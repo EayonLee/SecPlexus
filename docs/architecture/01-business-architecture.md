@@ -83,6 +83,8 @@ SecPlexus 覆盖四条能力支柱，用威胁情报做横向底座。它与传�
 
 **结构性优势**：防护对象和运营对象是同一批资产（AI 应用、Agent、MCP server、模型 Key）。护栏拦下的一次 Prompt 注入，就是一个案件的开端——不需要为 AI 安全单独建一套运营体系。这在产品主张和架构上是一体的（见 02 的数据流图）。
 
+护栏支柱同样遵循“替换大脑”的定位：**检测决策在 `ai-policy`（大脑），转发执行在开源网关 agentgateway（工具）**——我们不做流量转发的基础设施，只做策略与判定；这与告警支柱“研判在 agent-runtime、执行在用户设备”是同一个分工哲学。
+
 与传统方案的边界也由此确定：**只接告警，不接原始日志**。量级差两个数量级（告警 10 万条/天 ≈ 300MB，原始日志 1 亿条/天 ≈ 100GB），用户的 SIEM 继续做日志，SecPlexus 做它做不了的那层——把多家的结论串成一个故事。
 
 ## 2. 运营对象模型：告警、事件视图、案件三层
@@ -185,7 +187,7 @@ SecPlexus 覆盖四条能力支柱，用威胁情报做横向底座。它与传�
             │    propose → 人审 → eval 门控 → 上线
             │                                     ▲
             └── ④攻击链滚动聚合 ───────────────────┘
-                 fuse 时按实体+kill-chain 阶段滚动（TTL），
+                 correlator 归并时按实体+kill-chain 阶段滚动（TTL），
                  UI 显示"这是入侵的第 K 步"
 ```
 
@@ -209,7 +211,7 @@ SecPlexus 覆盖四条能力支柱，用威胁情报做横向底座。它与传�
 
 ### 5.4 攻击链滚动聚合
 
-【代码·AiSOC `attack_chain_grouper`】fuse 时按实体查/建 `chain_id`（Redis 滚动 TTL），把后续同实体告警按 MITRE kill-chain 阶段排序挂进链，fail-soft（Redis 故障降级为无链，不报错）。分析师看到的第一眼就是"这是一起 20 分钟前从初始访问开始的入侵的第 3 步"。
+【代码·AiSOC `attack_chain_grouper`】AiSOC 在 fuse（归并）时按实体查/建 `chain_id`（Redis 滚动 TTL），把后续同实体告警按 MITRE kill-chain 阶段排序挂进链，fail-soft（Redis 故障降级为无链，不报错）。我们对应为 correlator 归并时执行同款机制。分析师看到的第一眼就是"这是一起 20 分钟前从初始访问开始的入侵的第 3 步"。
 
 姊妹机制：**组织可信制品库**【实测·Intezer】——环境内已知合法的 hash/制品参与判定（"这个 hash 在你们环境是常见合法软件"）。机构记忆记"结论"，可信库记"什么在此环境是正常的"。v1.5。
 
@@ -265,7 +267,7 @@ v1 就要有影子模式的框架——哪怕零授权，因为数据必须从�
 | 智能体安全 | MCP 工具调用治理（能力契约） | ai-gateway | v1 |
 | | MCP/Skill 供应链准入扫描 | scheduler 定时任务 | v2 |
 | | Agent 行为审计 | audit + correlator | v1 |
-| 漏洞运营 | 资产+漏洞聚合、KEV/EPSS 优先级 | exposure（v2 服务） | v2 |
+| 漏洞运营 | 接入用户已有扫描器的漏洞数据，大脑做 KEV/EPSS/可利用性优先级排序与修复验证编排（**不自建扫描器**） | exposure（v2 服务） | v2 |
 | | 修复验证 | exposure + forensics | v2 |
 | 威胁情报 | 多源拉取、IOC 生命周期、ATT&CK 映射 | scheduler 任务 → intel 服务 | v1(job)/v2 |
 | 横向 | 按需端点取证（osquery） | forensics | v2 |
