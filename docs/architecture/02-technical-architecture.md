@@ -19,14 +19,14 @@
 | 7 | `console` | 自研 | Python / FastAPI | 查询（热层同步/狩猎异步）、Case、三队列工作台、SSE、资产与连接器配置 | 长尾查询 + 高危操作边界 |
 | 8 | `web` | 自研 | TypeScript / Next.js | 前端 | 技术栈强制 |
 | 9 | `scheduler` | 自研 | Python | 全部定时任务的唯一入口 | 定时任务集中管理，不散落各服务 |
-| 10 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：客户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
+| 10 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：用户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
 | 11 | `postgres` | **开源** | PostgreSQL 16 | 主存储 | — |
 | 12 | `redis` | **开源** | Redis 7 | 队列（Streams）、去重窗口、限流 | 去重要带 TTL 的高频读写 |
 | 13 | `object-storage` | **开源** | MinIO / S3 兼容 / 本地 FS | raw payload、Parquet 归档 | raw 永不进主表 |
 
-**两个容易混淆的区分**：`ai-gateway` 管的是**客户**的 AI 流量（防护对象），agent-runtime 内嵌的 LiteLLM SDK 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
+**两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），agent-runtime 内嵌的 LiteLLM SDK 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
 
-**语言选择的依据**【代码·AiSOC 实测】：AiSOC 的 ingest 用 Go（16k 行），业务面全 Python（api 140k 行）。我们算过账：10 万条/天 = 1.16 条/秒，峰值按 100 倍算 Python asyncio + 批量写绰绰有余；归一化是改动最频繁的代码，Python 的迭代速度比 Go 的编译周期值钱。唯一例外：客户有 syslog UDP 高频推送时，加一个纯收包的 Go thin gateway（只收包写队列，不解析）。
+**语言选择的依据**【代码·AiSOC 实测】：AiSOC 的 ingest 用 Go（16k 行），业务面全 Python（api 140k 行）。我们算过账：10 万条/天 = 1.16 条/秒，峰值按 100 倍算 Python asyncio + 批量写绰绰有余；归一化是改动最频繁的代码，Python 的迭代速度比 Go 的编译周期值钱。唯一例外：用户有 syslog UDP 高频推送时，加一个纯收包的 Go thin gateway（只收包写队列，不解析）。
 
 ## 2. 数据流：以数据流入为主轴
 
@@ -35,8 +35,8 @@
 ```
 ══════════════ 数据源（数据从这里流入）══════════════
 
-   告警数据源                            客户 AI 流量（防护平面 · inline）
-   EDR · WAF · SIEM · 云安全中心           客户 LLM 应用 / AI Agent
+   告警数据源                            用户 AI 流量（防护平面 · inline）
+   EDR · WAF · SIEM · 云安全中心           用户 LLM 应用 / AI Agent
    webhook · syslog · API 拉取            LLM API 调用 · MCP 工具调用
         │                                      │
         │                               ┌──────▼───────────────┐
@@ -143,7 +143,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 ### 3.3 降噪合并：三层独立可解释
 
-厂商合并解决"别刷屏"（单产品、单规则、同实体）；我们的合并解决"研判对象唯一"（跨产品、跨厂商、跨时间）。分层是因为混在一起就永远回答不了"这两条为什么被合并了"——客户和分析师一定会问。
+厂商合并解决"别刷屏"（单产品、单规则、同实体）；我们的合并解决"研判对象唯一"（跨产品、跨厂商、跨时间）。分层是因为混在一起就永远回答不了"这两条为什么被合并了"——用户和分析师一定会问。
 
 | 层 | 干什么 | 键 | 输出 |
 |---|---|---|---|

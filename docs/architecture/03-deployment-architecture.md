@@ -133,7 +133,7 @@ SPX_OBJECT_ENDPOINT=               # s3 模式：OSS/COS/OBS/TOS/Ceph/自建 全
 SPX_REDIS_URL=                     # 空 = 用捆绑 redis 容器
 ```
 
-对象存储三个驱动的定位：**fs** 默认（单机零依赖，Grafana 默认 SQLite 的同款哲学）；**s3** 直连用户的云存储（S3 兼容协议通吃全部主流对象存储）；**minio** compose 捆捆一个 MinIO 容器给没有云存储的客户。
+对象存储三个驱动的定位：**fs** 默认（单机零依赖，Grafana 默认 SQLite 的同款哲学）；**s3** 直连用户的云存储（S3 兼容协议通吃全部主流对象存储）；**minio** compose 捆捆一个 MinIO 容器给没有云存储的用户。
 
 数据库 v1 只支持 PG（数据面要求高不将就），但用 Dify 的 profile 互斥机制预留扩展：`db_postgres` 容器声明 `profiles: [postgresql]`，未来加 MySQL = 加一个 `db_mysql` 服务 + 方言测试，业务代码不动。
 
@@ -162,7 +162,7 @@ JumpServer（32k★，国产安全）的 installer 仓库提供了 `jmsctl` CLI 
 
 **信创 OS（麒麟 V10 / 统信 UOS / openEuler）**：都是标准 Linux，二进制离线装 Docker 后标准 slim 镜像可跑（鲲鹏+麒麟+Docker 组合有大量生产验证）。
 
-**内网离线交付**（信创客户硬约束）：
+**内网离线交付**（信创用户硬约束）：
 
 ```
 make release-offline
@@ -172,7 +172,7 @@ make release-offline
       install-offline.sh                      # docker load + 部署 + golden path
 ```
 
-内网有条件的客户用 Harbor 做内网镜像源（鲲鹏+麒麟+Harbor 有成熟实践）。
+内网有条件的用户用 Harbor 做内网镜像源（鲲鹏+麒麟+Harbor 有成熟实践）。
 
 **国内安装加速**（学 JumpServer 的 `cn-quick_start.sh`）：安装脚本默认走 gitee 源 + 阿里云镜像加速，海外走 GitHub——一个脚本双源。
 
