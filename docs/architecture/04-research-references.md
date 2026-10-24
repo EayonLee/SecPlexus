@@ -25,12 +25,12 @@
 | 公司 | 编排路线 | 关键设计 | 定价 |
 |---|---|---|---|
 | [Dropzone AI](https://www.dropzone.ai) | 自由递归推理 | 假设驱动调查；Context Memory 三来源（调查/纠正**强制填原因**/直录）；Schema 适应查询；数据血缘（每个问题/工具/结果可导出，链回原始日志）；"组装 vs 判断"；AI 只调查不响应 | $36K/年 = 4000 次调查 ≈ $9/次，无限用户 |
-| [Prophet Security](https://www.prophetsecurity.ai) | **图编排 + 受限 LLM** | "一致且确定，而非自由形式 LLM 链"；每问题/查询/推理步骤可审计；单租户部署；AI Detection Engineer 从客户数据建 ATT&CK 覆盖图 | 反对 per-seat（"成本跟人头不跟工作量"） |
+| [Prophet Security](https://www.prophetsecurity.ai) | **图编排 + 受限 LLM** | "一致且确定，而非自由形式 LLM 链"；每问题/查询/推理步骤可审计；单租户部署；AI Detection Engineer 从用户数据建 ATT&CK 覆盖图 | 反对 per-seat（"成本跟人头不跟工作量"） |
 | [Exaforce](https://www.exaforce.com) | 4 个对等 Exabot | 统一数据层 + **实时知识图谱**做底座；95% 告警 AI 处理 | — |
 | [Torq](https://torq.io/socrates) | omni-agent + HyperAgents | Socrates 编排 + Context Graph（环境记忆） | ~$60K |
 | Radiant（2026-08 被 Cribl 收购） | 模仿人类分析师 | FP 降 98%；"每分析师每天只升 1–3 条高保真告警" | — |
 | [Intezer](https://intezer.com) | 证据流水线 | 收集→分析（递归解包）→关联（含**组织可信制品库**）→证据级 verdict→聚合告警级 verdict | — |
-| Microsoft Security Copilot | 单职责 agent 套件 | phishing/alert triage、TI、KQL hunting 等各管一摊；每 agent 自治独立配置；责任 AI 护栏；客户实测月省约 200 小时 | — |
+| Microsoft Security Copilot | 单职责 agent 套件 | phishing/alert triage、TI、KQL hunting 等各管一摊；每 agent 自治独立配置；责任 AI 护栏；用户实测月省约 200 小时 | — |
 | Google SecOps (2026) | 专业 agent | Detection Engineering agent + Triage agent | — |
 
 **Radiant 被 Cribl（数据管道公司）收购**的信号：数据层是根基、AI 是放大器——独立 AI SOC 在收敛，要么长在自己的数据面上，要么被数据面公司吃掉。这支撑我们自建数据面（collector/归一化/实体档案）的路线。
@@ -139,7 +139,7 @@
 | 组件 | 许可证 | 状态 | 结论 |
 |---|---|---|---|
 | [agentgateway](https://github.com/agentgateway/agentgateway) | **Apache 2.0 全开源**（LF 项目，微软/阿里/AWS/思科/华为参与） | 活跃，Rust 数据面 | ✅ ai-gateway 数据面首选；只依赖 xDS + ext_authz |
-| [Higress](https://github.com/higress-group/higress)（阿里） | Apache 2.0，CNCF Sandbox | 活跃 | 国内云客户的备选 |
+| [Higress](https://github.com/higress-group/higress)（阿里） | Apache 2.0，CNCF Sandbox | 活跃 | 国内云用户的备选 |
 | [LiteLLM](https://github.com/BerriAI/litellm) | MIT 核心；**SSO/SCIM/密钥轮换在企业许可** | 活跃 | 仅作 SDK 内嵌于 agent-runtime（我们的 iam 在前，不需要它的 SSO） |
 | [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails)（NVIDIA） | Apache 2.0 | 活跃 | ✅ ai-policy 内嵌检测库 |
 | LLM Guard（Protect AI） | MIT | ⚠️ **已归档停止维护** | 不选 |
@@ -160,7 +160,7 @@
 4. 各厂商"合并"的内部实现均未公开
 5. Microsoft SCU 单价、各家单次研判真实 token 成本
 6. CrowdStrike "validation agents" 说法未在官方页找到，不引用
-7. SIABench 的 triage 96–98% 基于公开数据集，不可用于对客户承诺
+7. SIABench 的 triage 96–98% 基于公开数据集，不可用于对用户承诺
 8. 火山引擎"记忆/知识"模块的内部实现细节
 
 ## 10. 主要参考链接
