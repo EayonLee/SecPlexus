@@ -1,0 +1,99 @@
+# Local editor and operating system files
+.idea/
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.history/
+
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
+!.env.*.example
+/.local/
+/logs/
+/tmp/
+/secrets/
+/backups/
+*.pid
+*.pid.lock
+*.log
+
+# Credentials and machine-local state (keep sanitized examples in source)
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+.envrc
+!.envrc.example
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Go build outputs
+/bin/
+/dist/
+*.test
+coverage.out
+
+# JavaScript dependencies and generated output
+node_modules/
+.pnpm-store/
+.cache/
+.vite/
+.vite-temp/
+.next/
+.turbo/
+/src/apps/*/dist/
+/src/packages/**/dist/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+lerna-debug.log*
+
+# Test reports and coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.tox/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+
+# Project instructions and GitHub configuration belong in the repository.
+# Do not ignore .agents/ or .github/.

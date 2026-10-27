@@ -1,0 +1,7 @@
+packages:
+  - src/apps/web
+
+onlyBuiltDependencies:
+  - esbuild
+
+engineStrict: true

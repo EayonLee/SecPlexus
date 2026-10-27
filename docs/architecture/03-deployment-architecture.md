@@ -10,22 +10,29 @@
 
 ```
 secplexus/
-├── apps/
-│   ├── server/              # 全部 Python 后端角色（一个包）
-│   │   ├── roles/           # collector/ correlator/ agent/ soar/ api/ scheduler/ ai_policy/
-│   │   │                    #   每个角色 = 独立 Role 类（async start/stop）
-│   │   ├── contracts/       # OCSF 模型、API 契约（共享库）
-│   │   └── cli.py           # 统一入口
-│   └── web/                 # Next.js 前端
-├── connectors/              # 厂商连接器 + 归一化 profile + 回归样本
-├── orchestrator/            # workflow 引擎（共享库）
-├── infra/
-│   ├── compose/             # docker-compose（.env 可切换中心）
-│   ├── helm/                # k8s chart（每角色 Deployment + HPA + PDB）
-│   └── gateway/             # agentgateway 的 xDS 配置与策略插件
-├── install.sh               # 一键安装（国内/海外双源）
-└── Makefile                 # dev / up / up-full / test
+├── src/
+│   ├── apps/                # 可独立运行的应用；当前仅创建三个模块的基础目录
+│   │   ├── web/
+│   │   ├── iam/
+│   │   └── console/
+│   ├── packages/            # 实际跨应用复用的库，按需提取
+│   └── contracts/           # 接口与事件契约，不包含业务和数据库访问实现
+│       ├── openapi/
+│       └── proto/
+├── deploy/
+│   ├── local/               # 本地开发配置
+│   ├── compose/             # Docker Compose 部署
+│   └── helm/                # Kubernetes 部署
+├── scripts/                 # 开发、构建与发布工具
+├── docs/                    # 架构、模块设计与开发约定
+├── go.mod                   # Go 应用共用的根模块
+└── Makefile                 # 当前提供 help / check，运行与构建目标随实现添加
 ```
+
+应用内部保留各语言自己的目录和依赖惯例。后续应用加入 `src/apps/`，
+不提前创建空模块或共享平台库。当前实际目录与开发约定见
+[开发文档](../development/README.md)。下文的 Python 多角色镜像方案为此前设计，
+尚未与后续多语言、应用独立部署的讨论同步，不作为当前实现约束。
 
 ## 2. 镜像：单镜像多角色（SPX_ROLES）
 
@@ -35,6 +42,8 @@ CI 只产出两个镜像，都是 `linux/amd64 + linux/arm64` 双架构（Dify�
 - **`secplexus-web`**：Next.js（standalone 模式下由 console 托管构建产物，可不用）
 
 这个模式业界叫 **role-based deployment**：Langfuse（36k★）用一个镜像跑 web/worker 两个容器；Docker 官方与 microservices.io 都认可它优于真正的 all-in-one。价值在于：**从单机到横向扩展只改编排，不改代码**。
+
+自研镜像仅 **2 个**：`secplexus`（Python，全部 8 个角色；agent 因 LLM 故障隔离部署为独立容器，同镜像 `SPX_ROLES=agent`）、`secplexus-web`（TS）。standalone 模式 = secplexus 单容器跑 all（asyncio task group）+ console 托管 web 产物。
 
 ```
 SPX_ROLES=collector          → 单角色容器
@@ -118,6 +127,9 @@ k8s 侧是 Helm 生态事实标准【官方文档·Artifactory/Airflow/Keycloak/
 ### 可切换配置中心：`docker/.env` 一个文件（学 RAGFlow/Dify）
 
 ```bash
+# ── 密钥（首次安装自动生成写入 .env；轮换：新密钥生效、旧密钥仅解密存量）──
+SPX_SECRET_KEY=                # 主密钥：会话签名 + TOTP secret 加密（AES-GCM 的 KEK 经 HKDF 派生）
+
 # ── 角色 ──
 SPX_ROLES=all
 

@@ -199,7 +199,7 @@ SecPlexus 覆盖四条能力支柱，用威胁情报做横向底座。它与传�
 2. **分析师纠正**——人工改结论时**强制填写原因**，原因入库（没有原因的纠正只是标签，有原因的纠正才是可复用的知识）
 3. **用户直录**——"这个 IP 段是测试环境""这个团队做安全测试"
 
-存储用向量库组织，调查时自动应用。定位是"完美回忆"：人类分析师会忘记或不对齐地应用环境知识，AI 每次调查都带全量上下文。【代码·AiSOC】`institutional_memory` 表已验证此模式，分析师覆盖以 `analyst_override=True` 与 agent 结论同库检索。
+存储用向量库组织，调查时自动应用。**按组织（org）隔离**：每个部门的记忆是自己的经验，互不可见（全局威胁情报除外）。定位是"完美回忆"：人类分析师会忘记或不对齐地应用环境知识，AI 每次调查都带全量上下文。【代码·AiSOC】`institutional_memory` 表已验证此模式，分析师覆盖以 `analyst_override=True` 与 agent 结论同库检索。
 
 ### 5.2 知识前置过滤
 
@@ -258,9 +258,10 @@ v1 就要有影子模式的框架——哪怕零授权，因为数据必须从�
 |---|---|---|---|
 | AI 告警运营 | 接入、归一化、判别 | collector | v1 |
 | | 归并降噪、跨源关联、攻击链 | correlator | v1 |
-| | AI 研判（假设驱动、记忆、知识过滤） | agent-runtime | v1 |
+| | AI 研判（假设驱动、记忆、知识过滤；纯 AI 推理服务含 guardrail 检测 API，经队列与业务层解耦） | agent-runtime | v1 |
 | | 三队列工作台、立案 | console | v1 |
-| | 处置编排、审批、回写、通知（邮件/IM/工单，governed action） | soar | v1 |
+| 平台基座 | 身份与权限唯一权威源：组织（org）隔离、RBAC/ABAC、菜单权限、认证（本地账号/SSO/MFA）、管理页面 | iam（见 02 §3.4） | v1 |
+| | 处置编排（playbook 引擎宿主）、审批、回写、通知（邮件/IM/工单，governed action） | soar | v1 |
 | 大模型护栏 | LLM 流量 inline 检测（注入/DLP/越权） | ai-gateway + ai-policy | v1 |
 | | 模型 Key 异常调用检测 | correlator | v1 |
 | | AI 资产清单 | console 资产域 | v1 |
@@ -274,4 +275,4 @@ v1 就要有影子模式的框架——哪怕零授权，因为数据必须从�
 | | 蜜标（假 Key/URL，误报率≈0） | scheduler 任务 | v2 |
 | | 紫队自测、检出率与 ATT&CK 覆盖率矩阵 | bas | v2 |
 
-**多租户与 MSSP（v2）**：iam 的多租户之上提供 MSSP 视图——托管服务商一个控制台运营多个用户环境。这是海外验证过的标配通道（Dropzone 有专门的 MSSP 平台、AiSOC 有 `mssp` 实体与定价 ADR、Prophet 上 AWS Marketplace），也是国内安全厂商的主要采购路径之一。
+**MSSP 通道（v2）**：组织模型天然兼容——托管服务商是特权 org，各用户公司是独立 org，一个控制台运营多个用户环境（隔离模型不变）。这是海外验证过的标配通道（Dropzone 有专门的 MSSP 平台、AiSOC 有 `mssp` 实体与定价 ADR、Prophet 上 AWS Marketplace），也是国内安全厂商的主要采购路径之一。
