@@ -6,19 +6,19 @@
 
 服务拆分的判据不是"功能不同"，而是以下五条之一：**独立扩容**（瓶颈维度不同）、**故障隔离**（会卡住会崩溃）、**独立变更**（改动频率不同）、**技术栈强制**、**安全边界**（高危能力单独管控）。
 
-### 1.1 v1 全景（自研 9 + 开源 4 = 13 个容器）
+### 1.1 v1 全景（自研 8 组件（Python×7 + web 前端），2 镜像；开源 4 组件）
 
 | # | 服务 | 类型 | 语言 | 职责 | 为什么拆 |
 |---|---|---|---|---|---|
 | 1 | `collector` | 自研 | Python | 一切外部数据的唯一入口：告警接入、形状判别、OCSF 归一化、L0/L1 校验 | 改动最频繁（每接一家厂商就改），独立发版；突发流量独立扛 |
-| 2 | `correlator` | 自研 | Python | D1 去重 → D2 窗口折叠 → D3 跨源关联 → 告警 + 事件视图（攻击链） | 吞吐瓶颈，纯 CPU，按 `tenant:entity` 分区保序扩容 |
-| 3 | `agent-runtime` | 自研 | Python（内嵌 LiteLLM SDK） | 全部离线 AI 推理的宿主：研判 Agent（图编排骨架）、workflow 引擎、NL→查询 | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离 |
-| 4 | `soar` | 自研 | Python | 预案库、审批状态机（持久化暂停）、高危动作执行、按上游原生 ID 回写；**通知（邮件/IM webhook/工单）是它的 governed action** | 安全边界：Agent 提议 / SOAR 执行的权限分界 |
-| 5 | `ai-policy` | 自研 | Python（内嵌 NeMo Guardrails 库） | AI 安全策略大脑：规则、检测、ext_authz 决策、事件回流、管理 API | 策略与决策独立演进，不耦合网关数据面 |
+| 2 | `correlator` | 自研 | Python | D1 去重 → D2 窗口折叠 → D3 跨源关联 → 告警 + 事件视图（攻击链） | 吞吐瓶颈，纯 CPU，按 `org:entity` 分区保序扩容 |
+| 3 | `agent-runtime` | 自研 | Python（内嵌 LiteLLM SDK + NeMo Guardrails 库） | 全部 AI 推理：研判 Agent（图编排骨架）、NL→查询、**guardrail 检测 API**（ai-policy 的模型类检测调这里） | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离——部署时独立容器（同镜像 SPX_ROLES=agent） |
+| 4 | `soar` | 自研 | Python | **通用 workflow/playbook 引擎宿主**（orchestrator 库）、预案库、审批状态机（持久化暂停）、高危动作执行、按上游原生 ID 回写；通知（邮件/IM/工单）是 governed action | 安全边界：Agent 提议 / SOAR 执行的权限分界 |
+| 5 | `ai-policy` | 自研 | Python | AI 安全策略大脑（独立 PDP，SpiceDB/Cerbos 同款形态）：规则、ext_authz 决策、事件回流、管理 API。**检测分两层**：规则类（正则/关键词/schema）内存匹配走同步路径（亚毫秒）；模型类（语义级注入/越权）异步调 agent-runtime 的 guardrail API（NeMo 库内嵌于彼） | 独立 PDP 是行业标准形态；同步路径只有规则不阻塞客户流量 |
 | 6 | `iam` | 自研 | Python | 登录、SSO（OIDC/SAML）、RBAC/ABAC、多租户、API Token、SCIM | 身份是核心攻击面，被所有服务验签 |
 | 7 | `console` | 自研 | Python / FastAPI | 查询（热层同步/狩猎异步）、Case、三队列工作台、SSE、资产与连接器配置 | 长尾查询 + 高危操作边界 |
 | 8 | `web` | 自研 | TypeScript / Next.js | 前端 | 技术栈强制 |
-| 9 | `scheduler` | 自研 | Python | 全部定时任务的唯一入口 | 定时任务集中管理，不散落各服务 |
+| 9 | `scheduler` | 自研 | Python | 全部**平台级**定时任务的唯一入口：情报拉取、报表、蜜标巡检、供应链扫描 | **基础设施组件（cron 哲学：简单、稳定、永不失败）**：任务代码内声明 + DB 持久化 + 分布式锁单实例；与 playbook 的 schedule 触发器分层——用户业务流定时归 orchestrator（flocks trigger 模型），平台心跳归这里，基础设施不依赖业务引擎 |
 | 10 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：用户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
 | 11 | `postgres` | **开源** | PostgreSQL 16 | 主存储 | — |
 | 12 | `redis` | **开源** | Redis 7 | 队列（Streams）、去重窗口、限流 | 去重要带 TTL 的高频读写 |
@@ -26,7 +26,9 @@
 
 **两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），agent-runtime 内嵌的 LiteLLM SDK 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
 
-**语言选择的依据**【代码·AiSOC 实测】：AiSOC 的 ingest 用 Go（16k 行），业务面全 Python（api 140k 行）。我们算过账：10 万条/天 = 1.16 条/秒，峰值按 100 倍算 Python asyncio + 批量写绰绰有余；归一化是改动最频繁的代码，Python 的迭代速度比 Go 的编译周期值钱。唯一例外：用户有 syslog UDP 高频推送时，加一个纯收包的 Go thin gateway（只收包写队列，不解析）。
+**语言版图**：**Python 全栈**（全部 8 个后端角色；LiteLLM 以 SDK 内嵌 agent-runtime、NeMo Guardrails 以库内嵌——安全与 AI 生态的事实语言，flocks 纯 Python、AiSOC 业务面全 Python 均为实证；**单语言 = contracts 是一个共享包、天然单一事实源，零跨语言生成设施**——这是相比多语言方案最大的复杂度削减）+ TypeScript（web）+ 开源件（agentgateway=Rust、MinIO=Go、PG/Redis=C）。曾评估 Go（团队栈熟悉）：代价是 LiteLLM/NeMo 被迫从内嵌变独立容器、双语言逼出 buf+proto+OpenAPI 三端生成设施、guardrail 检测要跨服务中转——连锁复杂度大于收益，否决。**双引擎各司其职**：通用 workflow/playbook 引擎（orchestrator，soar 承载）的 `llm` 节点直调 agent-runtime；研判流程图（图编排骨架）在 agent-runtime 内自包含（§4）。
+
+**组件 / 角色 / 镜像**：组件（代码域）→ 角色（部署单元，`SPX_ROLES` 决定；agent 因 LLM 故障隔离部署为独立容器，同镜像同语言）→ 镜像（交付物，**自研仅 2 个**：`secplexus` Python 全角色 / `secplexus-web`）
 
 ## 2. 数据流：以数据流入为主轴
 
@@ -58,7 +60,7 @@
   │    OCSF 归一化 · 形状判别 · L0/L1 校验                  │
   │    raw payload → 对象存储（永不进主表）                  │
   └────────────────────────┬────────────────────────────┘
-                           │ Redis Stream（tenant:entity 分区保序）
+                           │ Redis Stream（org:entity 分区保序）
   ┌────────────────────────▼────────────────────────────┐
   │ ② correlator —— 降噪 · 关联                            │
   │    D1 去重 → D2 窗口折叠 → D3 跨源关联 → 攻击链滚动聚合    │
@@ -114,7 +116,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 **三条贯穿性设计**：
 
-1. **`tenant_id` 进所有业务表的主键/唯一键**。这是"架构上支持未来多集群"的真正含义——不是现在就上多集群，而是现在不做未来拆不动的事：届时无论逻辑复制按租户拆分还是 hash 分片，都不用改表结构。
+1. **`org_id` 进所有业务表的主键/唯一键**（组织概念见 §3.4）。这是"架构上支持未来多集群"的真正含义——不是现在就上多集群，而是现在不做未来拆不动的事：届时无论逻辑复制按组织拆分还是 hash 分片，都不用改表结构。
 2. **保留策略 = 工作记忆模型**（详见 §6.1）：归一化告警 90 天滚动窗口（按天分区过期自动清）、raw payload 7–30 天可配、事件视图 TTL 滚动；**案件、调查 Ledger、机构记忆/影子决策永久**（大脑的产出与经验）。
 3. **证据自包含原则（由 2 推出，防止 90 天清理割裂永久案件）**：案件和 Ledger 在结案时保存**证据快照**——研判依据的关键字段、source_refs、原始日志摘要冗余进 Ledger（它本来就存 prompt/工具调用/返回全文，天然自包含）。告警行过期清理**不影响**任何永久对象的完整性：案件回看证据读快照、处置回写读案件上冗余的 source_refs、影子统计读永久的 shadow_decisions 表。一句话：**告警是可再生的原料，案件和 Ledger 才是账本。**
 
@@ -154,7 +156,68 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 **上游是否已合并判断不出来**——查遍 OCSF/ECS/ASIM/UDM/ASFF/Sentinel/QRadar 没有任何标准有 `is_aggregated` 字段【官方文档】。落地方式是接入期"合并指纹探测"报告（计数字段、ID 稳定性、时间戳对齐痕迹、上层对象 ID 七项探测），输出**三档置信度**而非布尔值：已确认聚合 / 疑似聚合 / 未观察到迹象（≠未聚合）。
 
-**分区保序**【代码·AiSOC ADR-0012 的教训】：队列分区键必须 `tenant:entity`，且 entity 解析顺序必须与关联键**同一份代码**——否则同一实体的告警散在不同分区被不同副本消费，序列拼错、事件一分为二，而且看起来一切正常。无实体事件回退 event_id（回退 tenant_id 会造成热分区）。
+**分区保序**【代码·AiSOC ADR-0012 的教训】：队列分区键必须与关联键同构（AiSOC 用 `tenant:entity`，我们对应为 `org:entity`），且 entity 解析顺序必须与关联键**同一份代码**——否则同一实体的告警散在不同分区被不同副本消费，序列拼错、事件一分为二，而且看起来一切正常。无实体事件回退 event_id（回退 org_id 会造成热分区）。
+
+### 3.4 组织、权限与数据隔离（IAM 体系）
+
+**为什么是一个 iam 而不是拆开的用户系统/权限系统/认证中心**：IAM（Identity and Access Management，身份与访问管理）是领域名称，不是微服务架构专属词——它指的就是"认证 + 用户目录 + 授权"合并的一个领域。大厂拆成独立的用户中心/权限中心是被规模（几十个系统、几万员工）逼出的**部署拆分**，不是领域本该拆分；领域上认证与授权共享同一份用户目录，小规模下拆开只有同步与一致性成本。业界常态是内置合并（Grafana/GitLab/Django/TheHive 均单体内置；Keycloak/Zitadel 本身就是合并一体的产品）。
+
+**为什么叫"组织"不叫"租户"**：我们的隔离场景是一家公司内部的部门级数据控制，不是 SaaS 多客户——"租户"（tenant）强烈暗示后者。业界同场景的命名：TheHive 用 organisation、Grafana 用 organization、GitHub 用 organization、Zitadel 的 organization 是一等概念【官方文档】。字段统一 `org_id`。
+
+**组织模型**：平铺 org + org 内用户组（部门内细分用组建模，不做树形嵌套——嵌套继承的可见性规则是复杂度黑洞）。一个用户可属多个 org，每个 org 一个角色。MSSP 场景天然兼容：客户公司 = org，MSSP 运营方 = 特权 org（TheHive/Zitadel 同构）。
+
+**三层数据可见性**：
+
+| 层 | 数据 | 可见性 |
+|---|---|---|
+| 全局共享 | 威胁情报 IOC、规则库、ATT&CK 映射 | 所有 org 共享（大家的情报池） |
+| org 隔离 | 告警、案件、Ledger、事件视图 | 仅本 org |
+| org 隔离 | **机构记忆、实体档案**（记忆隔离即此层） | 仅本 org；IOC 命中结果回流全局层 |
+
+**告警的 org 归属在 collector 落定**：每个连接器配置属于某个 org（数据源 → org 默认），资产映射可覆盖；归属一旦落库不再变。
+
+**iam 的职责边界（标准 PDP/PEP 分层）**——所有权限的**定义、判定、管理**收敛于 iam（策略决策点），**执行**分布在三个检查点：
+
+```
+┌────────────── iam（唯一权威源：认证 + 目录 + 授权 + 管理 + 上下文分发）──────────────┐
+│ 认证：本地账号密码（Argon2id 哈希·登录锁定·会话/refresh token 轮换）· MFA(TOTP)      │
+│       · OIDC/SAML 对接用户已有 IdP（飞书/钉钉/Zitadel/Keycloak 均可插拔）            │
+│ 目录：组织 · 用户 · 用户组 · SCIM 同步                                               │
+│ 授权：RBAC/ABAC 策略 · 全平台权限点定义（alerts:read / soar:approve / orgs:manage…）   │
+│       · 菜单可见性 = 权限点的派生映射（前端登录后调 /me/permissions 按声明渲染菜单）    │
+│ 管理：组织 CRUD · 用户管理 · 角色与权限分配的管理 API——console 的 iam 域页面直接调它   │
+│ 分发：凭据签发与会话分发（浏览器会话/服务间 JWT/API Token），全系统唯一验签点          │
+└──────────────────────────┬────────────────────────────────────────────────┘
+                           │ JWT / 权限点声明
+        ┌──────────────────┼──────────────────┐
+        ▼ 执行点①API       ▼ 执行点②数据        ▼ 执行点③前端
+        每个服务的中间件      RLS + 查询自动注入   web 按权限声明渲染
+        验签 + 权限点校验    （org_id 上下文驱动）  菜单与按钮
+```
+
+**数据隔离的标准技术 = 双保险**【官方文档·AWS canonical 模式 + 代码·AiSOC 事故教训】：
+
+```sql
+-- 数据层（兜底）：RLS 策略 + 强制启用（迁移自动为注册表中的每张 org 隔离表生成）
+CREATE POLICY org_isolation ON alerts
+  USING (org_id = current_setting('app.org_id')::uuid);
+ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
+-- CI 断言：查 information_schema，有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器）
+```
+
+应用层（主防线）：SQLAlchemy 事务级事件自动 `SET LOCAL app.org_id`（连接池归还不泄漏）+ ORM 自动追加 org 过滤。为什么双保险：AiSOC 的真实事故【代码】——RLS 依赖会话变量（GUC），一条代码路径忘了设置，**RLS 策略还在却跨组织读穿了**；其源码注释结论"查询层的过滤才是被依赖的控制，RLS 是第二道防线"。
+
+**三条总线（后来者改不错的机制）**：
+
+| 总线 | 机制 | 新开发者的接入姿势 |
+|---|---|---|
+| 上下文总线 | iam 中间件验签 → RequestContext{user_id, org_id, roles, permissions} 注入 | 业务代码只写 `Depends(get_ctx)`，不碰认证实现 |
+| 数据访问总线 | 每个事务自动 SET LOCAL + 自动 org 过滤 | 新表只要带 org_id 列并注册，隔离自动生效 |
+| 事件总线 | Redis Streams，org_id 是消息头 | 新事件带 org 头，消费者按上下文处理 |
+
+**自举**：安装脚本创建 bootstrap admin 并打印一次性密码（对接部署篇的"安装即验收"）。内建 iam 通过标准协议（OIDC/SAML/SCIM）对接任意外部 IdP——对接的是标准，不是我们的私有实现；未来想换 Zitadel/Keycloak 做完整企业 IdP 时即插即用（方案 B 始终保留为升级路径）。
+
+详细设计见 [docs/design/iam/](../design/iam/01-requirements.md)。
 
 ## 4. Agent 编排：图编排骨架 + 受限 LLM
 
@@ -252,18 +315,33 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 └──────────────── 过滤表达式（编译成 WHERE）──────┘   └────── SQL 片段（AST 校验透传）─────┘
 ```
 
-执行层的安全约束直接抄 AiSOC `lake_sql.py`【代码】：单条 SELECT、表白名单、AST 级强制注入 tenant_id（不是参数级）、行数上限 100k。更硬的一条纪律抄自它的 `hunt/plan.py`：**模型拿到的 schema 里根本没有任何字段能携带 SQL/SPL/自由文本**，CI 断言 schema 而不是断言代码——"schema 才是真正约束模型的东西"。
+执行层的安全约束直接抄 AiSOC `lake_sql.py`【代码】：单条 SELECT、表白名单、AST 级强制注入 org_id（不是参数级；AiSOC 原文用 tenant_id）、行数上限 100k。更硬的一条纪律抄自它的 `hunt/plan.py`：**模型拿到的 schema 里根本没有任何字段能携带 SQL/SPL/自由文本**，CI 断言 schema 而不是断言代码——"schema 才是真正约束模型的东西"。
 
 ## 7. 两个共享库（不是服务）
 
 | 库 | 内容 | 为什么是库 |
 |---|---|---|
-| `contracts` | OCSF 模型、枚举、API 契约、查询 IR | 9 个进程共用，服务化只有网络开销和版本漂移 |
+| `contracts` | OCSF 模型、枚举、API 契约、查询 IR、RequestContext——**一个 Python 包直接 import，天然单一事实源**（单语言最大红利：零跨语言生成设施） | 全部角色共用，服务化只有网络开销和版本漂移 |
 | `connectors` | 厂商连接器 + 归一化 profile + 回归样本 | 只被 collector 引用，独立版本化 |
 | `orchestrator` | workflow 引擎：**10 类节点**（python/tool/llm/http/branch/loop/parallel/wait/approval + subworkflow；flocks 8 类实证，wait/parallel/approval 补自 AiSOC 的 25 步 playbook）、持久化审批暂停、幂等键、Python 节点子进程隔离 | correlator/agent/soar 复用；flocks 证明 Python 节点会内存泄漏，子进程隔离必须预留；处置动作（block_ip/isolate_host 等）不是节点类型，是 tool 节点调用的工具——否则每接一个厂商就要改引擎 |
 | `audit` | 追加式哈希链审计 | 审计必须内嵌在每个写入点，不能是旁路服务 |
 
-## 8. 与参照实现的规模对照
+## 9. 工程标准（每个组件强制，CI 检查）
+
+| # | 标准 | 条款 |
+|---|---|---|
+| 1 | **队列消费语义** | 至少一次投递 + 消费幂等键 + 指数退避重试 + DLQ 死信（AiSOC `aisoc.alerts.dlq` 同款）——写死为事件总线协议，不是各消费者自己发挥 |
+| 2 | **可观测** | **structlog** 结构化日志 + **OpenTelemetry 全链路 trace**：请求 → 队列 → 工具调用 → LLM 调用（每次 LLM 调用一个 span，模型/耗时/token 直接可见） |
+| 3 | **健康检查与优雅停机** | 每个角色强制 `/healthz` `/readyz`；SIGTERM 优雅排水（处理完在途消息再退）；K8s preStop 对齐 |
+| 4 | **RLS 自动断言** | org 隔离表集中注册，迁移自动建 policy；CI 查 information_schema——有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器） |
+| 5 | **声明式种子** | 预置角色矩阵等种子数据是代码常量，启动幂等同步（不许手改库） |
+| 6 | **错误码注册表** | 错误码集中定义一处，API 文档自动带出；禁止散落字符串 |
+| 7 | **数据库迁移** | Alembic 迁移单侧持有，迁移文件即版本历史 |
+| 8 | **设计原则** | **正确性由机器保证，不靠人的记忆**：policy 自动建、种子自动同步、隔离自动断言——一切"手动维护/人肉纪律"的方案不进入本系统 |
+
+> 注：Go 方案曾要求的 proto/OpenAPI 三端生成与 gen/ 零手改校验，在单语言下**天然不需要**——contracts 共享包就是单一事实源，这是回归 Python 全栈的最大复杂度削减。
+
+## 10. 与参照实现的规模对照
 
 | | AiSOC | flocks | **SecPlexus** |
 |---|---|---|---|

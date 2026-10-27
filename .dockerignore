@@ -1,0 +1,24 @@
+# Repository metadata and local configuration
+.git
+.idea
+**/.DS_Store
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+.local
+
+# Dependencies and generated local artifacts
+**/node_modules
+**/.next
+**/.turbo
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.tsbuildinfo
+bin
+dist
+src/apps/web/dist
+src/apps/web/coverage
+coverage.out

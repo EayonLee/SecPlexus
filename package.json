@@ -1,0 +1,15 @@
+{
+  "name": "secplexus",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @secplexus/web dev",
+    "build": "pnpm --filter @secplexus/web build",
+    "typecheck": "pnpm --filter @secplexus/web typecheck",
+    "lint": "pnpm --filter @secplexus/web lint"
+  }
+}
