@@ -4,6 +4,19 @@ An AI-native security operations platform.
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+<div align="center">
+  <img src="https://img.shields.io/badge/Go-1.27.3-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.27.3" />
+  <img src="https://img.shields.io/badge/chi-5.5.0-00ADD8" alt="chi 5.5.0" />
+  <img src="https://img.shields.io/badge/Next.js-16.4.3-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 16.4.3" />
+  <img src="https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&amp;logoColor=black" alt="React 19.3.1" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&amp;logoColor=white" alt="TypeScript 5.9.3" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4.3.3-06B6D4?logo=tailwindcss&amp;logoColor=white" alt="Tailwind CSS 4.3.3" />
+  <img src="https://img.shields.io/badge/GORM-1.31.2-EF4444" alt="GORM 1.31.2" />
+  <a href="https://github.com/EayonLee/SecPlexus/stargazers">
+    <img src="https://img.shields.io/github/stars/EayonLee/SecPlexus?style=flat&amp;logo=github" alt="SecPlexus GitHub stars" />
+  </a>
+</div>
+
 ## Development
 
 Install Go 1.27.3, Node.js 22.12+ (24 recommended), and pnpm 10.32.1.
@@ -56,6 +69,16 @@ docs/           Project documentation
 
 See the [contribution guide](CONTRIBUTING.md) for development setup, architecture
 boundaries, testing, and the pull request workflow.
+
+## Contributors
+
+Thanks to everyone who contributes to SecPlexus.
+
+<p align="center">
+  <a href="https://github.com/EayonLee/SecPlexus/graphs/contributors">
+    <img src="https://openomy.app/svg?repo=EayonLee/SecPlexus&amp;chart=bubble" alt="SecPlexus community contributions" width="100%" />
+  </a>
+</p>
 
 ## Acknowledgements
 

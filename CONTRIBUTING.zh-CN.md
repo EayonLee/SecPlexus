@@ -4,6 +4,8 @@
 
 欢迎为 SecPlexus 贡献代码、缺陷报告、测试、文档和体验改进。本指南说明如何准备符合项目架构、便于审查和验证的变更。
 
+任何人都可以创建 Issue、提交 Pull Request（PR）和参与代码审查。贡献不需要仓库写权限：Fork 仓库后，在自己的工作分支上修改，再向本仓库的 `main` 分支提交 PR 即可。
+
 ## 开始之前
 
 先查看[已有 Issue](https://github.com/EayonLee/SecPlexus/issues) 和
@@ -26,7 +28,7 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js、React、TypeScript、Tailwind CSS、shadcn/ui；统一应用框架与产品页面 |
 | [`src/contracts/`](src/contracts/README.md) | 权威 API 定义、结果码、权限目录及生成的协议类型 |
 | [`src/packages/`](src/packages/README.md) | 应用之间实际复用的实现 |
-| `tests/` | 集成测试运行器与浏览器 E2E 测试 |
+| `tests/` 和 `src/apps/web/tests/` | 集成测试运行器与 Web 浏览器 E2E 测试 |
 | `scripts/` 和 `deploy/` | 开发、构建、测试与部署工具 |
 | [`docs/plans/`](docs/plans/README.md) | 需求、实施计划、审核状态与验证证据 |
 
@@ -45,7 +47,15 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 | PostgreSQL 与 Redis | 可访问的开发实例；仓库 Compose 使用 PostgreSQL 16 与 Redis 7 |
 | Docker 与 Compose | 选择容器依赖或容器测试时需要 |
 
-没有仓库写权限时，先 Fork 并克隆自己的仓库。以下命令均在仓库根目录执行；已有 `.env` 时保留原文件。
+先将仓库 Fork 到自己的 GitHub 账号，再克隆 Fork，并将项目仓库添加为 `upstream`。将 `YOUR_USERNAME` 替换为你的 GitHub 用户名：
+
+```sh
+git clone https://github.com/YOUR_USERNAME/SecPlexus.git
+cd SecPlexus
+git remote add upstream https://github.com/EayonLee/SecPlexus.git
+```
+
+已有本地仓库时可以继续使用；有仓库写权限的协作者也可以在项目仓库内创建工作分支。以下命令均在仓库根目录执行；已有 `.env` 时保留原文件。
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -67,7 +77,7 @@ pnpm compose:up postgres redis
 make dev
 ```
 
-`make dev` 安装前端依赖、执行 IAM 迁移，并启动支持热更新的 IAM、Console 和 Web。它按配置连接基础设施，不启动 Docker，请使用开发数据库。首位管理员使用配置中的初始密码，首次登录必须改密。
+`make dev` 安装前端依赖、执行 IAM 迁移，并启动支持热更新的 IAM、Console 和 Web。它按配置连接基础设施，不启动 Docker，请使用开发数据库。空账号库会初始化管理员 `admin`，密码使用配置中的初始密码，默认为 `secplexus`；登录后可在账号设置中主动修改。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -159,7 +169,20 @@ pnpm test:e2e --docker
 
 ## 提交 Pull Request
 
-从 `main` 创建聚焦的工作分支。分支名最多由三个以连字符连接的单词组成，不使用斜杠或类型前缀，例如 `session-expiry`、`contribution-guide`。
+1. 从项目最新的 `main` 创建工作分支。
+2. 完成一个聚焦的变更，并执行与之相关的检查。
+3. 提交变更，将工作分支推送到自己的 Fork。
+4. 创建 PR，目标仓库与分支选择 `EayonLee/SecPlexus:main`，来源选择自己的工作分支。尚未完成或希望提前讨论时，可以创建 Draft PR。
+5. 根据审查意见继续修改，将后续提交推送到同一分支，已有 PR 会自动更新。
+
+如果已经按照前文配置了 `upstream`，可以这样创建工作分支：
+
+```sh
+git fetch upstream
+git switch -c fix/session-expiry upstream/main
+```
+
+新工作分支使用 `<type>/<description>`，类型与下文提交类型一致，描述使用简短的小写英文和连字符，例如 `feat/iam-login`、`docs/contribution-guide`。有关联的已有 Issue 时带上编号，例如 `fix/123-session-expiry`；不要求每次变更都创建 Issue，也不为分支命名单独创建 Issue。
 
 提交消息和 PR 标题使用 `type(scope): summary`，scope 可省略。类型包括
 `feat`、`fix`、`docs`、`chore`、`refactor` 和 `test`，例如：
@@ -167,7 +190,7 @@ pnpm test:e2e --docker
 
 PR 描述说明问题、变更后的行为、审查所需的设计决策和实际验证结果，按需关联 Issue 与已批准的计划。UI 变更附截图，涉及迁移或兼容性时说明影响。审查讨论保持具体、尊重事实。
 
-请求审查前确认：
+将 PR 标记为可审查之前，请确认：
 
 - [ ] 变更解决一个明确问题，并符合已批准的范围。
 - [ ] 受影响的契约、生成客户端、迁移与文档已同步。
@@ -175,4 +198,12 @@ PR 描述说明问题、变更后的行为、审查所需的设计决策和实�
 - [ ] UI 变更已在浏览器检查受影响的交互与布局。
 - [ ] 未包含凭证、敏感日志、私有数据或无关文件。
 
-使用编码 Agent 时，请自行审查其 diff 与验证证据。暂存、提交、推送、合并和部署需要你的明确授权；实施计划获批不代表这些操作已获授权。
+## 代码审查与合并
+
+欢迎社区成员参与 PR 审查、提出问题、验证变更和提供改进建议。作者应在 PR 中说明设计理由并回应反馈，让后续贡献者也能了解讨论过程。
+
+项目维护者负责最终接收和合并，将变更合入受保护的 `main` 分支。Approve 表示审查者认可当前变更，不会赋予合并权限。通过 Fork 贡献或创建 PR 均不需要合并权限。
+
+如果 PR 存在冲突，将项目最新的 `main` 更新到自己的工作分支，并在本地解决。PR 合并后，可以删除工作分支，同步 Fork 后继续下一次贡献。
+
+使用 AI 辅助开发的贡献遵循相同流程。提交者需要理解所提交的变更，检查生成的代码，并验证所报告的测试结果。

@@ -6,6 +6,10 @@ Thank you for contributing to SecPlexus. Code, reproducible bug reports, tests,
 documentation, and usability improvements are all welcome. This guide explains
 how to prepare a change that fits the project and can be reviewed and verified.
 
+Everyone is welcome to open issues, submit pull requests, and participate in
+reviews. You do not need write access to contribute: fork the repository and
+submit changes from a branch in your fork to this repository's `main` branch.
+
 ## Before you start
 
 Search the [existing issues](https://github.com/EayonLee/SecPlexus/issues) and
@@ -34,7 +38,7 @@ repository. PostgreSQL stores IAM data and sessions; Redis supports rate limitin
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js, React, TypeScript, Tailwind CSS, and shadcn/ui; shared application shell and product pages |
 | [`src/contracts/`](src/contracts/README.md) | Authoritative API definitions, result codes, permission catalog, and generated protocol types |
 | [`src/packages/`](src/packages/README.md) | Implementations actually shared across applications |
-| `tests/` | Integration-test runners and browser E2E tests |
+| `tests/` and `src/apps/web/tests/` | Integration-test runners and Web browser E2E tests |
 | `scripts/` and `deploy/` | Development, build, test, and deployment tooling |
 | [`docs/plans/`](docs/plans/README.md) | Requirements, implementation plans, approval status, and validation evidence |
 
@@ -57,8 +61,18 @@ Tool versions follow `go.mod`, `package.json`, and the CI workflow:
 | PostgreSQL and Redis | Reachable development instances; the supplied Compose stack uses PostgreSQL 16 and Redis 7 |
 | Docker with Compose | Needed when you choose container-based dependencies or tests |
 
-Fork the repository if you do not have write access, clone your fork, and run
-the following from the repository root. If `.env` already exists, keep it.
+Fork the repository to your GitHub account, then clone your fork and add the
+project repository as `upstream`. Replace `YOUR_USERNAME` with your GitHub username:
+
+```sh
+git clone https://github.com/YOUR_USERNAME/SecPlexus.git
+cd SecPlexus
+git remote add upstream https://github.com/EayonLee/SecPlexus.git
+```
+
+If you already have a checkout, use it. Contributors with repository write access
+can also work on branches in the project repository. Run the following from the
+repository root; keep `.env` if it already exists:
 
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
@@ -86,8 +100,9 @@ make dev
 
 `make dev` installs frontend dependencies, applies IAM migrations, and starts
 IAM, Console, and Web with hot reload. It connects to configured infrastructure
-and does not start Docker. Use a development database. The first administrator
-uses the configured bootstrap password and must change it on first login.
+and does not start Docker. Use a development database. An empty account database
+is initialized with `admin` and the configured bootstrap password (default:
+`secplexus`). You can change the password from account settings after signing in.
 
 | Command | Purpose |
 | --- | --- |
@@ -223,9 +238,26 @@ that was not run is not a passing check.
 
 ## Submit a pull request
 
-Create a focused branch from `main`. Branch names have at most three
-hyphen-separated words, without slashes or type prefixes, such as
-`session-expiry` or `contribution-guide`.
+1. Start a work branch from the latest project `main`.
+2. Make a focused change and run the checks relevant to it.
+3. Commit your changes and push the work branch to your fork.
+4. Open a PR with `EayonLee/SecPlexus:main` as the base and your work branch as
+   the head. Use a draft PR when you want early feedback or are still working.
+5. Respond to review feedback and push follow-up commits to the same branch;
+   they appear in the existing PR automatically.
+
+For a checkout with the `upstream` remote configured above, start a branch with:
+
+```sh
+git fetch upstream
+git switch -c fix/session-expiry upstream/main
+```
+
+Name new work branches `<type>/<description>`, using the commit types below and
+a short lowercase kebab-case description, such as `feat/iam-login` or
+`docs/contribution-guide`. When a change relates to an existing issue, include
+its number: `fix/123-session-expiry`. An issue is not required for every change;
+do not create one just to obtain a branch name.
 
 Use `type(scope): summary` for commit messages and PR titles; the scope is
 optional. Supported types are `feat`, `fix`, `docs`, `chore`, `refactor`, and
@@ -236,7 +268,7 @@ understand, and actual validation results. Link the related issue and approved
 plan where applicable. Include screenshots for UI changes and describe migration
 or compatibility impacts. Keep review discussion specific and constructive.
 
-Before requesting review:
+Before marking a PR ready for review:
 
 - [ ] The change addresses one problem and follows the approved scope.
 - [ ] Contracts, generated clients, migrations, and documentation are synchronized where affected.
@@ -244,6 +276,21 @@ Before requesting review:
 - [ ] UI changes have been checked in the browser, including affected interactions and layouts.
 - [ ] No credentials, sensitive logs, private data, or unrelated files are included.
 
-When using a coding agent, review its diff and validation evidence yourself.
-Staging, commits, pushes, merges, and deployment require your explicit
-authorization; approval of an implementation plan does not authorize those actions.
+## Review and merge
+
+Community members are welcome to review PRs, ask questions, test changes, and
+suggest improvements. Authors should explain their decisions and address
+feedback in the PR so the discussion remains available to future contributors.
+
+Project maintainers make the final acceptance decision and merge changes into
+the protected `main` branch. A review approval records a reviewer's assessment;
+it does not grant permission to merge. Contributing through a fork or opening a
+PR does not require merge permission.
+
+If your PR has conflicts, update your work branch with the latest project `main`
+and resolve them locally. Once the PR is merged, you can delete the work branch
+and sync your fork for the next contribution.
+
+AI-assisted contributions follow the same process. You are responsible for
+understanding the submitted changes, checking generated code, and verifying the
+reported test results.
