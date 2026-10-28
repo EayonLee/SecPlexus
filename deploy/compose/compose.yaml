@@ -1,0 +1,134 @@
+x-logging: &logging
+  driver: local
+  options: { max-size: '10m', max-file: '3' }
+
+# 所有数据库使用方共用这一组连接；容器通过服务名访问同一个PG。
+x-database: &database
+  SPX_POSTGRES_HOST: postgres
+  SPX_POSTGRES_PORT: '5432'
+  SPX_POSTGRES_DATABASE: ${SPX_POSTGRES_DATABASE:-secplexus}
+  SPX_POSTGRES_USER: ${SPX_POSTGRES_USER:-secplexus}
+  SPX_POSTGRES_PASSWORD: ${SPX_POSTGRES_PASSWORD-secplexus}
+  SPX_POSTGRES_MODELESS: ${SPX_POSTGRES_MODELESS:-disable}
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      POSTGRES_DB: ${SPX_POSTGRES_DATABASE:-secplexus}
+      POSTGRES_USER: ${SPX_POSTGRES_USER:-secplexus}
+      POSTGRES_PASSWORD: ${SPX_POSTGRES_PASSWORD-secplexus}
+    ports: ["127.0.0.1:${SPX_POSTGRES_PORT:-5432}:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    command: [postgres, -c, shared_buffers=64MB, -c, max_connections=40]
+    mem_limit: 384m
+    cpus: 1
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    restart: unless-stopped
+    image: redis:7-alpine@sha256:6ba19c50b56777f5c11c58eff8ddb69d0d5f27ba131cffb63f180ccfd43c66af
+    ports: ["127.0.0.1:${SPX_REDIS_PORT:-6379}:6379"]
+    environment:
+      REDIS_USER: ${SPX_REDIS_USER:-default}
+      REDISCLI_AUTH: ${SPX_REDIS_PASSWORD-secplexus}
+    # 使用 ACL 的哈希规则，避免明文密码出现在 Redis 进程参数中。
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -n "$$REDISCLI_AUTH" ]; then
+          password_rule="#$$(printf '%s' "$$REDISCLI_AUTH" | sha256sum | cut -d ' ' -f 1)"
+        else
+          password_rule=nopass
+        fi
+        set -- --user "$$REDIS_USER" reset on "$$password_rule" '~*' '&*' '+@all'
+        if [ "$$REDIS_USER" != default ]; then
+          set -- "$$@" --user default reset off
+        fi
+        exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy noeviction "$$@"
+    volumes: [redis_data:/data]
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli -e --user "$$REDIS_USER" ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  iam-migrate:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: iam } }
+    command: [migrate]
+    environment:
+      <<: *database
+      SPX_IAM_BOOTSTRAP_USERNAME: ${SPX_IAM_BOOTSTRAP_USERNAME:-admin}
+      SPX_IAM_BOOTSTRAP_PASSWORD: ${SPX_IAM_BOOTSTRAP_PASSWORD-secplexus}
+      SPX_IAM_LOG_FILE: ''
+    logging: *logging
+    depends_on: { postgres: { condition: service_healthy } }
+  iam:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: iam } }
+    command: [serve]
+    tmpfs: [/run/spx-certs]
+    environment:
+      <<: *database
+      SPX_PUBLIC_URL: ${SPX_PUBLIC_URL:-http://127.0.0.1:5173}
+      SPX_IAM_HOST: 0.0.0.0
+      SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
+      SPX_IAM_INTERNAL_HOST: 0.0.0.0
+      SPX_IAM_INTERNAL_PORT: ${SPX_IAM_INTERNAL_PORT:-9081}
+      SPX_REDIS_HOST: redis
+      SPX_REDIS_PORT: '6379'
+      SPX_REDIS_USER: ${SPX_REDIS_USER:-default}
+      SPX_REDIS_PASSWORD: ${SPX_REDIS_PASSWORD-secplexus}
+      SPX_REDIS_DB: ${SPX_REDIS_DB:-0}
+      SPX_IAM_CSRF_KEY: ${SPX_IAM_CSRF_KEY:?Set a 32-byte SPX_IAM_CSRF_KEY}
+      SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
+      SPX_IAM_TLS_CERT_FILE: /run/secrets/iam_tls_cert
+      SPX_IAM_TLS_KEY_FILE: /run/secrets/iam_tls_key
+      SPX_IAM_LOG_LEVEL: ${SPX_IAM_LOG_LEVEL:-info}
+      SPX_IAM_LOG_FILE: ''
+    secrets: [iam_tls_cert, iam_tls_key]
+    depends_on: { iam-migrate: { condition: service_completed_successfully }, redis: { condition: service_healthy } }
+    mem_limit: 512m
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O- "http://127.0.0.1:$$SPX_IAM_PORT/health/ready"']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  console:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: console } }
+    tmpfs: [/run/spx-certs]
+    environment:
+      SPX_CONSOLE_HOST: 0.0.0.0
+      SPX_CONSOLE_PORT: ${SPX_CONSOLE_PORT:-8080}
+      SPX_CONSOLE_IAM_BASE_URL: https://iam:${SPX_IAM_INTERNAL_PORT:-9081}
+      SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
+      SPX_CONSOLE_IAM_CA_FILE: /run/secrets/iam_tls_cert
+      SPX_CONSOLE_LOG_LEVEL: ${SPX_CONSOLE_LOG_LEVEL:-info}
+      SPX_CONSOLE_LOG_FILE: ''
+    secrets: [iam_tls_cert]
+    depends_on: { iam: { condition: service_healthy } }
+    mem_limit: 96m
+    logging: *logging
+  web:
+    build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
+    environment:
+      SPX_WEB_IAM_PROXY_TARGET: http://iam:${SPX_IAM_PORT:-8081}
+      SPX_WEB_CONSOLE_PROXY_TARGET: http://console:${SPX_CONSOLE_PORT:-8080}
+    ports: ["127.0.0.1:${SPX_WEB_PORT:-5173}:8080"]
+    depends_on: { iam: { condition: service_healthy }, console: { condition: service_started } }
+    mem_limit: 768m
+    logging: *logging
+secrets:
+  iam_tls_cert: { file: "${SPX_IAM_TLS_CERT_FILE:-certs/iam.crt}" }
+  iam_tls_key: { file: "${SPX_IAM_TLS_KEY_FILE:-certs/iam.key}" }
+volumes:
+  postgres_data:
+  redis_data:

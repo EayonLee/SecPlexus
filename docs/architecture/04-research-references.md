@@ -10,9 +10,8 @@
 | 腾讯云 SOC（调查中心） | 安全事件 | 按影响资产、时间线、ATT&CK 战技术关联，自动还原攻击过程 | AI Copilot 辅助 | 【官方文档】cloud.tencent.com/document/product/1011 |
 | 腾讯云 CSC | — | — | 四核心理念：统一资产基座（含 **AI 资产**）/安全左移/运行时防护/运营闭环 | 【官方文档】cloud.tencent.com/document/product/664 |
 | 火山引擎安全运营智能体 | **实体事件** | 规则前置过滤 → 相似归并 → **AI 以组为单位研判** → 攻击链串成事件 | 三队列（AI已研判等你授权 / AI不确定需要你的认知 / 已闭环不打扰你）+ 记忆 + 知识前置过滤 + 深度调查 | 【官方文档】docs.volcengine.com |
-| 奇安信 NGSOC（经 flocks 对接） | 合并告警 | **四种 ID 并存**：alarm-id / raw-alarm-id / ticket-id / merge-alarm-id；处置接口 `alarm_dispose_state` 要的是 `alarmIds`（原始告警 uuid），AI 研判用 merge-alarm-id | AI 研判（SSE） | 【代码】flocks `.flocks/plugins/tools/device/ngsoc_v4_15_1/ngsoc_alarms.yaml` |
 
-**关键结论**：平台型全部有事件层（工具型如 flocks 才是纯告警）；连国产 SIEM 自己都区分四种 ID——处置回写必须用上游原生 ID 是硬结论。
+**接入约束**：归并事件与上游原始告警标识必须区分保存，处置回写使用目标系统要求的原生ID，具体字段由连接器契约和回归样本验证。
 
 ### 腾讯云鼎的真实数字【官方文档】
 
@@ -41,10 +40,7 @@
 |---|---|---|
 | MS Phishing Triage Agent 被一线用户评 **"mid"**：明显钓鱼 OK，**低慢攻击差**；被批"改进邮件网关就不需要这个 AI" | 【实测】Reddit r/DefenderATP | 低慢攻击是系统性盲区，显式写进能力边界；AI 不做上游数据质量烂的补丁 |
 | Langfuse v3 拆 web/worker 后用户忘起 worker，摄取**静默失败** | 【实测】GitHub discussion #11216 | standalone=all 免疫；compose/helm 必带 healthcheck + 依赖条件 |
-| AiSOC 归一化器把上游 `count` 整个吃掉 | 【代码】`normalizer.go` 搜 "count" 零命中 | 聚合语义字段必须读进内部模型 |
-| AiSOC 时间解析失败回退 `time.Now()`，无告警 | 【代码】`normalizer.go:1063` | 时间失败 → null + warning，绝不覆盖 |
-| AiSOC groundedness scorer 曾"只在评测里跑、生产无调用方"，自信误报被自动关单 | 【代码】`test_groundedness_gate.py` 文件头自述 | 有指标 ≠ 有门禁，评测分数必须接进生产链路 |
-| 配置了关单策略的租户反而被锁死（查询写错表名） | 【代码】ADR-0009 | "谨慎的配置比不配置更危险"是真实发生过的缺陷形态 |
+| 配置与默认路径的行为可能不一致 | 本项目验收要求 | 配置和未配置策略的路径均需覆盖回归 |
 
 ## 3. 存储与冷热分层业界全景
 
@@ -60,18 +56,18 @@
 
 三条实现路径：A 统一热存储（仅 Google，不可复制）；B 冷层可查但降级 + **本地缓存层必需**（Elastic benchmark 证明无缓存的冷查询是灾难）；C 冷层=归档（腾讯/Sentinel）。按"工作记忆"存储模型（02 §6.1），告警只留 90 天工作窗口（≈9–27GB），冷热分层当前整体不需要；若未来规模超限（单租户 >100 万条/天或多租户 SaaS），沿路径 B 演进，本表备查。
 
-## 4. 归一化工程缺陷清单（全部代码实证）
+## 4. 工程质量检查项
 
-来自 AiSOC / flocks 源码逐行核实的真实缺陷，v1 全部写成 CI 门禁：
+以下为本项目的设计与验收约束，不作为其他项目缺陷或本项目已验证能力的证明。
 
-| # | 缺陷 | 出处 | 铁律 |
-|---|---|---|---|
-| 1 | 时间解析失败静默回退当前时间 | AiSOC `normalizer.go:1063` | null + warning，不参与时间线关联 |
-| 2 | 字段路径不支持数组下标，映射静默失效 | AiSOC `getNestedField` 遇数组返回 nil，而 profile 写了 `sourceIPs.0` | 支持下标 + 填充率报表（0% = bug） |
-| 3 | 缺失值用字符串 `"none"` | flocks `sangfor.py` `_pick()` | 缺失就是 null |
-| 4 | 只按 UTF-8 解码，国内设备 GBK 全变乱码 | flocks `parser.py` `errors="replace"` | UTF-8 strict → GB18030 → replace，编码记在事件上 |
-| 5 | `actor.kind` 瞎猜导致关联全错 | AiSOC 注释：11/68 连接器实体段塌成 "unknown"，**该连接器所有告警关联进同一个桶** | kind 判断不出就是 unknown |
-| 6 | 指纹未排序导致去重失效 | AiSOC `fingerprint()` 修正后的做法 | list 字段进指纹必须排序；tenant_id 进指纹 |
+| # | 需防范的问题 | 验证要求 |
+|---|---|---|
+| 1 | 时间解析失败覆盖为当前时间 | 返回null和可定位告警，不参与错误时间关联 |
+| 2 | 字段路径不支持数组索引 | 覆盖数组映射和字段填充率回归 |
+| 3 | 用字符串代替缺失值 | 类型化null，禁止混入展示占位符 |
+| 4 | 编码不兼容造成静默替换 | 严格解码、明确回退编码并保留处理记录 |
+| 5 | 实体类型不明导致错误归桶 | 未知实体不猜测；关联键与分区键一致 |
+| 6 | 集合顺序改变指纹 | 规范化排序，去重范围包含组织标识 |
 
 ## 5. 学术评测数据汇总
 
@@ -116,23 +112,17 @@
 | AI-native（AI 为中心组件）与 AI-enabled（AI 为外围功能）的架构差异 | 【官方文档】[Exabeam: AI Native vs AI Enabled](https://www.exabeam.com/explainers/ai-cyber-security/ai-native-vs-ai-enabled-5-differences-and-security-considerations) |
 | 国内厂商 AI 助手收敛为"通用 agent + CLI + prompt 方法论"结构 | 【推断】基于国内厂商产品公开演示与文档的多方观察归纳 |
 
-## 6. 开源参照项目细节
+## 6. 架构方案评估项
 
-### AiSOC（MIT，v20.1.0，2945★ 调研时）
+| 方面 | 评估问题 |
+|---|---|
+| 存储 | 保留期限、索引和分区能否支撑实际查询负载？ |
+| 编排 | 审批暂停能否持久化恢复，超时与重试是否有明确结果？ |
+| 并发 | 相同去重键是否只执行一次高成本处理，分区键是否一致？ |
+| 执行隔离 | 长时运行节点是否具备资源限制和故障隔离？ |
+| 部署 | 依赖健康、迁移、就绪和停止是否可验证且不破坏数据？ |
 
-- **存储 ADR-0005**：CH 热 30 天 / 对象温 60 天 / 冷 275 天；明确拒绝第二个热引擎；1TB/天 8×ZSTD 约 $902/月（自标"参考价必须重核"）
-- **扩容 ADR-0012**：规则按必需字段索引（实测 2.6× 提速、68.3% 候选减少）；分区键 `tenant:entity`；**发布 lag 指标但不自动扩容**（"autoscaler 是集群的，不是应用的"）
-- **门禁**：groundedness floor 0.75、只拦自动关单（不对称设计："降级升级只增加 review 负担"）
-- **审批**：playbook 到审批点持久化挂起（migration 081），过期有记录结果
-- **部署**：compose CORE(8GB)/full profiles + helm(HPA/PDB/values-ha) + install.sh 安装即验收
-
-### flocks（MIT，Apache-2.0 系）
-
-- SOC workspace = webui + 查询工具 + denoise/triage 两个 workflow 的组合包
-- **8 类 workflow 节点**：python/logic/branch/loop/tool/llm/http_request/subworkflow（`models.py` 实证）
-- `stream_alert_denoise`：4 节点纯 workflow（无 LLM），MinHash LSH 语义去重——**LSH 状态 649MB pickle 曾致内存线性增长**（子进程隔离的由来）
-- `stream_alert_triage`：4 路并行 LLM 分支 + **dedup leader/follower**（同 key 只调一次 LLM）
-- trigger 模型：manual/schedule/webhook/syslog/kafka/…（数据驱动的一切）
+这些评估项在对应需求的Spec/Plan中落实，不因平台全景规划而提前创建实现。
 
 ## 7. AI 网关与检测组件选型
 
@@ -167,8 +157,6 @@
 
 ### 调研期间分析过的本地仓库
 
-- AiSOC（开源 AI SOC，18 服务）：github.com/beenuar/AiSOC
-- flocks（开源 AI 原生 SecOps 平台）：本地克隆分析
 
 ### 标准与官方文档
 

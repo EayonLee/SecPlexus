@@ -1,0 +1,37 @@
+name: Verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.3'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm contracts:check
+      - run: pnpm contracts:generate
+      - run: git diff --exit-code -- src/contracts src/apps/web/src/auth/api.gen.ts src/apps/web/src/auth/console-api.gen.ts src/apps/web/src/auth/permissions.gen.ts src/contracts/common src/apps/web/src/auth/result.gen.ts
+      - run: test -z "$(gofmt -l src)"
+      - run: go vet ./src/...
+      - run: pnpm lint
+      - run: pnpm test:unit
+      - run: pnpm typecheck
+      - run: make build
+      - run: GOTOOLCHAIN=go1.27.3 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
+      - run: pnpm test:integration --docker --race
+      - run: pnpm --dir src/apps/web exec playwright install --with-deps chromium
+      - run: pnpm test:e2e --docker

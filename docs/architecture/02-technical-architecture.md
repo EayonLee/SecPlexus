@@ -1,5 +1,11 @@
 # 02 · 技术架构
 
+> 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和共享契约；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
+
+
+> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM已内嵌Authboss/SCS并接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+
+
 > 用大白话说：9 个自研服务 + 4 个开源组件跑在 PostgreSQL 和 Redis 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。
 
 ## 1. 服务清单与拆分理由
@@ -18,7 +24,7 @@
 | 6 | `iam` | 自研 | Python | 登录、SSO（OIDC/SAML）、RBAC/ABAC、多租户、API Token、SCIM | 身份是核心攻击面，被所有服务验签 |
 | 7 | `console` | 自研 | Python / FastAPI | 查询（热层同步/狩猎异步）、Case、三队列工作台、SSE、资产与连接器配置 | 长尾查询 + 高危操作边界 |
 | 8 | `web` | 自研 | TypeScript / Next.js | 前端 | 技术栈强制 |
-| 9 | `scheduler` | 自研 | Python | 全部**平台级**定时任务的唯一入口：情报拉取、报表、蜜标巡检、供应链扫描 | **基础设施组件（cron 哲学：简单、稳定、永不失败）**：任务代码内声明 + DB 持久化 + 分布式锁单实例；与 playbook 的 schedule 触发器分层——用户业务流定时归 orchestrator（flocks trigger 模型），平台心跳归这里，基础设施不依赖业务引擎 |
+| 9 | `scheduler` | 自研 | Python | 全部**平台级**定时任务的唯一入口：情报拉取、报表、蜜标巡检、供应链扫描 | **基础设施组件（cron 哲学：简单、稳定、永不失败）**：任务代码内声明 + DB 持久化 + 分布式锁单实例；与 playbook 的 schedule 触发器分层——用户业务流定时归 orchestrator，平台心跳归这里，基础设施不依赖业务引擎 |
 | 10 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：用户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
 | 11 | `postgres` | **开源** | PostgreSQL 16 | 主存储 | — |
 | 12 | `redis` | **开源** | Redis 7 | 队列（Streams）、去重窗口、限流 | 去重要带 TTL 的高频读写 |
@@ -26,7 +32,7 @@
 
 **两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），agent-runtime 内嵌的 LiteLLM SDK 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
 
-**语言版图**：**Python 全栈**（全部 8 个后端角色；LiteLLM 以 SDK 内嵌 agent-runtime、NeMo Guardrails 以库内嵌——安全与 AI 生态的事实语言，flocks 纯 Python、AiSOC 业务面全 Python 均为实证；**单语言 = contracts 是一个共享包、天然单一事实源，零跨语言生成设施**——这是相比多语言方案最大的复杂度削减）+ TypeScript（web）+ 开源件（agentgateway=Rust、MinIO=Go、PG/Redis=C）。曾评估 Go（团队栈熟悉）：代价是 LiteLLM/NeMo 被迫从内嵌变独立容器、双语言逼出 buf+proto+OpenAPI 三端生成设施、guardrail 检测要跨服务中转——连锁复杂度大于收益，否决。**双引擎各司其职**：通用 workflow/playbook 引擎（orchestrator，soar 承载）的 `llm` 节点直调 agent-runtime；研判流程图（图编排骨架）在 agent-runtime 内自包含（§4）。
+**语言版图**：当前 Web 使用 TypeScript/React，IAM 与 Console 使用 Go，根 Go module 统一管理服务及共享包。后续 AI 能力可按实际生态选择 Python；跨语言依赖通过公开契约隔离，不因语言选择增加不存在的服务或生成多套协议真源。workflow/playbook 等后续服务的选择由各自需求方案确认。
 
 **组件 / 角色 / 镜像**：组件（代码域）→ 角色（部署单元，`SPX_ROLES` 决定；agent 因 LLM 故障隔离部署为独立容器，同镜像同语言）→ 镜像（交付物，**自研仅 2 个**：`secplexus` Python 全角色 / `secplexus-web`）
 
@@ -83,10 +89,11 @@
   └─────────────────────────────────────────────────────┘
 
 ════════════ 控制平面（页面操作，旁挂不穿流）════════════
-   用户 → web → console ─┬─ 查询/看板
-                        ├─ 手动触发 workflow / agent 任务 → ③
-                        ├─ 处置审批 → ⑤
-                        └─ 配置（连接器/策略/权限 iam）
+   用户 → web → 同源HTTP入口 ─┬─ iam：身份、会话、组织、角色和授权
+                              ├─ console：案件、运营工作台与查询汇总
+                              └─ 其他模块：按业务归属接入
+   console 按自身业务需要调用其他模块；不作为全平台API的强制中转站。
+   工作流、Agent和审批的最终状态与执行规则归对应模块。
    scheduler ──定时──▶ ① API 拉取 · ③ 定时任务 · 蜜标/情报/扫描
 ```
 
@@ -128,16 +135,16 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 | 机制 | 作用 |
 |---|---|
-| `count` + `start_time`/`end_time` | 上游聚合语义的唯一标准字段——**必须读进内部模型**（AiSOC 的归一化器把上游 count 整个吃掉，是反面教材【代码】） |
+| `count` + `start_time`/`end_time` | 上游聚合语义的唯一标准字段——**必须读进内部模型** |
 | `unmapped` | 映射不上的字段全塞这里，一条不丢——半年后排障的救命稻草 |
 | `vendor_attributes` | "厂商给的值"和"我改过的值"分开存——可解释 AI 的刚需 |
 | `observables[]` + `evidences[]` | 实体集中列出带路径引用，关联/富化/情报都从这里读 |
 
 归一化分四层：**L0 最小必需集**（缺了进隔离区不进主表）→ **L1 通用实体**（actor/user/process/file/network + ATT&CK ID）→ L2 厂商专属（按需）→ L3 raw 永存。工作量比例约 7:2.5:0.5。
 
-**六条从真实代码缺陷提炼的工程铁律**（每条都有 AiSOC/flocks 的实证，明细见 04 §4）：
+**六条归一化工程约束**（验证要求见 04 §4）：
 
-1. 时间解析失败 → `null` + warning，**绝不回退 `now()`**（AiSOC `normalizer.go:1063` 的真实缺陷）
+1. 时间解析失败 → `null` + warning，**绝不回退 `now()`**
 2. 缺失就是 `null`，不写 `"none"` 哨兵值
 3. 解码顺序 UTF-8 strict → GB18030 → replace，**编码记在事件上**（国内设备大量 GBK）
 4. `actor.kind` / `outcome` 判断不出就是 `unknown`，不许猜
@@ -156,7 +163,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 **上游是否已合并判断不出来**——查遍 OCSF/ECS/ASIM/UDM/ASFF/Sentinel/QRadar 没有任何标准有 `is_aggregated` 字段【官方文档】。落地方式是接入期"合并指纹探测"报告（计数字段、ID 稳定性、时间戳对齐痕迹、上层对象 ID 七项探测），输出**三档置信度**而非布尔值：已确认聚合 / 疑似聚合 / 未观察到迹象（≠未聚合）。
 
-**分区保序**【代码·AiSOC ADR-0012 的教训】：队列分区键必须与关联键同构（AiSOC 用 `tenant:entity`，我们对应为 `org:entity`），且 entity 解析顺序必须与关联键**同一份代码**——否则同一实体的告警散在不同分区被不同副本消费，序列拼错、事件一分为二，而且看起来一切正常。无实体事件回退 event_id（回退 org_id 会造成热分区）。
+**分区保序**：队列分区键必须与关联键同构，统一使用组织与实体标识组成的键，且 entity 解析顺序必须与关联键**同一份代码**——否则同一实体的告警散在不同分区被不同副本消费，序列拼错、事件一分为二，而且看起来一切正常。无实体事件回退 event_id（回退 org_id 会造成热分区）。
 
 ### 3.4 组织、权限与数据隔离（IAM 体系）
 
@@ -185,7 +192,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 │ 目录：组织 · 用户 · 用户组 · SCIM 同步                                               │
 │ 授权：RBAC/ABAC 策略 · 全平台权限点定义（alerts:read / soar:approve / orgs:manage…）   │
 │       · 菜单可见性 = 权限点的派生映射（前端登录后调 /me/permissions 按声明渲染菜单）    │
-│ 管理：组织 CRUD · 用户管理 · 角色与权限分配的管理 API——console 的 iam 域页面直接调它   │
+│ 管理：组织 CRUD · 用户管理 · 角色与权限分配的管理 API——Web 身份管理页面经同源入口调用它   │
 │ 分发：凭据签发与会话分发（浏览器会话/服务间 JWT/API Token），全系统唯一验签点          │
 └──────────────────────────┬────────────────────────────────────────────────┘
                            │ JWT / 权限点声明
@@ -195,7 +202,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
         验签 + 权限点校验    （org_id 上下文驱动）  菜单与按钮
 ```
 
-**数据隔离的标准技术 = 双保险**【官方文档·AWS canonical 模式 + 代码·AiSOC 事故教训】：
+**组织隔离采用应用过滤与数据库防线分层设计**：
 
 ```sql
 -- 数据层（兜底）：RLS 策略 + 强制启用（迁移自动为注册表中的每张 org 隔离表生成）
@@ -205,7 +212,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 -- CI 断言：查 information_schema，有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器）
 ```
 
-应用层（主防线）：SQLAlchemy 事务级事件自动 `SET LOCAL app.org_id`（连接池归还不泄漏）+ ORM 自动追加 org 过滤。为什么双保险：AiSOC 的真实事故【代码】——RLS 依赖会话变量（GUC），一条代码路径忘了设置，**RLS 策略还在却跨组织读穿了**；其源码注释结论"查询层的过滤才是被依赖的控制，RLS 是第二道防线"。
+应用层（主防线）：SQLAlchemy 事务级事件自动 `SET LOCAL app.org_id`（连接池归还不泄漏）+ ORM 自动追加 org 过滤。查询层必须显式应用组织过滤；若启用 RLS，还需验证事务上下文、连接池复用和角色绕过边界，不能仅凭策略存在就视为隔离已经生效。
 
 **三条总线（后来者改不错的机制）**：
 
@@ -216,8 +223,6 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 | 事件总线 | Redis Streams，org_id 是消息头 | 新事件带 org 头，消费者按上下文处理 |
 
 **自举**：安装脚本创建 bootstrap admin 并打印一次性密码（对接部署篇的"安装即验收"）。内建 iam 通过标准协议（OIDC/SAML/SCIM）对接任意外部 IdP——对接的是标准，不是我们的私有实现；未来想换 Zitadel/Keycloak 做完整企业 IdP 时即插即用（方案 B 始终保留为升级路径）。
-
-详细设计见 [docs/design/iam/](../design/iam/01-requirements.md)。
 
 ## 4. Agent 编排：图编排骨架 + 受限 LLM
 
@@ -254,7 +259,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 - **证据级 → 告警级两级判定**【实测·Intezer】：每条证据先有独立 verdict，再聚合成告警结论——可独立审计，正好喂给 groundedness 门禁。
 - **Schema 语义**【论文·arXiv 2408.02442】：输出字段顺序 `evidence[] → reasoning → verdict → confidence`——JSON 模式下 GPT-3.5 有 100% 概率把 answer 排在 reason 前面，"先猜后编理由"，物理顺序能堵。
 - **按岗位拆 agent**【实测·Microsoft Copilot 套件】：triage / hunt / deep-dive 三岗位，自治级别独立配置——和影子模式互补（微软按岗位发权，我们按告警类别发权）。
-- **成本三道闸**【代码/官方文档】：①同 `dedup_key` 只对 leader 调 LLM、follower 复用结论（flocks 实证）②知识前置过滤（见 01 §5.2）③租户级 token 配额硬顶（阿里云"每主机每日 20 条 AI 研判"同款思路——用配额逼自己把 token 花在值得的告警上）。
+- **成本三道闸**【代码/官方文档】：①同 `dedup_key` 只对 leader 调 LLM、follower 复用结论②知识前置过滤（见 01 §5.2）③租户级 token 配额硬顶（阿里云"每主机每日 20 条 AI 研判"同款思路——用配额逼自己把 token 花在值得的告警上）。
 
 ## 5. AI 可靠性：六条硬约束
 
@@ -264,7 +269,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 |---|---|---|
 | 1 | **三值结论**，`insufficient_info` 是一等公民（独立队列独立 SLA） | 阿里云官方即三值；火山三队列同构 |
 | 2 | **工具返回三态**：`ok_empty` / `error` / `not_supported`，空结果不得作为关单依据 | ALERT-BENCH：空结果导致 4/5 方法漏掉 ≥88% 攻击告警 |
-| 3 | **groundedness 门禁**：确定性实体比对（IP/hash/CVE/域名），score < 0.75 只许降级不许自动关单；门禁必须接在生产链路不只评测 | AiSOC 真实缺陷：scorer 当过"只有评测没有调用方"的摆设，自信误报被自动关单 |
+| 3 | **groundedness 门禁**：确定性实体比对（IP/hash/CVE/域名），score < 0.75 只许降级不许自动关单；门禁必须接在生产链路不只评测 | 生产执行路径必须调用门禁，CI 验证实际调用关系和失败分支 |
 | 4 | **禁止同上下文自审**；要审就独立上下文或换模型 | Self-Refine 改对 16 改错 79；CoVe 改对 25 改错 132 |
 | 5 | **ATT&CK 只做候选集分类**，不许开放生成 technique ID | CTIBench 开放抽取 macro-F1 仅 0.3108 |
 | 6 | **处置绑定实体 + 上游原生 ID + 默认人审**，三缺一不执行 | 阿里云/火山/CrowdStrike 一致做法 |
@@ -275,11 +280,11 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 
 ### 6.1 存储：大脑的工作记忆，不是数据资产
 
-存储的角色由产品定位直接决定：SecPlexus 是外挂大脑，**原始告警的 system of record 是用户自己的 SIEM**（他们本来就有，而且存得比我们好）——我们不当第二档案馆。但也不能完全不存（flocks 模式），分界线一句话：
+存储的角色由产品定位直接决定：SecPlexus 是外挂大脑，**原始告警的 system of record 是用户自己的 SIEM**（他们本来就有，而且存得比我们好）——我们不当第二档案馆。平台仍需保留运营闭环所必需的数据，分界线如下：
 
 > **大脑的产出和经验永久，大脑的输入（别人的告警）只留工作窗口。**
 
-**为什么不能学 flocks 不存储**。flocks 的形态是告警来了直接触发 workflow、跑完就散，不留存不关联（代码实证：仓库里 `class Alert` 零命中）。这与"替换大脑"的定位正面冲突：
+**为什么需要持久化运营数据**。仅在收到告警时执行一次流程，无法支持后续关联、检索和审计。平台需要满足：
 
 1. **跨厂商关联是大脑的核心职能，而它必须有地方存东西。**"EDR 说执行、防火墙说外连、身份说异常登录是同一次攻击"——这个串联只有中立层能做（厂商各自只看到自己）。告警不落地，"关联"就退化成每次研判时模型现场去各家查——这正是 01 §1.3 批评 AI 助手的原话（"同一实体 3 分钟前的相关告警要靠模型自己在会话里查"）。选不存储等于亲手把自己做回助手。
 2. **经济性**。腾讯实测链路 17 万 → 1834 → 42：先归并再研判。没有预合并，10 万条/天全部进 LLM，成本差两个数量级。
@@ -298,7 +303,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 | **机构记忆 / 影子决策** | 大脑的经验 | **永久** |
 | **实体档案 entities** | 大脑的知识（IP/账号/主机的画像与关系，研判上下文底座） | **永久**（画像可从新告警持续刷新） |
 
-算账：10 万条/天 × ~1KB（raw 不进主表后）× 90 天 ≈ **9–27GB**——PG 单库时间分区绰绰有余，**冷热分层的讨论在这个模型下整体不再需要**。说明：行业均值约 3,000–4,500 条/天（04 §5.1），10 万/天是我们的设计容量——单租户峰值余量 30 倍，多源大客户也覆盖（业界证据：flocks 用 SQLite 都在跑【代码】；QRadar 的 offense 也存 PostgreSQL【官方文档】；AiSOC ADR-0005 拒绝第二个热分析引擎【代码】。若未来真的规模超限——单租户 >100 万条/天或多租户 SaaS——"冷层可查但降级 + 本地缓存层"的业界全景与证据见 04 §3 备查）。
+算账：10 万条/天 × ~1KB（raw 不进主表后）× 90 天 ≈ **9–27GB**——PG 单库时间分区绰绰有余，**冷热分层的讨论在这个模型下整体不再需要**。说明：行业均值约 3,000–4,500 条/天（04 §5.1），10 万/天是我们的设计容量——单租户峰值余量 30 倍，多源大客户也覆盖（该容量估算需在实现时通过索引、分区和真实负载验证。若未来真的规模超限——单租户 >100 万条/天或多租户 SaaS——"冷层可查但降级 + 本地缓存层"的业界全景与证据见 04 §3 备查）。
 
 现在必须做对的三件事（否则以后要重写）：
 
@@ -315,7 +320,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 └──────────────── 过滤表达式（编译成 WHERE）──────┘   └────── SQL 片段（AST 校验透传）─────┘
 ```
 
-执行层的安全约束直接抄 AiSOC `lake_sql.py`【代码】：单条 SELECT、表白名单、AST 级强制注入 org_id（不是参数级；AiSOC 原文用 tenant_id）、行数上限 100k。更硬的一条纪律抄自它的 `hunt/plan.py`：**模型拿到的 schema 里根本没有任何字段能携带 SQL/SPL/自由文本**，CI 断言 schema 而不是断言代码——"schema 才是真正约束模型的东西"。
+查询执行层要求单条 SELECT、表白名单、AST 级组织过滤和行数上限，不能仅依赖调用参数自报组织。模型查询契约还需满足：**模型拿到的 schema 里根本没有任何字段能携带 SQL/SPL/自由文本**，CI 断言 schema 而不是断言代码——"schema 才是真正约束模型的东西"。
 
 ## 7. 两个共享库（不是服务）
 
@@ -323,14 +328,14 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 |---|---|---|
 | `contracts` | OCSF 模型、枚举、API 契约、查询 IR、RequestContext——**一个 Python 包直接 import，天然单一事实源**（单语言最大红利：零跨语言生成设施） | 全部角色共用，服务化只有网络开销和版本漂移 |
 | `connectors` | 厂商连接器 + 归一化 profile + 回归样本 | 只被 collector 引用，独立版本化 |
-| `orchestrator` | workflow 引擎：**10 类节点**（python/tool/llm/http/branch/loop/parallel/wait/approval + subworkflow；flocks 8 类实证，wait/parallel/approval 补自 AiSOC 的 25 步 playbook）、持久化审批暂停、幂等键、Python 节点子进程隔离 | correlator/agent/soar 复用；flocks 证明 Python 节点会内存泄漏，子进程隔离必须预留；处置动作（block_ip/isolate_host 等）不是节点类型，是 tool 节点调用的工具——否则每接一个厂商就要改引擎 |
+| `orchestrator` | workflow 引擎：**10 类节点**（python/tool/llm/http/branch/loop/parallel/wait/approval + subworkflow）、持久化审批暂停、幂等键、Python 节点子进程隔离 | correlator/agent/soar 复用；长时间运行的 Python 节点需评估内存与故障隔离；处置动作（block_ip/isolate_host 等）不是节点类型，是 tool 节点调用的工具——否则每接一个厂商就要改引擎 |
 | `audit` | 追加式哈希链审计 | 审计必须内嵌在每个写入点，不能是旁路服务 |
 
 ## 9. 工程标准（每个组件强制，CI 检查）
 
 | # | 标准 | 条款 |
 |---|---|---|
-| 1 | **队列消费语义** | 至少一次投递 + 消费幂等键 + 指数退避重试 + DLQ 死信（AiSOC `aisoc.alerts.dlq` 同款）——写死为事件总线协议，不是各消费者自己发挥 |
+| 1 | **队列消费语义** | 至少一次投递 + 消费幂等键 + 指数退避重试 + DLQ 死信——写死为事件总线协议，不是各消费者自己发挥 |
 | 2 | **可观测** | **structlog** 结构化日志 + **OpenTelemetry 全链路 trace**：请求 → 队列 → 工具调用 → LLM 调用（每次 LLM 调用一个 span，模型/耗时/token 直接可见） |
 | 3 | **健康检查与优雅停机** | 每个角色强制 `/healthz` `/readyz`；SIGTERM 优雅排水（处理完在途消息再退）；K8s preStop 对齐 |
 | 4 | **RLS 自动断言** | org 隔离表集中注册，迁移自动建 policy；CI 查 information_schema——有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器） |
@@ -341,11 +346,13 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 
 > 注：Go 方案曾要求的 proto/OpenAPI 三端生成与 gen/ 零手改校验，在单语言下**天然不需要**——contracts 共享包就是单一事实源，这是回归 Python 全栈的最大复杂度削减。
 
-## 10. 与参照实现的规模对照
+## 10. 当前规划的资源边界
 
-| | AiSOC | flocks | **SecPlexus** |
-|---|---|---|---|
-| 服务数 | 34 个 compose 服务（CORE 档 11 个） | 1 个进程 | **13 个容器（core 档更少）** |
-| 存储 | PG + CH + Neo4j + Qdrant + OpenSearch + Kafka | SQLite | **PG + Redis + 对象存储** |
-| 队列 | Kafka | 进程内 | **Redis Streams（规模到再换）** |
-| 定位教训 | 全功能但重（CORE 就要 8GB） | 极轻但无平台 | **数据面保质量，规模上做减法** |
+| 维度 | 历史全景草案中的规划 |
+|---|---|
+| 部署 | 按实际运行角色组合，容器数随部署形态确定 |
+| 存储 | PostgreSQL、Redis及对象存储 |
+| 队列 | Redis Streams，达到容量边界后再评估替代 |
+| 原则 | 数据质量与隔离优先，按真实负载控制组件数量 |
+
+本节为平台全景规划；当前三模块的实现边界以模块文档和需求计划为准。

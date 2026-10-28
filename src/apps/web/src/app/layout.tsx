@@ -1,0 +1,64 @@
+import type { ReactNode } from "react";
+
+import type { Metadata } from "next";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages, getTranslations } from "next-intl/server";
+
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { APP_CONFIG } from "@/config/app-config";
+import { openGraphLocales } from "@/i18n/config";
+import { fontVars } from "@/lib/fonts/registry";
+import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
+import { ThemeBootScript } from "@/scripts/theme-boot";
+import { PreferencesStoreProvider } from "@/stores/preferences/preferences-provider";
+
+import "./globals.css";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  const t = await getTranslations("Metadata");
+  return {
+    metadataBase: new URL(APP_CONFIG.url),
+    applicationName: APP_CONFIG.name,
+    title: APP_CONFIG.name,
+    description: t("description"),
+    openGraph: { type: "website", siteName: APP_CONFIG.name, locale: openGraphLocales[locale] },
+    twitter: { card: "summary_large_image" },
+  };
+}
+
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+  const { theme_mode, theme_preset, content_layout, navbar_style, sidebar_variant, sidebar_collapsible, font } =
+    PREFERENCE_DEFAULTS;
+  return (
+    <html
+      lang={locale}
+      data-theme-mode={theme_mode}
+      data-theme-preset={theme_preset}
+      data-content-layout={content_layout}
+      data-navbar-style={navbar_style}
+      data-sidebar-variant={sidebar_variant}
+      data-sidebar-collapsible={sidebar_collapsible}
+      data-font={font}
+      suppressHydrationWarning
+    >
+      <head>
+        {/* Applies theme and layout preferences on load to avoid flicker and unnecessary server rerenders. */}
+        <ThemeBootScript />
+      </head>
+      <body className={`${fontVars} min-h-screen antialiased`}>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <TooltipProvider>
+            <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
+              {children}
+              <Toaster />
+            </PreferencesStoreProvider>
+          </TooltipProvider>
+        </NextIntlClientProvider>
+      </body>
+    </html>
+  );
+}

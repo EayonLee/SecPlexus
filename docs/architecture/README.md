@@ -1,8 +1,11 @@
 # SecPlexus 架构文档
 
+> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM已内嵌Authboss/SCS并接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+
+
 > AI 原生安全运营平台 —— 告警运营、漏洞运营、大模型护栏、智能体安全，编织成一张互联的安全网络。
 
-这套文档是 SecPlexus 的业务架构、技术架构与部署架构的完整设计。它不是拍脑袋的产物：**每一条关键决策都有出处**——来自对国内云厂商（阿里云、腾讯云、火山引擎、奇安信）、开源安全平台（AiSOC、flocks、Wazuh）、海外 AI SOC 公司（Dropzone、Prophet、Exaforce、Torq、Intezer、Microsoft）以及大型开源项目（Dify 159k★、Supabase 114k★、RAGFlow 93k★、JumpServer 32k★、GitLab）的逐一调研。证据明细见 [04-research-references.md](04-research-references.md)。
+这套文档是 SecPlexus 的业务架构、技术架构与部署架构的完整设计。它不是拍脑袋的产物：**每一条关键决策都有出处**——来自对国内云厂商（阿里云、腾讯云、火山引擎、奇安信）、开源安全平台（Wazuh）、海外 AI SOC 公司（Dropzone、Prophet、Exaforce、Torq、Intezer、Microsoft）以及大型开源项目（Dify 159k★、Supabase 114k★、RAGFlow 93k★、JumpServer 32k★、GitLab）的逐一调研。证据明细见 [04-research-references.md](04-research-references.md)。
 
 ## 一页全景
 
@@ -36,6 +39,7 @@
 
 | 文档 | 内容 | 回答的问题 |
 |---|---|---|
+| [需求与设计计划索引](../plans/README.md) | 按需求组织的 Spec、Plan 与审核状态 | 本次准备交付什么、如何实施与验收 |
 | [01-business-architecture.md](01-business-architecture.md) | 产品定位、运营对象模型、三队列工作台、AI 研判闭环、影子模式 | 我们运营什么、人机怎么协同 |
 | [02-technical-architecture.md](02-technical-architecture.md) | 服务划分、数据流、数据模型、Agent 编排、AI 可靠性、检索与存储 | 用什么服务实现、数据长什么样 |
 | [03-deployment-architecture.md](03-deployment-architecture.md) | monorepo、镜像策略、部署形态、信创与离线交付 | 怎么部署、怎么扩展、怎么进内网 |

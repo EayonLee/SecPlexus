@@ -1,0 +1,88 @@
+//go:build integration
+
+package handler
+
+import (
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
+)
+
+func TestSessionPersistenceFailureCannotSendSuccessfulLogin(t *testing.T) {
+	f := newFixture(t, nil)
+	ctx := context.Background()
+	_, err := f.server.Service.Store.Pool.Exec(ctx, `CREATE FUNCTION iam.reject_session_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unavailable'; END $$; CREATE TRIGGER reject_session_write BEFORE INSERT OR UPDATE ON iam.scs_sessions FOR EACH ROW EXECUTE FUNCTION iam.reject_session_write()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newAPIClient(t, f.public.URL, f.public.URL)
+	client.context()
+	client.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": f.initial}, 503)
+	request, _ := http.NewRequest("GET", f.public.URL, nil)
+	for _, cookie := range client.client.Jar.Cookies(request.URL) {
+		if cookie.Name == "spx_session" {
+			t.Fatal("failed storage produced an authentication cookie")
+		}
+	}
+
+	var active int
+	if err = f.server.Service.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.user_sessions WHERE state='active'`).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+
+	if active != 0 {
+		t.Fatal("orphan login remained active")
+	}
+}
+
+func TestSecurityChangesRollbackWhenAuditCannotCommit(t *testing.T) {
+	f := newFixture(t, nil)
+	ctx := context.Background()
+	client := newAPIClient(t, f.public.URL, f.public.URL)
+	client.login(f.admin, f.initial)
+	client.change(f.initial, f.password)
+	client.login(f.admin, f.password)
+	_, err := f.server.Service.Store.Pool.Exec(ctx, `CREATE FUNCTION iam.reject_audit_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unavailable'; END $$; CREATE TRIGGER reject_audit_write BEFORE INSERT ON iam.audit_events FOR EACH ROW EXECUTE FUNCTION iam.reject_audit_write()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client.request("POST", "/api/v1/iam/users", map[string]string{"username": "newmember", "display_name": "成员", "password": "temporary account password"}, 500)
+	var count int
+	if err = f.server.Service.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE username_normalized='newmember'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 0 {
+		t.Fatal("account survived a failed audit transaction")
+	}
+}
+
+func TestAuthenticationLocksRecoverAndDependencyFailuresRemainUnavailable(t *testing.T) {
+	f := newFixture(t, func(cfg *config.Config) { cfg.Auth.LoginMaxFailures = 2 })
+	ctx := context.Background()
+	client := newAPIClient(t, f.public.URL, f.public.URL)
+	client.context()
+	for range 2 {
+		client.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": "incorrect password"}, 401)
+	}
+
+	client.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": f.initial}, 401)
+	if _, err := f.server.Service.Store.Pool.Exec(ctx, `UPDATE iam.password_credentials SET locked_until=clock_timestamp()-interval '1 second'`); err != nil {
+		t.Fatal(err)
+	}
+
+	client.login(f.admin, f.initial)
+	if err := f.server.Limiter.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	client.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": f.initial}, 503)
+	// Redis 不可用不能被误报为密码错误，也不应阻断不依赖 Redis 的身份读取。
+	client.request("GET", "/api/v1/iam/me", nil, 200)
+	f.server.Service.Store.Pool.Close()
+	client.request("GET", "/api/v1/iam/me", nil, 503)
+}

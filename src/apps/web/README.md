@@ -1,84 +1,80 @@
 # SecPlexus Web
 
-React + Arco Design, initialized from the official
-[Arco Design Pro Vite template](https://github.com/arco-design/arco-design-pro/tree/main/arco-design-pro-vite).
-The upstream template is assembled with shared files from `arco-design-pro-next`,
-following the copy map in its `scripts/vite.js`. Layout, login, dashboard, table,
-form, visualization, and settings pages are retained for gradual adaptation.
-Original MIT terms are preserved in [LICENSE.arco-design-pro](LICENSE.arco-design-pro).
+## Routes and real identity
 
-## Toolchain
+| Route | Purpose |
+| --- | --- |
+| `/login` | Real IAM username/password login and mandatory password change |
+| `/dashboard` | Authenticated security workbench based on CRM V1; template sample data |
+| `/account/profile`, `/account/security` | Personal identity, password changes, recent authentication, device revocation and logout |
+| `/management/orgs/{org_id}/...` | Organization settings, members, roles, permission previews and audit |
+| `/management/platform/...`, `/management/system/security` | Platform users, organizations, audit and read-only security overview |
 
-Current stable React 19, Vite 8, TypeScript 7, React Router 7, Redux 5 /
-React Redux 9, ECharts 6, Less, and Biome. Exact versions are recorded in `package.json`
-and the root `pnpm-lock.yaml`. React's native lazy/Suspense replaces the legacy
-loadable wrapper; Vite's official React plugin provides Fast Refresh.
-The template's BizCharts renderer was replaced with modular ECharts because its
-React 16 reconciler is incompatible with React 19. The legacy color picker was
-replaced by Arco's ColorPicker, and Arco's React 19 adapter is loaded at startup.
+The product shell uses the shared Sidebar, form, dialog and table components, plus its existing layout controls and theme switcher. Navigation follows the server capability projection. The single workbench retains CRM V1 sample data and never counts as real business statistics. The Dashboards group contains only “安全智驾工作台”; real IAM navigation remains capability-based.
 
-## Commands
+IAM credentials stay in HttpOnly cookies. Zustand holds only the current in-memory identity and capability projection. No session, token, role, permission or business data is persisted in localStorage; only a remembered username and presentation preferences may persist. Identity epochs and cancellation reject stale responses after logout or organization changes. BroadcastChannel synchronizes session changes across tabs without sharing secrets. URL organization context remains independent per tab.
 
-Run `make dev` from the repository root for dependency installation and startup.
-`make build` creates the production build. `make stop` stops running project
-services, including Web started directly through pnpm in development or preview mode.
+`src/app/api/v1/[module]/[...path]/route.ts` streams public IAM/Console requests to server-configured origins. It forwards Cookie, Origin and CSRF context, preserves response status and Set-Cookie, and does not expose internal APIs or service credentials. Backend authorization remains authoritative. A dependency failure returns 503 and pauses interaction without turning it into a successful logout.
 
-For additional checks, run `pnpm typecheck` and `pnpm lint` from the repository
-root. The latter checks formatting with Biome.
+## Development and build
 
-## Mock boundary
+From the repository root:
 
-Mock data is enabled only in Vite development mode, unless
-`VITE_ENABLE_MOCK=false` is set. Production builds never enable mock handlers.
-Demo login is `admin` / `admin`. This is template navigation, not real IAM
-integration; mock permission checks are not a backend security boundary.
-The login form remembers only the username, never the password.
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+make dev
+pnpm typecheck
+pnpm lint
+make build
+pnpm preview
+make stop
+```
 
-To connect a real backend, copy `.env.example` to `.env.local`, set
-`VITE_ENABLE_MOCK=false` and `VITE_API_PROXY_TARGET` to the backend address.
-There is no backend implemented by this change. Never put secrets in `VITE_`
-variables: Vite exposes these values to browser code.
+Root startup reads the root `.env`, derives backend addresses, and supplies `SPX_WEB_IAM_PROXY_TARGET` and `SPX_WEB_CONSOLE_PROXY_TARGET` only to the Next server. `SPX_WEB_HOST` and `SPX_WEB_PORT` control the CLI listener. `make dev` applies IAM migrations against configured development infrastructure; it never starts Docker.
 
-## Theme
+Root builds also load the root `.env` when present and pass filtered Web configuration. `SPX_PUBLIC_URL` supplies the default public metadata origin, with an optional `NEXT_PUBLIC_APP_URL` override. Process values take precedence. Public values are fixed by the production build, so rebuild after changing them; runtime listener or proxy changes require a restart. A build can run without creating a development `.env`.
 
-The visual reference is [Arco theme 1376, 火山引擎](https://arco.design/themes/preview/1376).
-The app uses the current Arco React Less styles with the overrides in
-`src/theme.ts`. It does not stack the Pro component theme or the Vue theme on top.
-The original Pro pages and their license are retained.
+For independent Web development, copy [.env.example](.env.example) to `.env.local`, configure the public API origins, and run `pnpm dev` here. This uses Next.js native environment loading and the default port 3000. Keep IAM's public origin consistent with the browser entry. Never place secrets in `NEXT_PUBLIC_*`.
 
-- `src/settings.json`: primary color, navigation visibility and menu width.
-- `src/theme.ts`: shared component tokens, including the 4/6/12px radius scale.
-- `src/style/layout.module.less`: the page canvas and application layout.
-- `src/components/Chart/`: ECharts implementations of the original chart designs.
+Production uses `next build` followed by `next start`, including server components and API routes. It is not a static export. The Web Dockerfile runs Next.js as an unprivileged Node user. See [configuration](../../../docs/configuration.md), [testing](../../../docs/testing.md), and the [replacement plan](../../../docs/plans/replace-web-template/plan.md).
 
-Vite applies the same Less tokens in development and production, with
-`math: 'always'` for Arco's existing size expressions. Keep input focus, error,
-warning and disabled styling in Arco's component tokens; do not add global
-outline or border overrides. Newer components that are absent from the old
-reference preview use the current Arco React defaults and shared theme tokens.
+## Contracts and skills
 
-The reference preview uses Arco React 2.24.1. This app keeps its current React
-component version and its behavior fixes; it does not copy the old compiled CSS.
-See the [theme audit](../../../docs/development/theme-audit-1376.md) for the
-reference, changes and verification scope.
+Run `pnpm contracts:generate` from the root after editing authoritative contracts. Generated clients remain in `src/auth/`; they are not part of the upstream template.
 
-## Brand assets
+Follow the repository [AGENTS.md](../../../AGENTS.md), project [shadcn Skill](../../../.agents/skills/shadcn/SKILL.md), and [project code standard](../../../.agents/skills/spx-code-standard/SKILL.md). Use shared components and semantic theme tokens; keep UI rules in one place.
 
-`src/components/Brand` is shared by the login header, login form and navigation.
-It uses a locally hosted Space Grotesk font; its OFL notice is in
-`src/assets/fonts/OFL.space-grotesk.txt`. The three product illustrations live
-in `src/pages/login/assets` and load without third-party image requests.
+## Module-owned tooling
 
-## Project skill
+Frontend dependencies, Vitest/Playwright configuration, `tests/unit/`, and `tests/e2e/` live here; project skills remain in the root `.agents/skills/`. Root commands delegate to this module. The root pnpm lockfile is the only dependency lockfile. The root `/` route redirects to the authenticated workspace.
 
-Use [spx-arco-design](../../../.agents/skills/spx-arco-design/SKILL.md) for
-component references. Keep npm package names as `@arco-design/web-react`.
+The Web TypeScript project includes `.mts` tooling configuration and `.mjs` scripts with ESNext modules. The theme-preset generator keeps its separate CommonJS script configuration.
 
-## Template limitations
+```sh
+pnpm typecheck
+pnpm test:unit
+pnpm exec playwright install chromium
+pnpm test:e2e --docker
+```
 
-The upstream Arco components still emit an element-ref deprecation message in
-React 19 development mode. Browser acceptance checks found no uncaught runtime
-errors. Some demo illustrations still use upstream-hosted media. The retained
-admin templates primarily target desktop screens; the login page also fits
-narrow screens. The complete demo build still has large shared chunks, to be
-revisited as product pages replace the examples.
+These commands run in `src/apps/web/`. E2E provisions owned isolated infrastructure and uses the repository startup entry; it does not read developer credentials. For deployment, set `NEXT_PUBLIC_APP_URL` to the browser origin before building. This is public metadata, never a credential.
+
+## Selective template adoption
+
+The project keeps one CRM V1-based workbench in `src/spx/pages/workbench/`, real IAM pages, and shared UI, fonts and theme infrastructure. Other template pages, demo identities, menus and feature-only dependencies are removed. Appearance controls live in `src/spx/components/` alongside the product shell.
+
+Treat the template clone as a read-only reference. For each requested feature, copy its page or block and the necessary local components, types, data and dependencies; reuse existing project UI and theme tokens. Do not overwrite project configuration, lockfiles, identity/session code or already customized components. Preserve required licenses and attribution. Compare the selected feature with the fixed template version and verify its interactions after integration.
+
+Replace sample data with the owning module's generated API client when that business feature is implemented. IAM APIs stay with IAM; Console owns security operations and useful operational query aggregation, not duplicate wrappers around every module. See [Console boundaries](../console/README.md).
+
+## Internationalization
+
+The application uses `next-intl` with `en` and `zh-CN` catalogs in `messages/`. English is the default. A language menu is available on sign-in, authenticated pages, service-error and not-found views. The validated `spx-locale` preference cookie is separate from IAM credentials and is written by a Server Action; Next updates the current UI and layouts after the cookie changes. Routes and API contracts keep their existing paths without locale prefixes.
+
+`src/i18n/config.ts` owns supported locales, defaults and the display time zone. `request.ts` loads the matching catalog per request. The root provider shares that configuration with client components, and `html lang`, metadata and page titles follow the same locale. Dashboard is the English page name; 安全智驾工作台 is the Chinese name.
+
+Use typed `useTranslations` / `getTranslations` message keys and ICU placeholders or plurals. Add every message to both catalogs; do not concatenate sentence fragments or add locale conditionals to components. Format numbers, money, lists and timestamps with `useFormatter`; displayed timestamps use UTC consistently across both languages. Currency is preserved (the CRM sample uses USD), not converted when switching languages. Pass the locale into components such as the date picker.
+
+Translate platform text, stable permission labels and built-in role names. Preserve account names, organization names, custom role names, identifiers and other user data. API errors use stable result-code-to-message-key mappings; never translate or display raw internal error bodies. CRM sample labels retain their sales meaning: leads are 销售线索 and won projects are 成交项目, not invented security metrics.
+
+Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboard component rendering in both languages. Existing IAM E2E selects Chinese explicitly, so it does not depend on the default locale. Run the local unit/type/build checks after adding translations; browser checks should verify switching, refresh persistence, translated accessibility labels, metadata and narrow layouts.
