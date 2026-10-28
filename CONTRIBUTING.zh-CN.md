@@ -179,10 +179,10 @@ pnpm test:e2e --docker
 
 ```sh
 git fetch upstream
-git switch -c session-expiry upstream/main
+git switch -c fix/session-expiry upstream/main
 ```
 
-分支名应简短、说明本次变更，使用小写英文和连字符，例如 `session-expiry`、`contribution-guide`。
+新工作分支使用 `<type>/<description>`，类型与下文提交类型一致，描述使用简短的小写英文和连字符，例如 `feat/iam-login`、`docs/contribution-guide`。有关联的已有 Issue 时带上编号，例如 `fix/123-session-expiry`；不要求每次变更都创建 Issue，也不为分支命名单独创建 Issue。
 
 提交消息和 PR 标题使用 `type(scope): summary`，scope 可省略。类型包括
 `feat`、`fix`、`docs`、`chore`、`refactor` 和 `test`，例如：
