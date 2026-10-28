@@ -44,7 +44,8 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 - Behavior changes start with a focused failing test. Unit: rules/boundaries; integration: real component contracts; E2E: core flows/access boundaries. Avoid mocks, duplicated implementation logic, and permanent integration/E2E cases for temporary diagnostics.
 - Isolate test resources, await readiness, and clean up only owned resources. No sleeps/retries masking failure. Run relevant checks and report actual results/gaps; see [testing](docs/testing.md) for commands and standards.
-- Branches: create one short-lived branch per change from the latest `main`; use concise, descriptive lowercase kebab-case names (e.g. `iam-session-expiry`). Keep review fixes on the same PR branch; delete it after merge.
+- New branches: `<type>/<short-kebab-description>`; types match commits below, e.g. `feat/iam-login`. Include an existing issue number when relevant: `fix/123-session-expiry`; creating an issue is not mandatory.
+- Create one short-lived branch per change from the latest `main`; keep review fixes on the same PR branch and delete it after merge.
 - Commits/PRs: `type(scope): summary`; optional scope; types `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
 
 ## Default Computer Use Delegation (User Preference)

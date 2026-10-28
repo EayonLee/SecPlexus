@@ -250,11 +250,14 @@ For a checkout with the `upstream` remote configured above, start a branch with:
 
 ```sh
 git fetch upstream
-git switch -c session-expiry upstream/main
+git switch -c fix/session-expiry upstream/main
 ```
 
-Use short, descriptive lowercase kebab-case branch names, such as
-`session-expiry` or `contribution-guide`.
+Name new work branches `<type>/<description>`, using the commit types below and
+a short lowercase kebab-case description, such as `feat/iam-login` or
+`docs/contribution-guide`. When a change relates to an existing issue, include
+its number: `fix/123-session-expiry`. An issue is not required for every change;
+do not create one just to obtain a branch name.
 
 Use `type(scope): summary` for commit messages and PR titles; the scope is
 optional. Supported types are `feat`, `fix`, `docs`, `chore`, `refactor`, and
