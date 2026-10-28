@@ -182,7 +182,7 @@ git fetch upstream
 git switch -c session-expiry upstream/main
 ```
 
-分支名应说明本次变更，最多由三个以连字符连接的单词组成，不使用斜杠或类型前缀，例如 `session-expiry`、`contribution-guide`。
+分支名应简短、说明本次变更，使用小写英文和连字符，例如 `session-expiry`、`contribution-guide`。
 
 提交消息和 PR 标题使用 `type(scope): summary`，scope 可省略。类型包括
 `feat`、`fix`、`docs`、`chore`、`refactor` 和 `test`，例如：

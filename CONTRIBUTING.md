@@ -253,8 +253,7 @@ git fetch upstream
 git switch -c session-expiry upstream/main
 ```
 
-Choose a branch name that describes your change. Branch names have at most three
-hyphen-separated words, without slashes or type prefixes, such as
+Use short, descriptive lowercase kebab-case branch names, such as
 `session-expiry` or `contribution-guide`.
 
 Use `type(scope): summary` for commit messages and PR titles; the scope is
