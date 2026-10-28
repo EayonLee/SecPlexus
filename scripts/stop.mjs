@@ -69,7 +69,7 @@ async function stopProcesses() {
       const { command, parent } = snapshot.get(pid);
       if (directory && inside(directory, apps)) return true;
       if (directory && inside(directory, root) &&
-          (command.includes(`${apps}/`) || command.includes('src/apps/') || command.includes(`${root}/bin/`))) return true;
+          (command.includes(`${apps}/`) || command.includes('src/apps/') || command.includes(`${root}/bin/`) || command.includes('scripts/start.mjs') || /(?:^|\s)(?:\.\/)?(?:bin\/(?:iam|console))(?:\s|$)/.test(command))) return true;
       pid = parent;
     }
     return false;
@@ -121,6 +121,10 @@ function stopContainers() {
     return readdirSync(root).some(name => /^(?:docker-)?compose(?:[.-].*)?\.ya?ml$/.test(name));
   });
   if (!configured) return 0;
+  const docker = spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
+    encoding: 'utf8', timeout: 5_000,
+  });
+  if (docker.error || docker.status !== 0) return null;
   const output = run('docker', ['ps', '--filter', 'label=com.docker.compose.project.working_dir', '--format',
     '{{.ID}}\t{{.Label "com.docker.compose.project.working_dir"}}']);
   const ids = output.trim().split('\n').filter(Boolean).flatMap(line => {
@@ -136,9 +140,15 @@ function stopContainers() {
 
 let count = 0;
 let failed = false;
+let unknownContainers = false;
 for (const stop of [stopProcesses, stopContainers]) {
-  try { count += await stop(); }
+  try {
+    const stopped = await stop();
+    if (stopped === null) unknownContainers = true;
+    else count += stopped;
+  }
   catch (error) { failed = true; console.error(error.message); }
 }
 if (failed) process.exitCode = 1;
+else if (unknownContainers) console.log('Application stop completed; Docker container status is unknown.');
 else console.log(count ? 'SecPlexus services stopped.' : 'No SecPlexus services are running.');

@@ -1,24 +1,27 @@
-# Repository metadata and local configuration
 .git
-.idea
-**/.DS_Store
+.env
+.env.*
+**/node_modules
+**/dist
+**/test-results
+**/coverage
+.agents
+bin
+
+# Module-local credentials must also stay outside build contexts.
 **/.env
 **/.env.*
-!**/.env.example
-!**/.env.*.example
-.local
+**/*.pem
+**/*.key
+**/secrets
+**/backups
 
-# Dependencies and generated local artifacts
-**/node_modules
+logs
+certs
+**/logs
+**/certs
+
 **/.next
-**/.turbo
-**/.venv
-**/__pycache__
-**/.pytest_cache
-**/.ruff_cache
 **/*.tsbuildinfo
-bin
-dist
-src/apps/web/dist
-src/apps/web/coverage
-coverage.out
+
+**/.agents

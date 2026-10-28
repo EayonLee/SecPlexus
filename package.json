@@ -7,9 +7,21 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "dev": "pnpm --filter @secplexus/web dev",
-    "build": "pnpm --filter @secplexus/web build",
-    "typecheck": "pnpm --filter @secplexus/web typecheck",
-    "lint": "pnpm --filter @secplexus/web lint"
+    "dev": "node scripts/start.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "pnpm --dir src/apps/web typecheck",
+    "lint": "pnpm --dir src/apps/web lint",
+    "preview": "node scripts/start.mjs preview",
+    "compose:up": "node scripts/compose.mjs",
+    "test:unit": "node --test scripts/*.test.mjs && go test ./src/... && pnpm --dir src/apps/web test:unit",
+    "test:integration": "node tests/integration/run.mjs",
+    "test:e2e": "pnpm --dir src/apps/web test:e2e",
+    "contracts:generate": "node scripts/generate-contracts.mjs",
+    "contracts:check": "node scripts/check-contracts.mjs",
+    "certs:generate": "node scripts/generate-certs.mjs"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
   }
 }

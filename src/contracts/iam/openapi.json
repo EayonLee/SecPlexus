@@ -1,0 +1,4566 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SecPlexus Identity and Access API",
+    "version": "1.0.0",
+    "description": "Cookie sessions, organization-scoped RBAC and private service authorization. Versions are decimal strings. No public self-registration."
+  },
+  "security": [
+    {
+      "sessionCookie": []
+    }
+  ],
+  "paths": {
+    "/api/v1/iam/auth/context": {
+      "get": {
+        "operationId": "getApiV1IamAuthContext",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICSRFContext"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/iam/auth/login": {
+      "post": {
+        "operationId": "postApiV1IamAuthLogin",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APILoginResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APILoginInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": []
+      }
+    },
+    "/api/v1/iam/auth/reauthenticate": {
+      "post": {
+        "operationId": "postApiV1IamAuthReauthenticate",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APILoginResponse"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIReauthenticateInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/auth/logout": {
+      "post": {
+        "operationId": "postApiV1IamAuthLogout",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/auth/logout-all": {
+      "post": {
+        "operationId": "postApiV1IamAuthLogoutAll",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/me": {
+      "get": {
+        "operationId": "getApiV1IamMe",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIMe"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/me/password": {
+      "post": {
+        "operationId": "postApiV1IamMePassword",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIChangePasswordInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/me/sessions": {
+      "get": {
+        "operationId": "getApiV1IamMeSessions",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "items"
+                          ],
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APISession"
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/me/sessions/{id}": {
+      "delete": {
+        "operationId": "deleteApiV1IamMeSessionsId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/users": {
+      "get": {
+        "operationId": "getApiV1IamUsers",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIUser"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Username prefix or display-name substring"
+          }
+        ],
+        "x-spx-action": "iam.platform.users.read"
+      },
+      "post": {
+        "operationId": "postApiV1IamUsers",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICreated"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIUserInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.users.manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/users/{id}": {
+      "patch": {
+        "operationId": "patchApiV1IamUsersId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIUserUpdate"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.users.manage"
+      },
+      "get": {
+        "operationId": "getApiV1IamUsersId",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIUser"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.platform.users.read"
+      }
+    },
+    "/api/v1/iam/organizations": {
+      "get": {
+        "operationId": "getApiV1IamOrganizations",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIOrganization"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": "iam.platform.organizations.read"
+      },
+      "post": {
+        "operationId": "postApiV1IamOrganizations",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICreated"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIOrganizationInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.organizations.manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/iam/organizations/{id}": {
+      "patch": {
+        "operationId": "patchApiV1IamOrganizationsId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIOrganizationUpdate"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.organizations.manage"
+      }
+    },
+    "/api/v1/iam/users/{id}/reset-password": {
+      "post": {
+        "operationId": "postApiV1IamUsersIdResetPassword",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIResetPasswordInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.users.manage"
+      }
+    },
+    "/api/v1/iam/users/{id}/super-admin": {
+      "put": {
+        "operationId": "putApiV1IamUsersIdSuperAdmin",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APISetSuperAdminInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.platform.super_admins.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}": {
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgId",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIOrganization"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.organizations.read"
+      },
+      "patch": {
+        "operationId": "patchApiV1IamOrgsOrgId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIOrganizationUpdate"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.organizations.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/members": {
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgIdMembers",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIMember"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": "iam.members.read"
+      },
+      "post": {
+        "operationId": "postApiV1IamOrgsOrgIdMembers",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICreated"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIMemberInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.members.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/members/{id}": {
+      "patch": {
+        "operationId": "patchApiV1IamOrgsOrgIdMembersId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIMemberUpdate"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.members.manage"
+      },
+      "delete": {
+        "operationId": "deleteApiV1IamOrgsOrgIdMembersId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authz_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.members.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/roles": {
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgIdRoles",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIRole"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": "iam.roles.read"
+      },
+      "post": {
+        "operationId": "postApiV1IamOrgsOrgIdRoles",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICreated"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIRoleInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.roles.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/roles/{id}": {
+      "patch": {
+        "operationId": "patchApiV1IamOrgsOrgIdRolesId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIRoleInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.roles.manage"
+      },
+      "delete": {
+        "operationId": "deleteApiV1IamOrgsOrgIdRolesId",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.roles.manage"
+      },
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgIdRolesId",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIRole"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.roles.read"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/roles/{id}/members": {
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgIdRolesIdMembers",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIMember"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": [
+          "iam.roles.read",
+          "iam.members.read"
+        ]
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/roles/{id}/permissions": {
+      "put": {
+        "operationId": "putApiV1IamOrgsOrgIdRolesIdPermissions",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIGrantsInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.roles.manage"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/members/{id}/roles": {
+      "put": {
+        "operationId": "putApiV1IamOrgsOrgIdMembersIdRoles",
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIMemberRolesInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": "iam.roles.assign"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/permission-preview": {
+      "post": {
+        "operationId": "postApiV1IamOrgsOrgIdPermissionPreview",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIPreview"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIPreviewInput"
+              }
+            }
+          }
+        },
+        "x-spx-action": [
+          "iam.roles.read",
+          "iam.members.read"
+        ]
+      }
+    },
+    "/api/v1/iam/permissions": {
+      "get": {
+        "operationId": "getApiV1IamPermissions",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "items"
+                          ],
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIPermissionItem"
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.roles.read"
+      }
+    },
+    "/api/v1/iam/orgs/{org_id}/audit-events": {
+      "get": {
+        "operationId": "getApiV1IamOrgsOrgIdAuditEvents",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIAuditEvent"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": "iam.audit.read"
+      }
+    },
+    "/api/v1/iam/audit-events": {
+      "get": {
+        "operationId": "getApiV1IamAuditEvents",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/APIAuditEvent"
+                              },
+                              "x-go-name": "Items"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "x-go-name": "Total"
+                            },
+                            "limit": {
+                              "type": "integer",
+                              "x-go-name": "Limit"
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "x-go-name": "Offset"
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "total",
+                            "limit",
+                            "offset"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "default": 0
+            }
+          }
+        ],
+        "x-spx-action": "iam.platform.audit.read"
+      }
+    },
+    "/api/v1/iam/security/overview": {
+      "get": {
+        "operationId": "getApiV1IamSecurityOverview",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APISecurityOverview"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-spx-action": "iam.platform.security.read"
+      }
+    },
+    "/internal/v1/iam/authorize": {
+      "post": {
+        "operationId": "postInternalV1IamAuthorize",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICapabilityDecision"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIAuthorizeRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": []
+          }
+        ],
+        "description": "Private TLS endpoint. Service credential authorizes the caller; original browser cookie and CSRF still identify the user."
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "spx_session",
+        "description": "HTTPS deployments use __Host-spx_session instead."
+      },
+      "serviceCredential": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "APIPrincipal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "session_id": {
+            "type": "string",
+            "x-go-name": "SessionID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "x-go-name": "IsSuperAdmin"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "AuthenticatedAt"
+          },
+          "reauthenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "ReauthenticatedAt"
+          }
+        },
+        "required": [
+          "user_id",
+          "session_id",
+          "username",
+          "display_name",
+          "is_super_admin",
+          "auth_version",
+          "authenticated_at"
+        ]
+      },
+      "APIResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "x-go-name": "Type"
+          },
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "APIAuthorizedScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "x-go-name": "Kind"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "APIAuthorizeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cookie": {
+            "type": "string",
+            "x-go-name": "Cookie"
+          },
+          "method": {
+            "type": "string",
+            "x-go-name": "Method"
+          },
+          "path": {
+            "type": "string",
+            "x-go-name": "Path"
+          },
+          "origin": {
+            "type": "string",
+            "x-go-name": "Origin"
+          },
+          "csrf_token": {
+            "type": "string",
+            "x-go-name": "CSRFToken"
+          },
+          "action": {
+            "type": "string",
+            "x-go-name": "Action"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/APIResource",
+            "x-go-name": "Resource"
+          }
+        },
+        "required": [
+          "cookie",
+          "method",
+          "path",
+          "origin",
+          "csrf_token",
+          "action"
+        ]
+      },
+      "APICapabilityDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "x-go-name": "Allowed"
+          },
+          "decision_id": {
+            "type": "string",
+            "x-go-name": "DecisionID"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/APIAuthorizedScope",
+            "x-go-name": "Scope"
+          }
+        },
+        "required": [
+          "allowed",
+          "decision_id",
+          "principal",
+          "scope"
+        ]
+      },
+      "APIError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/APIResult"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "data": {
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "APIUserInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "username",
+          "display_name",
+          "password"
+        ]
+      },
+      "APIUserUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          }
+        },
+        "required": [
+          "display_name",
+          "status",
+          "auth_version"
+        ]
+      },
+      "APIOrganizationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "x-go-name": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "admin_user_id": {
+            "type": "string",
+            "x-go-name": "AdminUserID"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "admin_user_id"
+        ]
+      },
+      "APIOrganizationUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "name",
+          "authz_version"
+        ]
+      },
+      "APIRoleInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Code"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "description": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Description"
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Version"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "APIGrantsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,string"
+            },
+            "x-go-name": "Version"
+          }
+        },
+        "required": [
+          "permissions",
+          "version"
+        ]
+      },
+      "APIMemberRolesInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "role_ids",
+          "authz_version"
+        ]
+      },
+      "APIMemberUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "authz_version"
+        ]
+      },
+      "APIMemberInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "UserID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "DisplayName"
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Password"
+          }
+        },
+        "required": []
+      },
+      "APIPreviewInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "RoleID"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Version"
+          },
+          "membership_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "MembershipID"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": []
+      },
+      "APILoginInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "APIChangePasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "old_password": {
+            "type": "string",
+            "x-go-name": "OldPassword"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "NewPassword"
+          }
+        },
+        "required": [
+          "old_password",
+          "new_password"
+        ]
+      },
+      "APIReauthenticateInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string",
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "password"
+        ]
+      },
+      "APIResetPasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "password"
+        ]
+      },
+      "APISetSuperAdminInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "x-go-name": "Enabled"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "x-go-name": "Reason"
+          }
+        },
+        "required": [
+          "enabled",
+          "reason"
+        ]
+      },
+      "APIOrganization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "slug": {
+            "type": "string",
+            "x-go-name": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "authz_version"
+        ]
+      },
+      "APIMe": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/APIOrganization"
+            },
+            "x-go-name": "Organizations"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Capabilities"
+          },
+          "platform_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "PlatformCapabilities"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          }
+        },
+        "required": [
+          "principal",
+          "organizations",
+          "capabilities",
+          "platform_capabilities"
+        ]
+      },
+      "APIRole": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "code": {
+            "type": "string",
+            "x-go-name": "Code"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "description": {
+            "type": "string",
+            "x-go-name": "Description"
+          },
+          "kind": {
+            "type": "string",
+            "x-go-name": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,string"
+            },
+            "x-go-name": "Version"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int64",
+            "x-go-name": "MemberCount"
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "AllowedActions"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "kind",
+          "status",
+          "version",
+          "permissions",
+          "member_count",
+          "allowed_actions"
+        ]
+      },
+      "APIUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "Email"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "x-go-name": "IsSuperAdmin"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "email",
+          "status",
+          "is_super_admin",
+          "auth_version"
+        ]
+      },
+      "APIMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "username",
+          "display_name",
+          "status"
+        ]
+      },
+      "APIAuditEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "occurred_at",
+          "action",
+          "outcome",
+          "request_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "actor_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "actor_type": {
+            "type": "string",
+            "nullable": false
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "target_type": {
+            "type": "string",
+            "nullable": false
+          },
+          "target_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "APISession": {
+        "type": "object",
+        "required": [
+          "id",
+          "current",
+          "last_seen_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authenticated_at": {
+            "type": "string"
+          },
+          "idle_expires_at": {
+            "type": "string"
+          },
+          "absolute_expires_at": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          },
+          "client_ip": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "APIPermission": {
+        "type": "object",
+        "required": [
+          "key",
+          "scope",
+          "status",
+          "module",
+          "resource_type",
+          "action",
+          "description",
+          "risk_level",
+          "delegable",
+          "requires_recent_auth"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "delegable": {
+            "type": "boolean"
+          },
+          "requires_recent_auth": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "APIPermissionItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permission": {
+            "$ref": "#/components/schemas/APIPermission",
+            "x-go-name": "Permission"
+          },
+          "can_delegate": {
+            "type": "boolean",
+            "x-go-name": "CanDelegate"
+          }
+        },
+        "required": [
+          "permission",
+          "can_delegate"
+        ]
+      },
+      "APIPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Before"
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "After"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Added"
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Removed"
+          },
+          "affected_members": {
+            "type": "integer",
+            "format": "int64",
+            "x-go-name": "AffectedMembers"
+          }
+        },
+        "required": [
+          "before",
+          "after",
+          "added",
+          "removed",
+          "affected_members"
+        ]
+      },
+      "APISecurityOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_idle_timeout": {
+            "type": "string",
+            "x-go-name": "SessionIdleTimeout"
+          },
+          "session_absolute_timeout": {
+            "type": "string",
+            "x-go-name": "SessionAbsoluteTimeout"
+          },
+          "reauth_window": {
+            "type": "string",
+            "x-go-name": "ReauthWindow"
+          },
+          "login_max_failures": {
+            "type": "integer",
+            "x-go-name": "LoginMaxFailures"
+          },
+          "login_lock_duration": {
+            "type": "string",
+            "x-go-name": "LoginLockDuration"
+          },
+          "self_registration": {
+            "type": "boolean",
+            "x-go-name": "SelfRegistration"
+          }
+        },
+        "required": [
+          "session_idle_timeout",
+          "session_absolute_timeout",
+          "reauth_window",
+          "login_max_failures",
+          "login_lock_duration",
+          "self_registration"
+        ]
+      },
+      "APICreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "APILoginResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          }
+        },
+        "required": [
+          "principal"
+        ]
+      },
+      "APICSRFContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "x-go-name": "CSRFToken"
+          }
+        },
+        "required": [
+          "csrf_token"
+        ]
+      },
+      "APIResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "nullable": true
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "x-go-name": "RequestID"
+          }
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthenticated",
+          "permission_denied",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "internal_error",
+          "service_unavailable",
+          "payload_too_large",
+          "unsupported_media_type",
+          "method_not_allowed",
+          "iam.invalid_credentials",
+          "iam.invalid_current_password",
+          "iam.csrf_invalid",
+          "iam.origin_invalid",
+          "iam.recent_auth_required"
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Permission or CSRF denied",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Version conflict or protected resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Dependency unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Request body too large",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Unsupported request media type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      }
+    }
+  }
+}

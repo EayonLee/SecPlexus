@@ -1,0 +1,121 @@
+[
+  {
+    "name": "OK",
+    "code": "ok",
+    "status": 200,
+    "message": "成功",
+    "module": "common"
+  },
+  {
+    "name": "InvalidRequest",
+    "code": "invalid_request",
+    "status": 400,
+    "message": "请求参数不符合要求",
+    "module": "common"
+  },
+  {
+    "name": "Unauthenticated",
+    "code": "unauthenticated",
+    "status": 401,
+    "message": "请重新登录",
+    "module": "common"
+  },
+  {
+    "name": "PermissionDenied",
+    "code": "permission_denied",
+    "status": 403,
+    "message": "没有执行此操作的权限",
+    "module": "common"
+  },
+  {
+    "name": "NotFound",
+    "code": "not_found",
+    "status": 404,
+    "message": "资源不存在",
+    "module": "common"
+  },
+  {
+    "name": "Conflict",
+    "code": "conflict",
+    "status": 409,
+    "message": "数据已变化或仍被使用，请刷新后重试",
+    "module": "common"
+  },
+  {
+    "name": "RateLimited",
+    "code": "rate_limited",
+    "status": 429,
+    "message": "操作过于频繁，请稍后重试",
+    "module": "common"
+  },
+  {
+    "name": "InternalError",
+    "code": "internal_error",
+    "status": 500,
+    "message": "服务处理失败，请稍后重试",
+    "module": "common"
+  },
+  {
+    "name": "ServiceUnavailable",
+    "code": "service_unavailable",
+    "status": 503,
+    "message": "服务暂时不可用，请稍后重试",
+    "module": "common"
+  },
+  {
+    "name": "PayloadTooLarge",
+    "code": "payload_too_large",
+    "status": 413,
+    "message": "请求内容超过大小限制",
+    "module": "common"
+  },
+  {
+    "name": "UnsupportedMediaType",
+    "code": "unsupported_media_type",
+    "status": 415,
+    "message": "请求内容类型不受支持",
+    "module": "common"
+  },
+  {
+    "name": "MethodNotAllowed",
+    "code": "method_not_allowed",
+    "status": 405,
+    "message": "请求方法不受支持",
+    "module": "common"
+  },
+  {
+    "name": "InvalidCredentials",
+    "code": "iam.invalid_credentials",
+    "status": 401,
+    "message": "用户名或密码错误",
+    "module": "iam"
+  },
+  {
+    "name": "InvalidCurrentPassword",
+    "code": "iam.invalid_current_password",
+    "status": 400,
+    "message": "当前密码不正确",
+    "module": "iam"
+  },
+  {
+    "name": "CSRFInvalid",
+    "code": "iam.csrf_invalid",
+    "status": 403,
+    "message": "安全凭据已更新，请重试",
+    "module": "iam"
+  },
+  {
+    "name": "OriginInvalid",
+    "code": "iam.origin_invalid",
+    "status": 403,
+    "message": "请求来源不被允许",
+    "module": "iam"
+  },
+  {
+    "name": "RecentAuthRequired",
+    "code": "iam.recent_auth_required",
+    "status": 403,
+    "message": "请先确认密码",
+    "module": "iam"
+  }
+]

@@ -1,0 +1,302 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SecPlexus Console API",
+    "version": "1.0.0",
+    "description": "Cookie sessions, organization-scoped RBAC and private service authorization. Versions are decimal strings. No public self-registration."
+  },
+  "security": [
+    {
+      "sessionCookie": []
+    }
+  ],
+  "paths": {
+    "/api/v1/console/orgs/{org_id}/context": {
+      "get": {
+        "operationId": "getApiV1ConsoleOrgsOrgIdContext",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/APIResult"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APIConsoleContext"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.organizations.read"
+      }
+    },
+    "/api/v1/console/orgs/{org_id}/events": {
+      "get": {
+        "operationId": "getApiV1ConsoleOrgsOrgIdEvents",
+        "responses": {
+          "200": {
+            "description": "SSE, authorization rechecked every 30 seconds",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-spx-action": "iam.organizations.read"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "spx_session",
+        "description": "HTTPS deployments use __Host-spx_session instead."
+      }
+    },
+    "schemas": {
+      "APIError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/APIResult"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "data": {
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "APIConsoleContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "org_id": {
+            "type": "string",
+            "x-go-name": "OrgID"
+          },
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "decision_id": {
+            "type": "string",
+            "x-go-name": "DecisionID"
+          }
+        },
+        "required": [
+          "org_id",
+          "user_id",
+          "decision_id"
+        ]
+      },
+      "APIResult": {
+        "$ref": "../common/openapi.json#/components/schemas/Result"
+      },
+      "ErrorCode": {
+        "type": "string",
+        "x-spx-error-codes": true
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Permission or CSRF denied",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Version conflict or protected resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Dependency unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Request body too large",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Unsupported request media type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      }
+    }
+  }
+}

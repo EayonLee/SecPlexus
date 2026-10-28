@@ -14,10 +14,10 @@ Desktop.ini
 .env.*
 !.env.example
 !.env.*.example
-/.local/
-/logs/
+logs/
 /tmp/
 /secrets/
+certs/
 /backups/
 *.pid
 *.pid.lock
@@ -97,3 +97,10 @@ htmlcov/
 
 # Project instructions and GitHub configuration belong in the repository.
 # Do not ignore .agents/ or .github/.
+
+# Next.js module output and local framework state
+/src/apps/web/out/
+/src/apps/web/build/
+/src/apps/web/.swc/
+/src/apps/web/.vercel/
+/src/apps/web/next-env.d.ts
