@@ -4,6 +4,19 @@ AI 原生安全运营平台。
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+<div align="center">
+  <img src="https://img.shields.io/badge/Go-1.27.3-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.27.3" />
+  <img src="https://img.shields.io/badge/chi-5.5.0-00ADD8" alt="chi 5.5.0" />
+  <img src="https://img.shields.io/badge/Next.js-16.4.3-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 16.4.3" />
+  <img src="https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&amp;logoColor=black" alt="React 19.3.1" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&amp;logoColor=white" alt="TypeScript 5.9.3" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4.3.3-06B6D4?logo=tailwindcss&amp;logoColor=white" alt="Tailwind CSS 4.3.3" />
+  <img src="https://img.shields.io/badge/GORM-1.31.2-EF4444" alt="GORM 1.31.2" />
+  <a href="https://github.com/EayonLee/SecPlexus/stargazers">
+    <img src="https://img.shields.io/github/stars/EayonLee/SecPlexus?style=flat&amp;logo=github" alt="SecPlexus GitHub 星标数" />
+  </a>
+</div>
+
 ## 本地开发
 
 准备Go 1.27.3、Node.js 22.12+（建议24）和pnpm 10.32.1。
@@ -52,6 +65,16 @@ docs/           项目文档
 ## 参与贡献
 
 开发环境、架构边界、测试要求与 PR 流程见[贡献指南](CONTRIBUTING.zh-CN.md)。
+
+## 贡献者
+
+感谢每一位为 SecPlexus 做出贡献的开发者。
+
+<p align="center">
+  <a href="https://github.com/EayonLee/SecPlexus/graphs/contributors">
+    <img src="https://openomy.app/svg?repo=EayonLee/SecPlexus&amp;chart=bubble" alt="SecPlexus 社区贡献统计" width="100%" />
+  </a>
+</p>
 
 ## 鸣谢
 
