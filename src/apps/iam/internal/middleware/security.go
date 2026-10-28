@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/url"
 	"slices"
@@ -78,16 +79,14 @@ func NewSecurity(cfg config.Config) (*Security, error) {
 			result.Fail(w, common.CodeCSRFInvalid)
 		})),
 	)
-	ids := map[string]bool{}
-	for _, client := range cfg.Internal.Clients {
-		if client.ID == "" || ids[client.ID] || len(client.Token) < 32 || len(client.Token) > 512 || len(client.Actions) == 0 {
+	for id, client := range cfg.Internal.Clients {
+		if id == "" || len(client.Token) < 32 || len(client.Token) > 512 || len(client.Actions) == 0 {
 			return nil, errors.New("internal clients require a unique ID, 32–512 byte token and allowed actions")
 		}
 
-		ids[client.ID] = true
 		digest := sha256.Sum256([]byte(client.Token))
 		security.clients = append(security.clients, InternalClient{
-			ID:        client.ID,
+			ID:        id,
 			TokenHash: hex.EncodeToString(digest[:]),
 			Actions:   client.Actions,
 		})
@@ -173,4 +172,19 @@ func (s *Security) ClearCSRF(w http.ResponseWriter) {
 // safeMethod 判断不应产生业务写入的 HTTP 方法。
 func safeMethod(method string) bool {
 	return method == "GET" || method == "HEAD" || method == "OPTIONS"
+}
+
+// GinProtect 只适配成熟 CSRF 组件，业务处理保持原生 Gin 调用链。
+func (s *Security) GinProtect() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		invoked := false
+		s.Protect(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			invoked = true
+			c.Request = r
+			c.Next()
+		})).ServeHTTP(c.Writer, c.Request)
+		if !invoked {
+			c.Abort()
+		}
+	}
 }

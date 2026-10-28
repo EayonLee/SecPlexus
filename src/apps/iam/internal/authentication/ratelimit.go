@@ -6,43 +6,63 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/ulule/limiter/v3"
+	redisstore "github.com/ulule/limiter/v3/drivers/store/redis"
 
 	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 var ErrUnavailable = errors.New("authentication dependency unavailable")
-
 var ErrRateLimited = errors.New("too many authentication attempts")
-var countAttempt = redis.NewScript(`local count=redis.call('INCR',KEYS[1]);if count==1 then redis.call('PEXPIRE',KEYS[1],ARGV[1]) end;return count`)
 
-// Limiter 使用 Redis 限制登录尝试。
-type Limiter struct {
-	Client *redis.Client
+// Limiter 使用成熟的原子 Redis 存储，来源与账号分别计数。
+type Limiter struct{ ip, account *limiter.Limiter }
+
+// NewLimiter 在启动时加载组件脚本；存储不可用时启动失败。
+func NewLimiter(client *redis.Client) (*Limiter, error) {
+	store, err := redisstore.NewStoreWithOptions(client, limiter.StoreOptions{Prefix: cachekey.Prefix})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return &Limiter{ip: limiter.New(store, limiter.Rate{Period: time.Minute, Limit: 60}), account: limiter.New(store, limiter.Rate{Period: 15 * time.Minute, Limit: 20})}, nil
 }
 
-// Check 使用 Redis 按客户端地址和账号限制登录；Redis 不可用时拒绝请求。
+// CheckIP 在读取凭据前限制来源，包括无效请求。
+func (l *Limiter) CheckIP(ctx context.Context, ip string) error {
+	return check(ctx, l.ip, cachekey.IAMLoginIP, ip)
+}
+
+// CheckAccount 限制已经规范化的账号，不把账号明文写入 Redis。
+func (l *Limiter) CheckAccount(ctx context.Context, account string) error {
+	return check(ctx, l.account, cachekey.IAMLoginAccount, account)
+}
+
+// Check 用于同时需要来源与账号桶的密码变更请求。
 func (l *Limiter) Check(ctx context.Context, ip, account string) error {
-	for _, rule := range []struct {
-		template      cachekey.Template
-		value         string
-		limit, window int64
-	}{{cachekey.IAMLoginIP, ip, 60, 60000}, {cachekey.IAMLoginAccount, account, 20, 900000}} {
-		hash := sha256.Sum256([]byte(rule.value))
-		key := rule.template.Format(hex.EncodeToString(hash[:]))
-		count, err := countAttempt.Run(ctx, l.Client, []string{key}, rule.window).Int64()
-		if err != nil {
-			logging.From(ctx).Error("登录限流存储不可用", "event", "cache.failed", "operation", "iam.login.limit", "bucket", string(rule.template), "error", logging.Error(err))
-			return fmt.Errorf("%w: %w", ErrUnavailable, err)
-		}
-
-		if count > rule.limit {
-			logging.From(ctx).Warn("登录频率超过限制", "event", "auth.rate_limited", "bucket", string(rule.template), "limit", rule.limit, "window_ms", rule.window)
-			return ErrRateLimited
-		}
+	if err := l.CheckIP(ctx, ip); err != nil {
+		return err
 	}
+	return l.CheckAccount(ctx, account)
+}
 
+func check(ctx context.Context, counter *limiter.Limiter, template cachekey.Template, value string) error {
+	hash := sha256.Sum256([]byte(value))
+	state, err := counter.Get(ctx, template.ComponentKey(hex.EncodeToString(hash[:])))
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	if state.Reached {
+		return &RateLimitError{RetryAfter: max(1, state.Reset-time.Now().Unix())}
+	}
 	return nil
 }
+
+// RateLimitError 返回当前固定窗口还需等待的秒数。
+type RateLimitError struct{ RetryAfter int64 }
+
+func (e *RateLimitError) Error() string { return ErrRateLimited.Error() }
+
+func (e *RateLimitError) Unwrap() error { return ErrRateLimited }

@@ -1,6 +1,8 @@
 "use client";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 
+import { type QueryKey, useQuery } from "@tanstack/react-query";
+import { type ColumnDef, useTable } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -8,53 +10,68 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 
-import { api, errorMessageKey, useIdentity } from "../iam/session";
+import { errorMessageKey, useIdentity } from "../iam/session";
 
 export interface PageData<T> {
   items: T[];
   total: number;
 }
-export function useList<T>(url: string) {
+/** usePagedQuery 仅组合受控页码和身份作用域；服务端状态完全交给 Query。 */
+export function usePagedQuery<T>(
+  key: QueryKey,
+  fetchPage: (pagination: { limit: number; offset: number }, signal: AbortSignal) => Promise<PageData<T>>,
+) {
   const auth = useIdentity();
   const version = auth.organizations.find((org) => org.id === auth.org_id)?.authz_version;
   const [page, setPage] = useState(1);
-  const [revision, setRevision] = useState(0);
-  const [data, setData] = useState<PageData<T>>({ items: [], total: 0 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ReturnType<typeof errorMessageKey> | "">("");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 授权版本和手动刷新都会使列表快照失效。
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    setData({ items: [], total: 0 });
-    const separator = url.includes("?") ? "&" : "?";
-    void api<PageData<T>>(`${url}${separator}limit=20&offset=${(page - 1) * 20}`, { signal: controller.signal })
-      .then((result) => {
-        if (!controller.signal.aborted) setData(result);
-      })
-      .catch((failure: unknown) => {
-        if (!controller.signal.aborted) setError(errorMessageKey(failure));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [url, page, version, revision]);
-  const reload = useCallback(() => setRevision((value) => value + 1), []);
-  return { ...data, loading, error, page, setPage, reload };
+  const query = useQuery({
+    queryKey: [...key, auth.principal?.session_id, auth.principal?.auth_version, auth.org_id, version, page],
+    enabled: auth.status === "authenticated",
+    queryFn: ({ signal }) => fetchPage({ limit: 20, offset: (page - 1) * 20 }, signal),
+  });
+  return {
+    items: query.data?.items ?? [],
+    total: query.data?.total ?? 0,
+    loading: query.isFetching,
+    error: query.error ? errorMessageKey(query.error) : ("" as const),
+    page,
+    setPage,
+    reload: () => {
+      void query.refetch();
+    },
+  };
 }
 export function DataTable<T extends { id: string }>({
   state,
   columns,
 }: {
-  state: ReturnType<typeof useList<T>>;
+  state: ReturnType<typeof usePagedQuery<T>>;
   columns: { title: string; cell: (row: T) => ReactNode }[];
 }) {
   const t = useTranslations("Common");
   const errors = useTranslations("Errors");
 
+  const tableColumns: ColumnDef<DataTableFeatures, T>[] = columns.map((column) => ({
+    id: column.title,
+    header: column.title,
+    cell: ({ row }) => column.cell(row.original),
+  }));
+  const table = useTable({
+    features: dataTableFeatures,
+    data: state.items,
+    columns: tableColumns,
+    getRowId: (row) => row.id,
+    manualPagination: true,
+    rowCount: state.total,
+    state: { pagination: { pageIndex: state.page - 1, pageSize: 20 } },
+    onPaginationChange: (updater) => {
+      const current = { pageIndex: state.page - 1, pageSize: 20 };
+      const next = typeof updater === "function" ? updater(current) : updater;
+      state.setPage(next.pageIndex + 1);
+    },
+  });
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {state.error && <p role="alert">{errors(state.error)}</p>}
@@ -75,10 +92,10 @@ export function DataTable<T extends { id: string }>({
                 </TableCell>
               </TableRow>
             ) : state.items.length ? (
-              state.items.map((row) => (
+              table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
                   {columns.map((column) => (
-                    <TableCell key={column.title}>{column.cell(row)}</TableCell>
+                    <TableCell key={column.title}>{column.cell(row.original)}</TableCell>
                   ))}
                 </TableRow>
               ))
@@ -100,17 +117,13 @@ export function DataTable<T extends { id: string }>({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-sm">{t("pagination", { total: state.total, page: state.page })}</p>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            disabled={state.page <= 1 || state.loading}
-            onClick={() => state.setPage(state.page - 1)}
-          >
+          <Button variant="outline" disabled={state.page <= 1 || state.loading} onClick={() => table.previousPage()}>
             {t("previousPage")}
           </Button>
           <Button
             variant="outline"
             disabled={state.page * 20 >= state.total || state.loading}
-            onClick={() => state.setPage(state.page + 1)}
+            onClick={() => table.nextPage()}
           >
             {t("nextPage")}
           </Button>

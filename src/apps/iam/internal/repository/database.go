@@ -11,11 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
-	"github.com/pressly/goose/v3/database"
-	"github.com/pressly/goose/v3/lock"
-
-	"github.com/EayonLee/SecPlexus/src/apps/iam/migrations"
 )
 
 // Migrate 使用配置的数据库账号执行版本化迁移，普通服务启动不自动改表。
@@ -41,19 +36,9 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 	defer pool.Close()
 
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() { err = errors.Join(err, db.Close()) }()
 
-	locker, err := lock.NewPostgresSessionLocker()
-	if err != nil {
-		return err
-	}
-
-	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
-	if err != nil {
-		return err
-	}
-
-	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore), goose.WithSessionLocker(locker))
+	provider, err := migrationProvider(db)
 	if err != nil {
 		return err
 	}

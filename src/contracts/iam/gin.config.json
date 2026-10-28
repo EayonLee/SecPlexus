@@ -1,0 +1,12 @@
+{
+  "package": "router",
+  "generate": {
+    "gin-server": true,
+    "models": true
+  },
+  "import-mapping": {
+    "schemas.source.json": "github.com/EayonLee/SecPlexus/src/contracts/iam"
+  },
+  "output": "src/apps/iam/internal/router/api.gen.go",
+  "allow-remote-refs-from": []
+}

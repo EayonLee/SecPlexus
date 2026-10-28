@@ -1,8 +1,8 @@
 import type { PermissionKey } from "@/auth/permissions.gen";
 import { permissions } from "@/auth/permissions.gen";
+import type { ApiMe } from "@/spx/api/iam/types.gen";
 
 import type messages from "../../../messages/en.json";
-import type { Identity } from "./types";
 
 export function organizationFromPath(pathname: string, search = ""): string | undefined {
   return pathname.match(/^\/management\/orgs\/([^/]+)/)?.[1] || new URLSearchParams(search).get("org_id") || undefined;
@@ -81,7 +81,7 @@ export const managementPages: ManagementPage[] = [
     path: () => "/management/system/security",
   },
 ];
-export function visibleManagementPages(identity: Pick<Identity, "org_id" | "capabilities" | "platform_capabilities">) {
+export function visibleManagementPages(identity: Pick<ApiMe, "org_id" | "capabilities" | "platform_capabilities">) {
   return managementPages.filter((page) =>
     page.scope === "platform"
       ? identity.platform_capabilities.includes(page.action)

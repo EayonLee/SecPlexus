@@ -92,3 +92,10 @@ test('root file paths become absolute without rewriting private configuration', 
 test('web derives public metadata from the browser origin without forwarding server configuration', () => {
   assert.deepEqual(webEnvironment({ SPX_PUBLIC_URL: 'http://127.0.0.1:5173', SPX_CONSOLE_IAM_TOKEN: 'server-only' }), { NEXT_PUBLIC_APP_URL: 'http://127.0.0.1:5173' });
 });
+
+test('module connection overrides reach IAM only and stay outside Web and Console', () => {
+  const environment = {SPX_IAM_POSTGRES_HOST:'isolated-db',SPX_IAM_POSTGRES_PASSWORD:'test-only',SPX_IAM_REDIS_URL:'isolated-cache',SPX_POSTGRES_HOST:'shared-db',SPX_WEB_PORT:'5173'};
+  assert.deepEqual(moduleEnvironment(environment,'iam'),{SPX_IAM_POSTGRES_HOST:'isolated-db',SPX_IAM_POSTGRES_PASSWORD:'test-only',SPX_IAM_REDIS_URL:'isolated-cache',SPX_POSTGRES_HOST:'shared-db'});
+  assert.deepEqual(moduleEnvironment(environment,'console'),{});
+  assert.deepEqual(webEnvironment(environment),{SPX_WEB_PORT:'5173'});
+});

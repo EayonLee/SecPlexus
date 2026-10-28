@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
@@ -17,7 +20,7 @@ import (
 )
 
 // Serve 初始化 IAM 运行依赖，并负责 HTTP 服务的启动与关闭。
-func Serve(ctx context.Context, cfg config.Config) error {
+func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	if len(cfg.Internal.Clients) == 0 || cfg.Internal.TLSCertFile == "" || cfg.Internal.TLSKeyFile == "" {
 		return errors.New("internal client configuration and TLS certificate/key are required")
 	}
@@ -37,7 +40,7 @@ func Serve(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
-	defer store.Close()
+	defer func() { outcome = errors.Join(outcome, store.Close()) }()
 
 	if err = store.VerifySchema(startup); err != nil {
 		return err
@@ -48,7 +51,7 @@ func Serve(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
-	defer client.Close()
+	defer func() { outcome = errors.Join(outcome, client.Close()) }()
 
 	sessions := authentication.NewSessions(store, cfg)
 	security, err := iammiddleware.NewSecurity(cfg)
@@ -56,11 +59,15 @@ func Serve(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
+	limiter, err := authentication.NewLimiter(client)
+	if err != nil {
+		return err
+	}
 	server, err := handler.New(&service.Service{
 		Store:    store,
 		Sessions: sessions,
 		Config:   cfg,
-	}, security, &authentication.Limiter{Client: client}, func(ctx context.Context) error {
+	}, security, limiter, func(ctx context.Context) error {
 		if err := pool.Ping(ctx); err != nil {
 			logging.From(ctx).Error("PostgreSQL 就绪检查失败", "event", "dependency.unready", "dependency", "postgres", "error", logging.Error(err))
 			return err
@@ -94,25 +101,37 @@ func Serve(ctx context.Context, cfg config.Config) error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
-	failures := make(chan error, 2)
-	go func() { failures <- public.ListenAndServe() }()
-	go func() { failures <- internal.ListenAndServeTLS(cfg.Internal.TLSCertFile, cfg.Internal.TLSKeyFile) }()
+	group, serving := errgroup.WithContext(ctx)
+	public.BaseContext = func(net.Listener) context.Context { return serving }
+	internal.BaseContext = func(net.Listener) context.Context { return serving }
+	group.Go(func() error {
+		err := public.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	})
+	group.Go(func() error {
+		err := internal.ListenAndServeTLS(cfg.Internal.TLSCertFile, cfg.Internal.TLSKeyFile)
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	})
+	group.Go(func() error {
+		<-serving.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := errors.Join(public.Shutdown(shutdown), internal.Shutdown(shutdown))
+		if err != nil {
+			err = errors.Join(err, public.Close(), internal.Close())
+		}
+		return err
+	})
 	slog.Info("HTTP 监听启动中", "event", "service.starting", "public_addr", cfg.App.Addr(), "internal_addr", cfg.Internal.Addr())
-	select {
-	case <-ctx.Done():
-	case err = <-failures:
-	}
-
-	slog.Info("正在关闭 HTTP 服务", "event", "service.stopping")
-	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelShutdown()
-
-	publicErr := public.Shutdown(shutdown)
-	internalErr := internal.Shutdown(shutdown)
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("HTTP 监听异常结束", "event", "service.listener_failed", "error", logging.Error(err))
+	if err := group.Wait(); err != nil {
+		logging.From(ctx).Error("HTTP 服务关闭失败", "event", "service.listener_failed", "error", logging.Error(err))
 		return errors.New("IAM HTTP listener failed")
 	}
-
-	return errors.Join(publicErr, internalErr)
+	return nil
 }

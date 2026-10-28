@@ -1,0 +1,451 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SecPlexus iam internal API",
+    "version": "1.0.0",
+    "description": "Cookie sessions, organization-scoped RBAC and private service authorization. Versions are decimal strings. No public self-registration."
+  },
+  "security": [
+    {
+      "sessionCookie": []
+    }
+  ],
+  "paths": {
+    "/internal/v1/iam/authorize": {
+      "post": {
+        "operationId": "authorizeInternal",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Result"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ok"
+                          ]
+                        },
+                        "data": {
+                          "$ref": "#/components/schemas/APICapabilityDecision"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "data"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIAuthorizeRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceCredential": []
+          }
+        ],
+        "description": "Private TLS endpoint. Service credential authorizes the caller; original browser cookie and CSRF still identify the user."
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "spx_session",
+        "description": "HTTPS deployments use __Host-spx_session instead."
+      },
+      "serviceCredential": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Permission or CSRF denied",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Version conflict or protected resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Dependency unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Internal failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Request body too large",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Unsupported request media type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "APIResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "x-go-name": "Type"
+          },
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "APIAuthorizeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cookie": {
+            "type": "string",
+            "x-go-name": "Cookie"
+          },
+          "method": {
+            "type": "string",
+            "x-go-name": "Method"
+          },
+          "path": {
+            "type": "string",
+            "x-go-name": "Path"
+          },
+          "origin": {
+            "type": "string",
+            "x-go-name": "Origin"
+          },
+          "csrf_token": {
+            "type": "string",
+            "x-go-name": "CSRFToken"
+          },
+          "action": {
+            "type": "string",
+            "x-go-name": "Action"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/APIResource",
+            "x-go-name": "Resource"
+          }
+        },
+        "required": [
+          "cookie",
+          "method",
+          "path",
+          "origin",
+          "csrf_token",
+          "action"
+        ]
+      },
+      "Result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "nullable": true
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "x-go-name": "RequestID"
+          }
+        }
+      },
+      "APIPrincipal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "session_id": {
+            "type": "string",
+            "x-go-name": "SessionID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "x-go-name": "IsSuperAdmin"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "AuthenticatedAt"
+          },
+          "reauthenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "ReauthenticatedAt"
+          }
+        },
+        "required": [
+          "user_id",
+          "session_id",
+          "username",
+          "display_name",
+          "is_super_admin",
+          "auth_version",
+          "authenticated_at"
+        ]
+      },
+      "APIAuthorizedScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "x-go-name": "Kind"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "APICapabilityDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "x-go-name": "Allowed"
+          },
+          "decision_id": {
+            "type": "string",
+            "x-go-name": "DecisionID"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/APIAuthorizedScope",
+            "x-go-name": "Scope"
+          }
+        },
+        "required": [
+          "allowed",
+          "decision_id",
+          "principal",
+          "scope"
+        ]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthenticated",
+          "permission_denied",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "internal_error",
+          "service_unavailable",
+          "payload_too_large",
+          "unsupported_media_type",
+          "method_not_allowed",
+          "iam.invalid_credentials",
+          "iam.invalid_current_password",
+          "iam.csrf_invalid",
+          "iam.origin_invalid",
+          "iam.recent_auth_required"
+        ]
+      },
+      "APIError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Result"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "data": {
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

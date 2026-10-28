@@ -86,7 +86,7 @@ func CheckDelegation(effective []string, existing, candidate []string, catalog [
 	}
 
 	for _, key := range candidate {
-		if !availableNew[key] && !(availableExisting[key] && slices.Contains(existing, key)) {
+		if !availableNew[key] && (!availableExisting[key] || !slices.Contains(existing, key)) {
 			return ErrDenied
 		}
 	}

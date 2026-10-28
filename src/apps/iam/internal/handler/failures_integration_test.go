@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 )
 
@@ -76,7 +77,7 @@ func TestAuthenticationLocksRecoverAndDependencyFailuresRemainUnavailable(t *tes
 	}
 
 	client.login(f.admin, f.initial)
-	if err := f.server.Limiter.Client.Close(); err != nil {
+	if err := f.redis.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,4 +86,39 @@ func TestAuthenticationLocksRecoverAndDependencyFailuresRemainUnavailable(t *tes
 	client.request("GET", "/api/v1/iam/me", nil, 200)
 	f.server.Service.Store.Pool.Close()
 	client.request("GET", "/api/v1/iam/me", nil, 503)
+}
+
+// TestPanicBeforeSessionCommitCompensatesLogicalSession 保护逻辑落库后、Cookie提交前的异常路径。
+func TestPanicBeforeSessionCommitCompensatesLogicalSession(t *testing.T) {
+	f := newFixture(t, nil)
+	client := newAPIClient(t, f.public.URL, f.public.URL)
+	client.context()
+	f.server.readyCheck = func(ctx context.Context) error {
+		principal, err := f.server.Auth.Login(ctx, authentication.Credentials{Username: f.admin, Password: f.initial}, authentication.RequestMetadata{RequestID: "panic-compensation", ClientIP: "127.0.0.1"})
+		if err != nil {
+			return err
+		}
+		authentication.CurrentAttempt(ctx).Principal = &principal
+		panic("private panic must not reach browser")
+	}
+	response, err := client.client.Get(f.public.URL + "/health/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != 500 {
+		t.Fatalf("panic returned %d", response.StatusCode)
+	}
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == f.server.Service.Sessions.Manager.Cookie.Name {
+			t.Fatal("uncommitted session cookie escaped")
+		}
+	}
+	var active int
+	if err := f.server.Service.Store.Pool.QueryRow(context.Background(), `SELECT count(*) FROM iam.user_sessions WHERE state='active'`).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatal("panic left an active logical session")
+	}
 }

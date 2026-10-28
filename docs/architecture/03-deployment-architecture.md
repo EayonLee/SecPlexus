@@ -37,7 +37,7 @@ flowchart LR
 
 模块可独立启动，显式`--config`选择自己的config.yaml；省略时读取工作目录下config.yaml。根.env只是统一入口加载的环境，不要求模块依赖根脚本。`make build`产出两个Go二进制及Next.js的`.next/`服务端与客户端产物。停止按工作区归属识别进程，不依赖某个dev标记文件。
 
-Go配置按app、实际依赖、业务策略与logging分组，文件中的环境占位声明覆盖及默认值。密码和凭证直接通过进程环境或部署Secret注入；只有TLS等实际文件材料保留文件形式。Web使用Next.js原生环境配置，NEXT_PUBLIC_*仅用于公开值。
+Go配置按app、实际依赖、业务策略与logging分组，YAML 使用普通字面值，Viper 显式绑定模块/共享环境并注册默认值，严格解码后校验；不使用环境占位方言。密码和凭证直接通过进程环境或部署Secret注入；只有TLS等实际文件材料保留文件形式。Web使用Next.js原生环境配置，NEXT_PUBLIC_*仅用于公开值。
 
 ## Compose
 

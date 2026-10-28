@@ -43,10 +43,7 @@ func (q *Queries) GetLoginUser(ctx context.Context, username string) (LoginUser,
 
 // LockUser 锁定用户行，所有身份写入均先取得用户锁。
 func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (LoginUser, error) {
-	var user LoginUser
-	err := q.db.WithContext(ctx).Table("iam.users").Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", id).Take(&user).Error
-	return user, err
+	return gorm.G[LoginUser](q.db, clause.Locking{Strength: "UPDATE"}).Table("iam.users").Where("id = ?", id).Take(ctx)
 }
 
 // Session 是数据库中可撤销的会话状态。
@@ -117,9 +114,7 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, input RevokeUserSessio
 
 // GetOrganization 读取组织状态与权限版本。
 func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (contract.APIOrganization, error) {
-	var organization contract.APIOrganization
-	err := q.db.WithContext(ctx).Table("iam.organizations").Select("id,slug,name,status,authz_version").Where("id = ?", id).Take(&organization).Error
-	return organization, err
+	return gorm.G[contract.APIOrganization](q.db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Where("id = ?", id).Take(ctx)
 }
 
 // GetOrganizationPermissionsParams 标识组织和用户范围。

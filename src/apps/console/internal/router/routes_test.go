@@ -2,20 +2,20 @@ package router
 
 import (
 	"encoding/json"
-	"net/http"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	contract "github.com/EayonLee/SecPlexus/src/contracts/console"
 )
 
 func TestRoutesMatchContract(t *testing.T) {
-	mux := chi.NewRouter()
-	Register(mux, Handlers{})
+	mux := gin.New()
+	Register(mux, nil, func(*gin.Context) {})
 	var document struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
@@ -31,15 +31,11 @@ func TestRoutesMatchContract(t *testing.T) {
 	}
 
 	actual := []string{}
-	err := chi.Walk(mux, func(method, path string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/internal/") {
-			actual = append(actual, method+" "+path)
+	for _, route := range mux.Routes() {
+		if strings.HasPrefix(route.Path, "/api/") {
+			path := regexp.MustCompile(`:([a-z_]+)`).ReplaceAllString(route.Path, "{$1}")
+			actual = append(actual, route.Method+" "+path)
 		}
-
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	sort.Strings(actual)

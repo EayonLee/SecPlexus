@@ -1,42 +1,52 @@
 package management
 
 import (
-	"net/http"
+	"github.com/gin-gonic/gin"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 
 	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// listOrganizationAuditEvents 读取当前组织的审计列表。
-func (s *Handler) listOrganizationAuditEvents(w http.ResponseWriter, r *http.Request) error {
-	return s.auditEvents(w, r, r.PathValue("org_id"), false)
+// ListOrganizationAuditEvents 读取当前组织的审计列表。
+func (s *Handler) ListOrganizationAuditEvents(c *gin.Context, orgId string, params router.ListOrganizationAuditEventsParams) {
+	limit, offset := pagination(params.Limit, params.Offset)
+	s.auditEvents(c, orgId, false, limit, offset)
 }
 
-// listAuditEvents 读取平台管理员可见的审计范围。
-func (s *Handler) listAuditEvents(w http.ResponseWriter, r *http.Request) error {
-	return s.auditEvents(w, r, r.URL.Query().Get("org_id"), true)
+// ListAuditEvents 读取平台管理员可见的审计范围。
+func (s *Handler) ListAuditEvents(c *gin.Context, params router.ListAuditEventsParams) {
+	orgID := ""
+	if params.OrgId != nil {
+		orgID = *params.OrgId
+	}
+	limit, offset := pagination(params.Limit, params.Offset)
+	s.auditEvents(c, orgID, true, limit, offset)
 }
 
 // auditEvents 绑定分页与范围参数，查询和授权由业务用例处理。
-func (s *Handler) auditEvents(w http.ResponseWriter, r *http.Request, orgID string, platform bool) error {
-	limit, offset, err := pagination(r)
-	if err != nil {
-		return err
-	}
+func (s *Handler) auditEvents(c *gin.Context, orgID string, platform bool, limit, offset int) {
+	w := c.Writer
+	r := c.Request
 
 	response, err := s.Service.ListAuditEvents(r.Context(), orgID, platform, limit, offset)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, response)
-	return nil
 }
 
-// securityOverview 返回可公开的认证策略摘要，不包含密钥。
-func (s *Handler) securityOverview(w http.ResponseWriter, r *http.Request) error {
+// SecurityOverview 返回可公开的认证策略摘要，不包含密钥。
+func (s *Handler) SecurityOverview(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
 	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformSecurityRead, ""); err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	cfg := s.Service.Config
@@ -48,5 +58,4 @@ func (s *Handler) securityOverview(w http.ResponseWriter, r *http.Request) error
 		"login_lock_duration":      cfg.Auth.LoginLockDuration.String(),
 		"self_registration":        false,
 	})
-	return nil
 }

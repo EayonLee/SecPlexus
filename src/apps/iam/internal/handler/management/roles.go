@@ -1,7 +1,10 @@
 package management
 
 import (
-	"net/http"
+	"github.com/gin-gonic/gin"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+
 	"strconv"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
@@ -11,141 +14,160 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// previewPermission 预览拟议权限变更，不实际授予权限。
-func (s *Handler) previewPermission(w http.ResponseWriter, r *http.Request) error {
+// PreviewPermission 预览拟议权限变更，不实际授予权限。
+func (s *Handler) PreviewPermission(c *gin.Context, orgId string, params router.PreviewPermissionParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.PreviewInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	response, err := s.Service.Preview(r.Context(), r.PathValue("org_id"), input)
+	response, err := s.Service.Preview(r.Context(), orgId, input)
 	if err != nil {
-		return err
-	}
-
-	result.Success(w, response)
-	return nil
-}
-
-// listRoleMembers 查询角色关联成员，组织与角色读取权限均由用例校验。
-func (s *Handler) listRoleMembers(w http.ResponseWriter, r *http.Request) error {
-	limit, offset, err := pagination(r)
-	if err != nil {
-		return err
-	}
-
-	response, err := s.Service.ListRoleMembers(r.Context(), limit, offset, r.PathValue("org_id"), r.PathValue("id"))
-	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, response)
-	return nil
 }
 
-// listRoles 读取角色及当前操作者允许执行的动作。
-func (s *Handler) listRoles(w http.ResponseWriter, r *http.Request) error {
-	limit, offset, err := pagination(r)
+// ListRoleMembers 查询角色关联成员，组织与角色读取权限均由用例校验。
+func (s *Handler) ListRoleMembers(c *gin.Context, orgId string, id string, params router.ListRoleMembersParams) {
+	w := c.Writer
+	r := c.Request
+	limit, offset := pagination(params.Limit, params.Offset)
+
+	response, err := s.Service.ListRoleMembers(r.Context(), limit, offset, orgId, id)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
-	items, total, err := s.Service.Roles(r.Context(), r.PathValue("org_id"), "", limit, offset)
+	result.Success(w, response)
+}
+
+// ListRoles 读取角色及当前操作者允许执行的动作。
+func (s *Handler) ListRoles(c *gin.Context, orgId string, params router.ListRolesParams) {
+	w := c.Writer
+	r := c.Request
+	limit, offset := pagination(params.Limit, params.Offset)
+
+	items, total, err := s.Service.Roles(r.Context(), orgId, "", limit, offset)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
-	return nil
 }
 
-// createRole 创建组织自定义角色。
-func (s *Handler) createRole(w http.ResponseWriter, r *http.Request) error {
+// CreateRole 创建组织自定义角色。
+func (s *Handler) CreateRole(c *gin.Context, orgId string, params router.CreateRoleParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.RoleInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	id, err := s.Service.CreateRole(r.Context(), r.PathValue("org_id"), input, middleware.RequestID(r))
+	id, err := s.Service.CreateRole(r.Context(), orgId, input, middleware.RequestID(r))
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Created(w, map[string]string{"id": id})
-	return nil
 }
 
-// getRole 读取当前组织内的指定角色。
-func (s *Handler) getRole(w http.ResponseWriter, r *http.Request) error {
-	items, _, err := s.Service.Roles(r.Context(), r.PathValue("org_id"), r.PathValue("id"), 1, 0)
+// GetRole 读取当前组织内的指定角色。
+func (s *Handler) GetRole(c *gin.Context, orgId string, id string) {
+	w := c.Writer
+	r := c.Request
+	items, _, err := s.Service.Roles(r.Context(), orgId, id, 1, 0)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	if len(items) == 0 {
-		return repository.ErrNotFound
+		httpx.Reject(c, repository.ErrNotFound)
+		return
 	}
 
 	result.Success(w, items[0])
-	return nil
 }
 
-// updateRole 按版本更新角色资料。
-func (s *Handler) updateRole(w http.ResponseWriter, r *http.Request) error {
+// UpdateRole 按版本更新角色资料。
+func (s *Handler) UpdateRole(c *gin.Context, orgId string, id string, params router.UpdateRoleParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.RoleInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.UpdateRole(r.Context(), r.PathValue("org_id"), r.PathValue("id"), input, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.UpdateRole(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// setRolePermissions 按版本替换角色权限并保留委派限制。
-func (s *Handler) setRolePermissions(w http.ResponseWriter, r *http.Request) error {
+// SetRolePermissions 按版本替换角色权限并保留委派限制。
+func (s *Handler) SetRolePermissions(c *gin.Context, orgId string, id string, params router.SetRolePermissionsParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.GrantsInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.ReplaceGrants(r.Context(), r.PathValue("org_id"), r.PathValue("id"), input, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.ReplaceGrants(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// deleteRole 按版本删除未被成员引用的自定义角色。
-func (s *Handler) deleteRole(w http.ResponseWriter, r *http.Request) error {
-	version, err := strconv.ParseInt(r.URL.Query().Get("version"), 10, 64)
+// DeleteRole 按版本删除未被成员引用的自定义角色。
+func (s *Handler) DeleteRole(c *gin.Context, orgId string, id string, params router.DeleteRoleParams) {
+	w := c.Writer
+	r := c.Request
+	version, err := strconv.ParseInt(params.Version, 10, 64)
 	if err != nil {
-		return repository.ErrInvalid
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err = s.Service.DeleteRole(r.Context(), r.PathValue("org_id"), r.PathValue("id"), version, middleware.RequestID(r)); err != nil {
-		return err
+	if err = s.Service.DeleteRole(r.Context(), orgId, id, version, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// setMemberRoles 替换成员角色关系，权限和版本检查由用例完成。
-func (s *Handler) setMemberRoles(w http.ResponseWriter, r *http.Request) error {
+// SetMemberRoles 替换成员角色关系，权限和版本检查由用例完成。
+func (s *Handler) SetMemberRoles(c *gin.Context, orgId string, id string, params router.SetMemberRolesParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.MemberRolesInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.ReplaceMemberRoles(r.Context(), r.PathValue("org_id"), r.PathValue("id"), input, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.ReplaceMemberRoles(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }

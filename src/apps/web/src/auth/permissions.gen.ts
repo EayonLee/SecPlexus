@@ -16,4 +16,4 @@ export const permissions = {
   IAMRolesAssign: "iam.roles.assign",
   IAMAuditRead: "iam.audit.read",
 } as const;
-export type PermissionKey = (typeof permissions)[keyof typeof permissions];
+export type PermissionKey = typeof permissions[keyof typeof permissions];

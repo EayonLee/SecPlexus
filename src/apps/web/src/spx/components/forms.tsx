@@ -1,7 +1,17 @@
 "use client";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId } from "react";
 
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslations } from "next-intl";
+import {
+  type DefaultValues,
+  type FieldValues,
+  type FieldError as FormError,
+  type UseFormRegisterReturn,
+  type UseFormReturn,
+  useForm,
+} from "react-hook-form";
+import type { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,53 +22,43 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
 import { useAction } from "./data";
 
-export interface FormField {
-  name: string;
-  label: string;
-  type?: "text" | "password" | "email" | "textarea";
-  required?: boolean;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
-  placeholder?: string;
-  description?: string;
-  value?: string;
-  options?: { value: string; label: string }[];
-}
-export function FormDialog({
+/** FormDialog 只组合对话框与 RHF 生命周期；字段和生成协议类型由业务页面声明。 */
+export function FormDialog<TInput extends FieldValues, TOutput extends FieldValues>({
   title,
   description,
-  fields,
+  schema,
+  defaultValues,
   children,
   onClose,
   onSubmit,
 }: {
   title: string;
   description?: string;
-  fields: FormField[];
-  children?: ReactNode;
+  schema: z.ZodType<TOutput, TInput>;
+  defaultValues: DefaultValues<TInput>;
+  children?: (form: UseFormReturn<TInput, unknown, TOutput>) => ReactNode;
   onClose: () => void;
-  onSubmit: (values: Record<string, string>) => Promise<unknown>;
+  onSubmit: (values: TOutput) => Promise<unknown>;
 }) {
-  const perform = useAction();
-
   const t = useTranslations("Common");
-
-  const [busy, setBusy] = useState(false);
-  const id = useId();
+  const perform = useAction();
+  const form = useForm<TInput, unknown, TOutput>({ resolver: zodResolver(schema), defaultValues });
+  const busy = form.formState.isSubmitting;
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open && !busy) {
+          form.reset();
+          onClose();
+        }
       }}
     >
       <DialogContent>
@@ -67,64 +67,27 @@ export function FormDialog({
           <DialogDescription>{description ?? t("formDescription")}</DialogDescription>
         </DialogHeader>
         <form
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const values = Object.fromEntries(
-              [...new FormData(event.currentTarget)].map(([key, value]) => [key, String(value)]),
-            );
-            setBusy(true);
+          noValidate
+          onSubmit={form.handleSubmit(async (values) => {
             const saved = await perform(() => onSubmit(values));
-            setBusy(false);
-            if (saved) onClose();
-          }}
+            if (saved) {
+              form.reset();
+              onClose();
+            }
+          })}
         >
           <fieldset disabled={busy} className="flex flex-col gap-5">
-            <FieldGroup>
-              {fields.map((field) => (
-                <Field key={field.name}>
-                  <FieldLabel htmlFor={`${id}-${field.name}`}>{field.label}</FieldLabel>
-                  {field.options ? (
-                    <NativeSelect
-                      id={`${id}-${field.name}`}
-                      name={field.name}
-                      defaultValue={field.value || field.options[0].value}
-                      required={field.required}
-                    >
-                      {field.options.map((option) => (
-                        <NativeSelectOption key={option.value} value={option.value}>
-                          {option.label}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  ) : field.type === "textarea" ? (
-                    <Textarea
-                      id={`${id}-${field.name}`}
-                      name={field.name}
-                      defaultValue={field.value}
-                      required={field.required}
-                      maxLength={field.maxLength}
-                    />
-                  ) : (
-                    <Input
-                      id={`${id}-${field.name}`}
-                      name={field.name}
-                      type={field.type || "text"}
-                      defaultValue={field.value}
-                      required={field.required}
-                      minLength={field.minLength}
-                      maxLength={field.maxLength}
-                      pattern={field.pattern}
-                      placeholder={field.placeholder}
-                      autoComplete={field.type === "password" ? "new-password" : "off"}
-                    />
-                  )}
-                  {field.description && <FieldDescription>{field.description}</FieldDescription>}
-                </Field>
-              ))}
-              {children}
-            </FieldGroup>
+            <FieldGroup>{children?.(form)}</FieldGroup>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  form.reset();
+                  onClose();
+                }}
+                disabled={busy}
+              >
                 {t("cancel")}
               </Button>
               <Button type="submit" disabled={busy}>
@@ -136,5 +99,44 @@ export function FormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** FormInput 复用现有 Field 和输入样式，错误文案由 next-intl 提供。 */
+export function FormInput({
+  label,
+  registration,
+  error,
+  type = "text",
+  description,
+  placeholder,
+}: {
+  label: string;
+  registration: UseFormRegisterReturn;
+  error?: FormError;
+  type?: "text" | "password" | "email" | "textarea";
+  description?: string;
+  placeholder?: string;
+}) {
+  const id = useId();
+  const errors = useTranslations("Errors");
+  return (
+    <Field data-invalid={!!error}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      {type === "textarea" ? (
+        <Textarea id={id} {...registration} aria-invalid={!!error} />
+      ) : (
+        <Input
+          id={id}
+          {...registration}
+          type={type}
+          placeholder={placeholder}
+          autoComplete={type === "password" ? "new-password" : "off"}
+          aria-invalid={!!error}
+        />
+      )}
+      {description && <FieldDescription>{description}</FieldDescription>}
+      {error && <FieldError>{errors("invalidRequest")}</FieldError>}
+    </Field>
   );
 }

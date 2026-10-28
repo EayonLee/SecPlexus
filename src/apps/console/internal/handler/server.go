@@ -3,11 +3,10 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/router"
@@ -26,8 +25,8 @@ type Server struct {
 }
 
 // authorize 验证原始会话并取得当前组织范围，拒绝不可信的浏览器身份声明。
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (contract.CapabilityDecision, bool) {
-	org, err := uuid.Parse(chi.URLParam(r, "org_id"))
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, orgID string) (contract.CapabilityDecision, bool) {
+	org, err := uuid.Parse(orgID)
 	if err != nil {
 		result.Fail(w, common.CodeInvalidRequest)
 		return contract.CapabilityDecision{}, false
@@ -59,14 +58,20 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (contract.Cap
 
 // Handler 注册 Console 路由并返回 HTTP 处理器。
 func (s *Server) Handler() http.Handler {
-	mux := chi.NewRouter()
-	router.Register(mux, s.routeHandlers())
-	return middleware.Boundary(mux, mux)
+	engine := middleware.NewEngine()
+	validate, err := middleware.ContractValidation(consoleapi.OpenAPI, nil)
+	if err != nil {
+		panic("invalid published Console contract")
+	}
+	engine.Use(validate)
+	router.Register(engine, s, s.Events)
+	return engine
 }
 
 // context 返回已经 IAM 验证的当前组织上下文。
-func (s *Server) context(w http.ResponseWriter, r *http.Request) {
-	decision, ok := s.authorize(w, r)
+func (s *Server) Context(c *gin.Context, orgID string) {
+	w, r := c.Writer, c.Request
+	decision, ok := s.authorize(w, r, orgID)
 	if !ok {
 		return
 	}
@@ -79,8 +84,10 @@ func (s *Server) context(w http.ResponseWriter, r *http.Request) {
 }
 
 // events 订阅组织事件并定期重新鉴权，权限撤销后结束流。
-func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	decision, ok := s.authorize(w, r)
+func (s *Server) Events(c *gin.Context) {
+	w, r := c.Writer, c.Request
+	orgID := c.Param("org_id")
+	decision, ok := s.authorize(w, r, orgID)
 	if !ok {
 		return
 	}
@@ -95,18 +102,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		reason = "flush_unsupported"
-		logger.Error("响应不支持流式刷新", "event", "sse.unsupported")
+	c.SSEvent("authorized", map[string]string{"decision_id": decision.DecisionID})
+	if c.IsAborted() {
+		reason = "write_failed"
 		return
 	}
-
-	if _, err := fmt.Fprintf(w, "event: authorized\ndata: {\"decision_id\":%q}\n\n", decision.DecisionID); err != nil {
-		return
-	}
-
-	flusher.Flush()
+	c.Writer.Flush()
 	logger.Info("组织事件流已建立", "event", "sse.opened")
 	// 在三十秒撤权目标内，为有界 IAM 调用预留五秒。
 	ticker := time.NewTicker(25 * time.Second)
@@ -124,16 +125,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 					reason = "reauthorization_failed"
 				}
 				logger.Warn("事件流重新鉴权未通过", "event", "sse.access_stopped", "reason", reason, "error", logging.Error(err))
-				_, _ = fmt.Fprint(w, "event: access_revoked\ndata: {}\n\n")
-				flusher.Flush()
+				c.SSEvent("access_revoked", map[string]string{})
+				c.Writer.Flush()
 				return
 			}
-			if _, err = fmt.Fprint(w, ": authorized\n\n"); err != nil {
+			if _, err = c.Writer.WriteString(": authorized\n\n"); err != nil {
 				reason = "write_failed"
 				logger.Debug("事件流发送失败", "event", "sse.write_failed", "error", logging.Error(err))
 				return
 			}
-			flusher.Flush()
+			c.Writer.Flush()
 		}
 	}
 }

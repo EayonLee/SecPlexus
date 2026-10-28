@@ -36,7 +36,7 @@ func TestOriginAndCSRFBoundary(t *testing.T) {
 			cfg := config.Config{}
 			cfg.App.PublicURL = tc.public
 			cfg.Auth.CSRFKey = strings.Repeat("k", 32)
-			cfg.Internal.Clients = []config.InternalClient{{ID: "console", Token: strings.Repeat("t", 32), Actions: []string{"iam.organizations.read"}}}
+			cfg.Internal.Clients = map[string]config.InternalClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.organizations.read"}}}
 			security, err := NewSecurity(cfg)
 			if err != nil {
 				t.Fatal(err)

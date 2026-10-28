@@ -6,7 +6,7 @@ An AI-native security operations platform.
 
 <div align="center">
   <img src="https://img.shields.io/badge/Go-1.27.3-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.27.3" />
-  <img src="https://img.shields.io/badge/chi-5.5.0-00ADD8" alt="chi 5.5.0" />
+  <img src="https://img.shields.io/badge/Gin-1.12.0-00ADD8" alt="Gin 1.12.0" />
   <img src="https://img.shields.io/badge/Next.js-16.4.3-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 16.4.3" />
   <img src="https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&amp;logoColor=black" alt="React 19.3.1" />
   <img src="https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&amp;logoColor=white" alt="TypeScript 5.9.3" />
@@ -51,7 +51,7 @@ are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based 
 See [configuration and startup](docs/configuration.md), [testing](docs/testing.md),
 [IAM architecture](src/apps/iam/README.md), and [Web](src/apps/web/README.md).
 
-Go modules load their own structured `config.yaml` with `${ENV:default}` placeholders.
+Go modules use plain `config.yaml`, Viper/mapstructure for explicit environment bindings and strict typed decoding, and Cobra commands.
 Local rotating JSON logs use `logs/iam.log` and `logs/console.log`; containers use stdout.
 
 ## Repository layout

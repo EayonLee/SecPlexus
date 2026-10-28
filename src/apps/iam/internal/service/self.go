@@ -38,14 +38,14 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 	for rows.Next() {
 		var id, slug, name, version string
 		if err = rows.Scan(&id, &slug, &name, &version); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 
 		organizations = append(organizations, map[string]string{"id": id, "slug": slug, "name": name, "authz_version": version})
 	}
 
-	rows.Close()
+	_ = rows.Close()
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (s *Service) SessionsList(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := []map[string]any{}
 	for rows.Next() {

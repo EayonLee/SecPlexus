@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // queryLogger 接入 GORM 的日志边界，保留错误和慢操作，禁止输出 SQL 与参数。

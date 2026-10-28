@@ -3,8 +3,11 @@ import { useEffect, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Command } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useForm } from "react-hook-form";
+import type { z } from "zod";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { zLoginBody } from "@/spx/api/iam/zod.gen";
 
 import { LanguageSwitcher } from "../components/language-switcher";
 import { errorMessageKey, initializeSession, signIn, useIdentity } from "../iam/session";
@@ -22,16 +26,20 @@ export function LoginPage() {
 
   const router = useRouter();
   const auth = useIdentity();
-  const [busy, setBusy] = useState(false);
+  const form = useForm<z.infer<typeof zLoginBody>>({
+    resolver: zodResolver(zLoginBody),
+    defaultValues: { username: "", password: "" },
+  });
+  const busy = form.formState.isSubmitting;
   const [error, setError] = useState<ReturnType<typeof errorMessageKey> | "">("");
-  const [username, setUsername] = useState("");
+
   const [remember, setRemember] = useState(false);
   useEffect(() => {
     const remembered = localStorage.getItem("spx-remembered-username") || "";
-    setUsername(remembered);
+    form.setValue("username", remembered);
     setRemember(!!remembered);
     void initializeSession();
-  }, []);
+  }, [form]);
   useEffect(() => {
     if (auth.status === "authenticated") router.replace("/dashboard");
   }, [auth.status, router]);
@@ -70,21 +78,19 @@ export function LoginPage() {
           <form
             method="post"
             className="flex flex-col gap-4"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              setBusy(true);
+            noValidate
+            onSubmit={form.handleSubmit(async (values) => {
               setError("");
               try {
-                await signIn(username, String(form.get("password")));
-                if (remember) localStorage.setItem("spx-remembered-username", username);
+                await signIn(values.username, values.password);
+                if (remember) localStorage.setItem("spx-remembered-username", values.username);
                 else localStorage.removeItem("spx-remembered-username");
               } catch (failure) {
                 setError(errorMessageKey(failure));
               } finally {
-                setBusy(false);
+                form.resetField("password");
               }
-            }}
+            })}
           >
             <fieldset
               disabled={busy || auth.status === "unknown" || auth.status === "unavailable"}
@@ -93,18 +99,17 @@ export function LoginPage() {
               <FieldGroup className="gap-4">
                 <Field className="gap-1.5">
                   <FieldLabel htmlFor="username">{t("username")}</FieldLabel>
-                  <Input
-                    id="username"
-                    name="username"
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    autoComplete="username"
-                    required
-                  />
+                  <Input id="username" {...form.register("username")} autoComplete="username" required />
                 </Field>
                 <Field className="gap-1.5">
                   <FieldLabel htmlFor="password">{t("password")}</FieldLabel>
-                  <Input id="password" name="password" type="password" autoComplete="current-password" required />
+                  <Input
+                    id="password"
+                    {...form.register("password")}
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                  />
                 </Field>
                 <Field orientation="horizontal">
                   <Checkbox
@@ -114,6 +119,9 @@ export function LoginPage() {
                   />
                   <FieldLabel htmlFor="remember">{t("remember")}</FieldLabel>
                 </Field>
+                {(form.formState.errors.username || form.formState.errors.password) && (
+                  <FieldError>{errors("invalidRequest")}</FieldError>
+                )}
                 {error && <FieldError>{errors(error)}</FieldError>}
               </FieldGroup>
               <Button type="submit" disabled={busy}>

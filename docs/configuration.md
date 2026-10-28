@@ -13,13 +13,13 @@ Go直接加载config.yaml，不需要再复制example。实际.env、certs和log
 
 ## PostgreSQL：默认一个实例、一个库、一组账号
 
-全局只维护`SPX_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/MODELESS`。默认数据库账号/库名为 `secplexus`，密码为 `secplexus`。模块的db字段默认引用这组值；应用运行、迁移、维护都使用同一连接，不创建模块用户或另一套运维账号。
+全局只维护`SPX_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/MODELESS`。默认数据库账号/库名为 `secplexus`，密码为 `secplexus`。Viper将这组环境变量绑定到模块db字段；应用运行、迁移、维护都使用同一连接，不创建模块用户或另一套运维账号。
 
 账号需要具备本项目schema和版本表的建表、迁移权限。应用层的鉴权与审计事务保持不变；不再依靠单独数据库账号限制HTTP进程的DDL权限。
 
 同一数据库中的表仍由对应模块管理。Console当前通过IAM接口取得身份信息，没有数据库查询，因此不添加无用的db配置。
 
-需要让模块连接独立实例或使用其他账号时，直接修改该模块config.yaml，例如把db.host、db.user改为该连接的值，把password改为引用该模块自己的密码变量。其他模块继续使用全局默认值，无需改代码或增加配置层。
+需要让IAM使用独立连接时，使用`SPX_IAM_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/MODELESS`覆盖共享变量，或在没有相应环境变量时修改模块YAML字面值。Redis同理使用`SPX_IAM_REDIS_HOST/PORT/USER/PASSWORD/DB`。Console没有DB/cache配置。
 
 完整DSN只作为高级覆盖`SPX_POSTGRES_URL`保留，用于特殊驱动参数；根示例不要求填写它。
 
@@ -56,16 +56,18 @@ Compose使用服务名连接，Next.js公开API代理地址由同一组模块端
 
 ```yaml
 db:
-  host: "${SPX_POSTGRES_HOST:127.0.0.1}"
-  port: "${SPX_POSTGRES_PORT:5432}"
-  name: "${SPX_POSTGRES_DATABASE:secplexus}"
-  user: "${SPX_POSTGRES_USER:secplexus}"
-  password: "${SPX_POSTGRES_PASSWORD:secplexus}"
+  host: 127.0.0.1
+  port: 5432
+  name: secplexus
+  user: secplexus
+  password: secplexus
 ```
 
-`${NAME:default}`优先读取进程环境，未设置时使用默认值；显式空值保留。根入口先按“进程环境 > 根.env”合并。模块配置中的字面值不会被隐式的环境映射再次覆盖，因此可以直接修改某个模块的连接。
+根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**模块专用环境 > 共享环境 > YAML字面值 > Viper默认值**；显式空值保留，随后进行类型及业务配置校验。仅显式登记的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
 
-只替换YAML标量，不执行shell，也不把密码中的换行、冒号或美元符号当成配置语法。未知字段、重复键、额外文档和非法类型明确报错，错误不打印密码或密钥。修改配置后重启。
+完整DSN字段`SPX_IAM_POSTGRES_URL`优先于`SPX_POSTGRES_URL`，`SPX_IAM_REDIS_URL`优先于`SPX_REDIS_URL`；配置了非空URL时不再组合分项字段。模块环境显式设空URL可恢复分项组合。`MODELESS`沿用当前环境变量命名，对应驱动的`sslmode`。
+
+普通YAML不再支持`${NAME:default}`；没有旧解析器回退。环境标量由mapstructure官方Hook转换为整数、布尔、列表和时长。未知字段、重复键、额外文档、非法类型与超过64KiB配置在加载边界拒绝，错误不输出秘密值。修改配置后重启。内部调用方是以服务ID为键的`internal.clients`映射；凭证和action白名单属于同一配置项，不能以数组顺序猜测调用方。
 
 ## 运行
 
@@ -127,7 +129,7 @@ Web 与 API 默认通过同一个入口访问。IAM 根据 `app.public_url` 校�
 
 ## 配置与启动代码的职责
 
-模块的 `internal/config` 只做加载、环境展开、类型转换和校验，以及依据字段构造连接地址；不会访问数据库、创建 Redis/HTTP 客户端或执行迁移。`internal/bootstrap` 显式创建依赖、挂载路由并负责失败清理和退出关闭；数据库操作由 repository 承担。
+模块的 `internal/config` 只做加载、显式环境绑定、类型转换和校验，以及依据字段构造连接地址；不会访问数据库、创建 Redis/HTTP 客户端或执行迁移。`internal/bootstrap` 显式创建依赖、挂载路由并负责失败清理和退出关闭；数据库操作由 repository 承担。
 
 IAM 缓存分组为 `cache`，字段为 host、port、password、db、url；当前实现仍是 Redis，环境变量继续使用 `SPX_REDIS_*`，key 前缀在代码中固定为 spx。不增加占位 driver 或嵌套 redis 分组。PostgreSQL 环境变量保留 `SPX_POSTGRES_MODELESS`，驱动连接参数仍是 `sslmode`。升级需修改配置分组名时保留原连接值，不覆盖用户 `.env`。
 

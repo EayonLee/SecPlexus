@@ -6,7 +6,7 @@ AI 原生安全运营平台。
 
 <div align="center">
   <img src="https://img.shields.io/badge/Go-1.27.3-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.27.3" />
-  <img src="https://img.shields.io/badge/chi-5.5.0-00ADD8" alt="chi 5.5.0" />
+  <img src="https://img.shields.io/badge/Gin-1.12.0-00ADD8" alt="Gin 1.12.0" />
   <img src="https://img.shields.io/badge/Next.js-16.4.3-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js 16.4.3" />
   <img src="https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&amp;logoColor=black" alt="React 19.3.1" />
   <img src="https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&amp;logoColor=white" alt="TypeScript 5.9.3" />
@@ -48,7 +48,7 @@ Console当前提供组织访问与SSE鉴权，还没有业务工作流；Web基�
 测试入口见[测试指南](docs/testing.md)，模块设计见[IAM README](src/apps/iam/README.md)与
 [Web README](src/apps/web/README.md)。
 
-Go模块直接读取各自的结构化`config.yaml`，用`${ENV:默认值}`覆盖配置。
+Go模块使用普通结构化`config.yaml`，通过Viper/mapstructure显式绑定环境并严格解码，命令入口采用Cobra。
 本机轮转JSON日志统一放在根`logs/`；容器默认stdout。
 
 ## 项目结构

@@ -79,3 +79,9 @@ description: Guide SecPlexus implementation, behavior-preserving simplification,
 测试入口和隔离标准见 `docs/testing.md`：单元覆盖规则/HTTP 边界，真实集成覆盖 PG/Redis、事务和组件契约，Playwright E2E 覆盖少量核心用户流程。复用稳定用例，不把临时复现逐层堆进长期集成/E2E，不以 Mock、安装依赖或格式通过冒充链路成功。
 
 只对改动执行匹配检查，完整交付按需求计划验收。审查应关注真实影响：跨模块私表、handler SQL、重复校验、事务逃逸、Result/code/status 失配、Session 保存失败仍响应成功、流式包装、组织切换旧响应、资源泄漏和阅读困难。未发现问题也说明覆盖范围和未验证项，不以推测性风险或单纯格式偏好自动发起全仓重构。
+
+## 当前框架接入
+
+- HTTP使用原生Gin与OpenAPI生成路由；参考`docs/development/role-management.md`。复用官方扩展点，删除被替代的通用机制，不再接Chi/Authboss或回放HTTP认证请求。
+- 配置用Viper显式环境绑定/mapstructure严格解码、Cobra命令；不恢复旧占位符解析。Schema/绑定/生成器规则及版本见`src/contracts/README.md`和Gin重构能力记录。
+- Web服务器状态用Query，表单用RHF和生成Zod；生成SDK只消费公开契约。敏感凭据不入MutationCache；缓存键含身份/组织授权版本，切换先取消清空。

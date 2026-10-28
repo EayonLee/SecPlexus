@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 
-import { APIError, api, useIdentity } from "../../src/spx/iam/session";
+import { client } from "../../src/spx/api/iam/client.gen";
+import { changePassword } from "../../src/spx/api/iam/sdk.gen";
+import { APIError, mutationHeaders, useIdentity } from "../../src/spx/iam/session";
 import { initialAuth } from "../../src/spx/iam/types";
 import { createServer } from "node:http";
 
@@ -20,7 +22,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   // Node测试用自己的HTTP监听器解析浏览器相对URL，响应仍通过真实fetch传输。
-  globalThis.fetch = (input, options) => nativeFetch(new URL(String(input), origin), options);
+  client.setConfig({ baseUrl: origin, fetch: nativeFetch });
   useIdentity.setState(
     {
       ...initialAuth,
@@ -46,7 +48,13 @@ afterAll(async () => {
 });
 
 test("CSRF bootstrap failure pauses authenticated actions without logging the user out", async () => {
-  await expect(api("/iam/me/password", { method: "POST", body: {} })).rejects.toBeInstanceOf(APIError);
+  await expect(
+    changePassword({
+      headers: mutationHeaders,
+      body: { old_password: "old password", new_password: "new password" },
+      throwOnError: true,
+    }),
+  ).rejects.toBeInstanceOf(APIError);
   expect(useIdentity.getState().status).toBe("unavailable");
   expect(useIdentity.getState().principal?.user_id).toBe("user");
 });

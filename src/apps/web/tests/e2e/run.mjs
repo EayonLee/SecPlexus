@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { constants, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -201,6 +201,20 @@ try {
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
   });
   await ready(`http://127.0.0.1:${consolePort2}/health/ready`, console2);
+  if(process.argv.includes("--manual")){
+   const filename=path.join(directory,"browser.json");
+   writeFileSync(filename,JSON.stringify({baseURL:publicURL,username:"admin",password:initialPassword}),{mode:0o600});
+   console.log(`Isolated browser acceptance ready: ${filename}`);
+   console.log("Create stop in the same temporary directory, send input, or interrupt to clean up the owned stack.");
+   await new Promise(resolve=>{
+    const stop=path.join(directory,"stop");
+    const finish=()=>{observer.close();process.stdin.removeListener("data",finish);process.removeListener("SIGINT",finish);process.removeListener("SIGTERM",finish);process.stdin.pause();resolve()};
+    const observer=watch(directory,()=>{if(existsSync(stop))finish()});
+    process.stdin.once("data",finish);
+    process.once("SIGINT",finish);
+    process.once("SIGTERM",finish);
+   });
+  }else{
   const child = spawn(
     "pnpm",
     [
@@ -228,6 +242,7 @@ try {
     child.once("error", reject);
     child.once("exit", (code) => resolve(code ?? 1));
   });
+  }
   for (const filename of ["iam-one.log", "iam-two.log", "console-one.log", "console-two.log"]) {
     const data = readFileSync(path.join(directory, filename), "utf8");
     if (![pgPassword, initialPassword, password, credential, csrf].every((value) => !data.includes(value)))

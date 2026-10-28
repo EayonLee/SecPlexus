@@ -2,7 +2,11 @@ package management
 
 import (
 	"encoding/json"
-	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+
 	"strconv"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -14,148 +18,168 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// listOrganizations 返回经过平台读取权限校验的组织列表。
-func (s *Handler) listOrganizations(w http.ResponseWriter, r *http.Request) error {
-	limit, offset, err := pagination(r)
-	if err != nil {
-		return err
-	}
+// ListOrganizations 返回经过平台读取权限校验的组织列表。
+func (s *Handler) ListOrganizations(c *gin.Context, params router.ListOrganizationsParams) {
+	w := c.Writer
+	r := c.Request
+	limit, offset := pagination(params.Limit, params.Offset)
 
 	response, err := s.Service.ListOrganizations(r.Context(), limit, offset)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, response)
-	return nil
 }
 
-// createOrganization 绑定创建组织参数，交给用例创建及审计。
-func (s *Handler) createOrganization(w http.ResponseWriter, r *http.Request) error {
+// CreateOrganization 绑定创建组织参数，交给用例创建及审计。
+func (s *Handler) CreateOrganization(c *gin.Context, params router.CreateOrganizationParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.OrganizationInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
 	id, err := s.Service.CreateOrganization(r.Context(), input, middleware.RequestID(r))
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Created(w, map[string]string{"id": id})
-	return nil
 }
 
-// updateOrganization 处理平台范围的组织状态变更。
-func (s *Handler) updateOrganization(w http.ResponseWriter, r *http.Request) error {
+// UpdateOrganization 处理平台范围的组织状态变更。
+func (s *Handler) UpdateOrganization(c *gin.Context, id string, params router.UpdateOrganizationParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.OrganizationUpdate
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.UpdateOrganization(r.Context(), r.PathValue("id"), input, true, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.UpdateOrganization(r.Context(), id, input, true, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// getOrganization 查询目标组织的公开投影。
-func (s *Handler) getOrganization(w http.ResponseWriter, r *http.Request) error {
-	data, err := s.Service.Organization(r.Context(), r.PathValue("org_id"))
+// GetOrganization 查询目标组织的公开投影。
+func (s *Handler) GetOrganization(c *gin.Context, orgId string) {
+	w := c.Writer
+	r := c.Request
+	data, err := s.Service.Organization(r.Context(), orgId)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, json.RawMessage(data))
-	return nil
 }
 
-// updateCurrentOrganization 处理组织管理员允许修改的组织字段。
-func (s *Handler) updateCurrentOrganization(w http.ResponseWriter, r *http.Request) error {
+// UpdateCurrentOrganization 处理组织管理员允许修改的组织字段。
+func (s *Handler) UpdateCurrentOrganization(c *gin.Context, orgId string, params router.UpdateCurrentOrganizationParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.OrganizationUpdate
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.UpdateOrganization(r.Context(), r.PathValue("org_id"), input, false, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.UpdateOrganization(r.Context(), orgId, input, false, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// listMembers 按当前组织和分页参数读取成员。
-func (s *Handler) listMembers(w http.ResponseWriter, r *http.Request) error {
-	limit, offset, err := pagination(r)
-	if err != nil {
-		return err
-	}
+// ListMembers 按当前组织和分页参数读取成员。
+func (s *Handler) ListMembers(c *gin.Context, orgId string, params router.ListMembersParams) {
+	w := c.Writer
+	r := c.Request
+	limit, offset := pagination(params.Limit, params.Offset)
 
-	response, err := s.Service.ListMembers(r.Context(), limit, offset, r.PathValue("org_id"))
+	response, err := s.Service.ListMembers(r.Context(), limit, offset, orgId)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, response)
-	return nil
 }
 
-// createMember 限制高成本密码计算并创建组织成员。
-func (s *Handler) createMember(w http.ResponseWriter, r *http.Request) error {
-	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMMembersManage, r.PathValue("org_id")); err != nil {
-		return err
+// CreateMember 限制高成本密码计算并创建组织成员。
+func (s *Handler) CreateMember(c *gin.Context, orgId string, params router.CreateMemberParams) {
+	w := c.Writer
+	r := c.Request
+	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMMembersManage, orgId); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	var input service.MemberInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
 	select {
 	case s.HashSlots <- struct{}{}:
 		defer func() { <-s.HashSlots }()
 	default:
-		return authentication.ErrRateLimited
+		httpx.Reject(c, authentication.ErrRateLimited)
+		return
 	}
 
-	id, err := s.Service.CreateMember(r.Context(), r.PathValue("org_id"), input, middleware.RequestID(r))
+	id, err := s.Service.CreateMember(r.Context(), orgId, input, middleware.RequestID(r))
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Created(w, map[string]string{"id": id})
-	return nil
 }
 
-// updateMember 绑定版本与状态，交给用例校验更新。
-func (s *Handler) updateMember(w http.ResponseWriter, r *http.Request) error {
+// UpdateMember 绑定版本与状态，交给用例校验更新。
+func (s *Handler) UpdateMember(c *gin.Context, orgId string, id string, params router.UpdateMemberParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.MemberUpdate
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.UpdateMember(r.Context(), r.PathValue("org_id"), r.PathValue("id"), input, false, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.UpdateMember(r.Context(), orgId, id, input, false, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// deleteMember 依据当前组织版本移除成员。
-func (s *Handler) deleteMember(w http.ResponseWriter, r *http.Request) error {
-	version, err := strconv.ParseInt(r.URL.Query().Get("authz_version"), 10, 64)
+// DeleteMember 依据当前组织版本移除成员。
+func (s *Handler) DeleteMember(c *gin.Context, orgId string, id string, params router.DeleteMemberParams) {
+	w := c.Writer
+	r := c.Request
+	version, err := strconv.ParseInt(params.AuthzVersion, 10, 64)
 	if err != nil {
-		return repository.ErrInvalid
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err = s.Service.UpdateMember(r.Context(), r.PathValue("org_id"), r.PathValue("id"), service.MemberUpdate{AuthzVersion: version}, true, middleware.RequestID(r)); err != nil {
-		return err
+	if err = s.Service.UpdateMember(r.Context(), orgId, id, service.MemberUpdate{AuthzVersion: version}, true, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }

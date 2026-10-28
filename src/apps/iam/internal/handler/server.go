@@ -1,33 +1,34 @@
-// Package handler 处理 IAM 认证与账号请求，管理接口由 management 子包负责。
+// Package handler 处理 IAM 的原生 Gin 协议边界。
 package handler
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
-	"io"
+
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
+
 	"net/url"
-	"strings"
-	"time"
+	"strconv"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router/internalapi"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
@@ -36,54 +37,41 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// Server 提供 IAM 的公开和内部 HTTP 接口。
+// Server 显式装配 IAM 用例与 HTTP 安全边界。
 type Server struct {
-	Service    *service.Service                // IAM 业务用例。
-	Auth       *authentication.Authenticator   // 登录认证适配器。
-	Security   *iammiddleware.Security         // CSRF 和内部调用安全检查。
-	Limiter    *authentication.Limiter         // 登录请求限流。
-	hashSlots  chan struct{}                   // 限制同时执行的密码计算数量。
-	validate   func(http.Handler) http.Handler // 启动时编译的请求契约校验。
-	readyCheck func(context.Context) error     // 启动装配提供的真实依赖就绪检查。
+	*management.Handler
+	Service                    *service.Service
+	Auth                       *authentication.Authenticator
+	Security                   *iammiddleware.Security
+	Limiter                    *authentication.Limiter
+	hashSlots                  chan struct{}
+	validate, validateInternal gin.HandlerFunc
+	readyCheck                 func(context.Context) error
 }
 
-// New 创建 IAM 服务并校验接口契约。
-func New(service *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, readyCheck func(context.Context) error) (*Server, error) {
-	validator, err := iammiddleware.ContractValidation()
+// New 在启动时验证契约并装配有界认证资源。
+func New(svc *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, readyCheck func(context.Context) error) (*Server, error) {
+	validate, err := middleware.ContractValidation(contract.OpenAPI, map[string]int64{"/api/v1/iam/auth/login": 2048, "/api/v1/iam/auth/reauthenticate": 2048})
 	if err != nil {
-		return nil, errors.New("invalid published IAM API contract")
+		return nil, errors.New("invalid public IAM contract")
 	}
-
-	auth, err := authentication.NewAuthenticator(service.Sessions)
+	internal, err := middleware.ContractValidation(contract.InternalOpenAPI, nil)
+	if err != nil {
+		return nil, errors.New("invalid internal IAM contract")
+	}
+	slots := make(chan struct{}, 4)
+	auth, err := authentication.NewAuthenticator(svc.Sessions, limiter, slots)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Server{
-		Service:    service,
-		Auth:       auth,
-		Security:   security,
-		Limiter:    limiter,
-		hashSlots:  make(chan struct{}, 4),
-		validate:   validator,
-		readyCheck: readyCheck,
-	}, nil
+	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, hashSlots: slots, validate: validate, validateInternal: internal, readyCheck: readyCheck}, nil
 }
 
-// handle 统一绑定路由参数并映射用例错误。
-func (s *Server) handle(fn httpx.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		for index, key := range chi.RouteContext(r.Context()).URLParams.Keys {
-			r.SetPathValue(key, chi.RouteContext(r.Context()).URLParams.Values[index])
-		}
-
-		// 路由模板不含用户输入，向下传递用于关联业务和依赖日志。
-		r = r.WithContext(logging.With(r.Context(), "route", chi.RouteContext(r.Context()).RoutePattern()))
-		started := time.Now()
-		if err := fn(w, r); err != nil {
-			s.writeError(w, r, err)
-		}
-		logging.From(r.Context()).Debug("IAM 用例处理完成", "event", "iam.handled", "duration_ms", time.Since(started).Milliseconds())
+// errors 将 Gin 收集的业务错误在响应及会话提交前统一映射。
+func (s *Server) errors(c *gin.Context) {
+	c.Next()
+	if len(c.Errors) > 0 && !c.Writer.Written() {
+		s.writeError(c.Writer, c.Request, c.Errors.Last().Err)
 	}
 }
 
@@ -93,6 +81,8 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, authentication.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, sql.ErrConnDone):
 		code = common.CodeServiceUnavailable
+	case errors.Is(err, authentication.ErrInvalidCredentials):
+		code = common.CodeInvalidCredentials
 	case errors.Is(err, identity.ErrPasswordMismatch):
 		code = common.CodeInvalidCurrentPassword
 	case errors.Is(err, repository.ErrUnauthenticated):
@@ -109,7 +99,11 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = common.CodeNotFound
 	case errors.Is(err, authentication.ErrRateLimited):
 		code = common.CodeRateLimited
-		w.Header().Set("Retry-After", "60")
+		w.Header().Set("Retry-After", "1")
+		var limited *authentication.RateLimitError
+		if errors.As(err, &limited) {
+			w.Header().Set("Retry-After", strconv.FormatInt(limited.RetryAfter, 10))
+		}
 	default:
 		var pgerr *pgconn.PgError
 		if errors.As(err, &pgerr) {
@@ -142,158 +136,145 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	result.Fail(w, code)
 }
 
-// requestID 读取入口生成的请求标识。
+// requestID 读取入口生成的关联标识。
 func requestID(r *http.Request) string { return middleware.RequestID(r) }
 
-// PublicHandler 返回包含会话和安全中间件的公开接口。
+// PublicHandler 只向公开监听器挂载公开契约和有状态安全中间件。
 func (s *Server) PublicHandler() http.Handler {
-	mux := chi.NewRouter()
-	router.RegisterPublic(mux, s.routeHandlers())
-	return middleware.Boundary(iammiddleware.Session(s.Service.Sessions, s.clientIP)(s.Security.Protect(s.validate(mux))), mux)
-}
-
-// login 限制密码计算与来源频率后调用统一认证适配器。
-func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
-	select {
-	case s.hashSlots <- struct{}{}:
-		defer func() { <-s.hashSlots }()
-	default:
-		return authentication.ErrRateLimited
+	engine := middleware.NewEngine()
+	engine.RemoteIPHeaders = []string{"X-Forwarded-For"}
+	if err := engine.SetTrustedProxies(s.Service.Config.App.TrustedProxyCIDRs); err != nil {
+		panic("invalid trusted proxies")
 	}
-
-	data, err := io.ReadAll(io.LimitReader(r.Body, 2049))
-	if err != nil || len(data) > 2048 {
-		return repository.ErrInvalid
-	}
-	// 来源计数也约束无效请求；账号标识在进入 Redis 前取摘要。
-	if err = s.Limiter.Check(r.Context(), s.clientIP(r), stringAccount(data)); err != nil {
-		return err
-	}
-
-	r.Body = io.NopCloser(bytes.NewReader(data))
-	err = s.Auth.Login(w, r)
-	if err == nil && authentication.CurrentAttempt(r.Context()).Principal != nil {
-		s.Security.ClearCSRF(w)
-	}
-
-	return err
-}
-
-// clientIP 仅依据明确配置的可信代理解析来源地址。
-func (s *Server) clientIP(r *http.Request) string {
-	prefixes := make([]netip.Prefix, 0, len(s.Service.Config.App.TrustedProxyCIDRs))
-	for _, value := range s.Service.Config.App.TrustedProxyCIDRs {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
-		if err == nil {
-			prefixes = append(prefixes, prefix)
+	public := engine.Group("")
+	public.Use(iammiddleware.Session(s.Service.Sessions), s.errors, s.Security.GinProtect(), func(c *gin.Context) {
+		if c.FullPath() == "/api/v1/iam/auth/login" || c.FullPath() == "/api/v1/iam/auth/reauthenticate" {
+			if err := s.Limiter.CheckIP(c.Request.Context(), c.ClientIP()); err != nil {
+				httpx.Reject(c, err)
+				return
+			}
 		}
-	}
-
-	return identity.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), prefixes)
+		c.Next()
+	}, s.validate)
+	router.RegisterPublic(public, s, s.ready)
+	return engine
 }
 
-// reauthenticate 确认当前账号的密码并保留原会话绝对到期时间。
-func (s *Server) reauthenticate(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.Service.Sessions.Resolve(r.Context())
+// Login 将经过契约验证的凭据传入认证用例。
+func (s *Server) Login(c *gin.Context, params router.LoginParams) {
+	var input contract.APILoginInput
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
+	p, err := s.Auth.Login(c.Request.Context(), authentication.Credentials{Username: input.Username, Password: input.Password}, s.metadata(c))
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
-
-	var input struct {
-		Password string `json:"password"`
-	}
-	if err = httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
-	}
-
-	body, err := encodeLogin(p.Username, input.Password)
-	if err != nil {
-		return err
-	}
-
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	// 密码确认仅针对当前账号，不能借重新认证延长原会话绝对期限。
-	a := authentication.CurrentAttempt(r.Context())
-	a.Reauthenticate = true
-	return s.login(w, r)
+	s.authenticated(c, p, false)
 }
 
-// InternalHandler 返回需要服务身份认证的内部接口。
+// Reauthenticate 仅校验当前账号，不重新构造 HTTP 登录请求。
+func (s *Server) Reauthenticate(c *gin.Context, params router.ReauthenticateParams) {
+	var input contract.APIReauthenticateInput
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
+	p, err := s.Auth.Reauthenticate(c.Request.Context(), input.Password, s.metadata(c))
+	if err != nil {
+		httpx.Reject(c, err)
+		return
+	}
+	s.authenticated(c, p, true)
+}
+
+func (s *Server) metadata(c *gin.Context) authentication.RequestMetadata {
+	return authentication.RequestMetadata{RequestID: requestID(c.Request), ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+}
+
+func (s *Server) authenticated(c *gin.Context, p contract.Principal, reauth bool) {
+	a := authentication.CurrentAttempt(c.Request.Context())
+	a.Principal = &p
+	a.Reauthenticate = reauth
+	s.Security.ClearCSRF(c.Writer)
+	result.Success(c.Writer, contract.APILoginResponse{Principal: p})
+}
+
+// InternalHandler 只在独立的内部监听器挂载严格生成的服务间契约。
 func (s *Server) InternalHandler() http.Handler {
-	mux := chi.NewRouter()
-	router.RegisterInternal(mux, s.routeHandlers())
-	return middleware.Boundary(s.validate(mux), mux)
+	engine := middleware.NewEngine()
+	engine.Use(s.errors, s.validateInternal)
+	strict := internalapi.NewStrictHandlerWithOptions(s, nil, internalapi.StrictGinServerOptions{
+		RequestErrorHandlerFunc:  func(c *gin.Context, _ error) { httpx.Reject(c, repository.ErrInvalid) },
+		HandlerErrorFunc:         func(c *gin.Context, err error) { httpx.Reject(c, err) },
+		ResponseErrorHandlerFunc: func(c *gin.Context, err error) { httpx.Reject(c, err) },
+	})
+	internalapi.RegisterHandlersWithOptions(engine, strict, internalapi.GinServerOptions{ErrorHandler: func(c *gin.Context, _ error, _ int) { httpx.Reject(c, repository.ErrInvalid) }})
+	return engine
 }
 
-// ready 检查 IAM 所依赖的数据库和 Redis 是否可访问。
-func (s *Server) ready(w http.ResponseWriter, r *http.Request) error {
-	if err := s.readyCheck(r.Context()); err != nil {
-		logging.From(r.Context()).Error("IAM 依赖就绪检查失败", "event", "dependency.unready", "error", logging.Error(err))
-		result.Fail(w, common.CodeServiceUnavailable)
-		return nil
+// ready 检查真实依赖，不触发迁移或初始化。
+func (s *Server) ready(c *gin.Context) {
+	if err := s.readyCheck(c.Request.Context()); err != nil {
+		httpx.Reject(c, authentication.ErrUnavailable)
+		return
 	}
-
-	result.Success(w, map[string]bool{"ready": true})
-	return nil
+	result.Success(c.Writer, map[string]bool{"ready": true})
 }
 
-// authContext 返回当前会话对应的 CSRF 令牌。
-func (s *Server) authContext(w http.ResponseWriter, r *http.Request) {
-	result.Success(w, map[string]string{"csrf_token": csrf.Token(r)})
+// AuthContext 返回当前浏览器的 CSRF 令牌。
+func (s *Server) AuthContext(c *gin.Context) {
+	result.Success(c.Writer, map[string]string{"csrf_token": csrf.Token(c.Request)})
 }
 
-// authorizeInternal 验证调用方，并使用原始会话计算能力权限。
-func (s *Server) authorizeInternal(w http.ResponseWriter, r *http.Request) error {
-	var input contract.AuthorizeRequest
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
-	}
-
+// AuthorizeInternal 先确认服务身份，再按转发的原始会话执行权限检查。
+func (s *Server) AuthorizeInternal(ctx context.Context, request internalapi.AuthorizeInternalRequestObject) (internalapi.AuthorizeInternalResponseObject, error) {
+	c := ctx.(*gin.Context)
+	r := c.Request
+	input := request.Body
 	if !s.Security.InternalClient(r, input.Action) {
-		return authorization.ErrDenied
+		return nil, authorization.ErrDenied
 	}
-	// v1 只返回能力范围，不把未支持的对象上下文当作已完成对象授权。
 	if input.Resource != nil {
-		return repository.ErrInvalid
+		return nil, repository.ErrInvalid
 	}
-
 	parsed, err := url.ParseRequestURI(input.Path)
 	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Path == "" || input.Method == "" || len(input.Cookie) > 8192 {
-		return repository.ErrInvalid
+		return nil, repository.ErrInvalid
 	}
-
-	original := &http.Request{
-		Method:     input.Method,
-		URL:        parsed,
-		Header:     make(http.Header),
-		RemoteAddr: r.RemoteAddr,
-	}
-
-	original = original.WithContext(r.Context())
+	original := (&http.Request{Method: input.Method, URL: parsed, Header: make(http.Header), RemoteAddr: r.RemoteAddr}).WithContext(r.Context())
 	original.Header.Set("Cookie", input.Cookie)
 	original.Header.Set("Origin", input.Origin)
 	original.Header.Set("X-CSRF-Token", input.CSRFToken)
+	var decision contract.CapabilityDecision
 	var failure error
-
-	callback := iammiddleware.Session(s.Service.Sessions, s.clientIP)(s.Security.Protect(http.HandlerFunc(func(inner http.ResponseWriter, req *http.Request) {
-		decision, err := s.Service.Authorize(req.Context(), input.Action, input.OrgID)
+	buffer := iammiddleware.NewBuffer()
+	s.Security.Protect(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		var token string
+		if cookie, err := req.Cookie(s.Service.Sessions.Manager.Cookie.Name); err == nil {
+			token = cookie.Value
+		}
+		loaded, err := s.Service.Sessions.Manager.Load(req.Context(), token)
 		if err != nil {
-			failure = err
+			failure = authentication.ErrUnavailable
 			return
 		}
-
-		logging.From(req.Context()).Debug("内部能力校验通过", "event", "iam.authorized", "decision_id", decision.DecisionID, "action", input.Action, "org_id", input.OrgID, "user_id", decision.Principal.UserID)
-		result.Success(inner, decision)
-	})))
-
-	buffer := iammiddleware.NewBuffer()
-	callback.ServeHTTP(buffer, original)
+		decision, failure = s.Service.Authorize(loaded, input.Action, input.OrgID)
+	})).ServeHTTP(buffer, original)
 	if failure != nil {
-		return failure
+		return nil, failure
 	}
-	// 会话续期发生在服务端，内部授权响应不转发浏览器 Cookie。
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(buffer.Status)
-	_, _ = w.Write(buffer.Body.Bytes())
-	return nil
+	if buffer.Status >= 400 {
+		// 保留成熟CSRF组件的公开错误码；仅此HTTP适配边界解开它自己的错误响应。
+		var rejected contract.APIError
+		if buffer.Status != http.StatusForbidden || json.Unmarshal(buffer.Body.Bytes(), &rejected) != nil {
+			return nil, errors.New("invalid security component response")
+		}
+		rejected.RequestID = requestID(r)
+		return internalapi.AuthorizeInternal403JSONResponse{ForbiddenJSONResponse: internalapi.ForbiddenJSONResponse(rejected)}, nil
+	}
+	definition, _ := common.Lookup(common.CodeOK)
+	return internalapi.AuthorizeInternal200JSONResponse{Code: internalapi.AuthorizeInternal200JSONResponseBodyCode(common.CodeOK), Data: decision, Message: definition.Message, RequestID: requestID(r)}, nil
 }

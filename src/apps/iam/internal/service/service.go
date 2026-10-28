@@ -44,34 +44,22 @@ func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision
 			)
 		}
 	}()
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err = tx.Error
+	err = s.Store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		p, err := s.resolve(ctx, tx)
+		if err != nil {
+			return err
+		}
+		scope, err := s.authorizeTx(ctx, tx, p, action, orgID)
+		if err != nil {
+			return err
+		}
+		decision = contract.CapabilityDecision{Allowed: true, DecisionID: uuid.NewString(), Principal: p, Scope: scope}
+		return nil
+	})
 	if err != nil {
 		return contract.CapabilityDecision{}, err
 	}
-
-	defer tx.Rollback()
-
-	p, err := s.resolve(ctx, tx)
-	if err != nil {
-		return contract.CapabilityDecision{}, err
-	}
-
-	scope, err := s.authorizeTx(ctx, tx, p, action, orgID)
-	if err != nil {
-		return contract.CapabilityDecision{}, err
-	}
-
-	if err = tx.Commit().Error; err != nil {
-		return contract.CapabilityDecision{}, err
-	}
-
-	return contract.CapabilityDecision{
-		Allowed:    true,
-		DecisionID: uuid.NewString(),
-		Principal:  p,
-		Scope:      scope,
-	}, nil
+	return decision, nil
 }
 
 // resolve 在当前事务内解析并复核逻辑会话。
@@ -170,103 +158,97 @@ func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetTy
 		)
 	}()
 
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err = tx.Error
-	if err != nil {
-		return err
-	}
+	err = s.Store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		phase = "lock_management"
+		if err = repository.LockManagement(ctx, tx, repository.ManagementLock); err != nil {
+			return err
+		}
 
-	defer tx.Rollback()
-
-	phase = "lock_management"
-	if err = repository.LockManagement(ctx, tx, repository.ManagementLock); err != nil {
-		return err
-	}
-
-	phase = "resolve_actor"
-	sessionID, err := uuid.Parse(s.Sessions.Manager.GetString(ctx, authentication.LogicalSessionKey))
-	if err != nil {
-		return repository.ErrUnauthenticated
-	}
-
-	if err = repository.SessionUser(ctx, tx, sessionID, &actorID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+		phase = "resolve_actor"
+		sessionID, err := uuid.Parse(s.Sessions.Manager.GetString(ctx, authentication.LogicalSessionKey))
+		if err != nil {
 			return repository.ErrUnauthenticated
 		}
 
-		return err
-	}
+		if err = repository.SessionUser(ctx, tx, sessionID, &actorID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+				return repository.ErrUnauthenticated
+			}
 
-	userLocks := append([]uuid.UUID{actorID}, additionalUsers...)
-	if targetType == "user" && targetID != nil {
-		userLocks = append(userLocks, *targetID)
-	}
-
-	phase = "lock_users"
-	if err = repository.LockUsers(ctx, tx, userLocks); err != nil {
-		return err
-	}
-
-	phase = "resolve_session"
-	p, err := s.resolve(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	phase = "lock_organization"
-	if orgID != "" {
-		var lockedID uuid.UUID
-		if err = repository.LockOrganization(ctx, tx, orgID, &lockedID); err != nil {
 			return err
 		}
-	}
 
-	phase = "authorize"
-	if _, err = s.authorizeTx(ctx, tx, p, action, orgID); err != nil {
-		return err
-	}
+		userLocks := append([]uuid.UUID{actorID}, additionalUsers...)
+		if targetType == "user" && targetID != nil {
+			userLocks = append(userLocks, *targetID)
+		}
 
-	phase = "apply_change"
-	metadata := map[string]any{}
-	if err = change(tx, p, metadata); err != nil {
-		return err
-	}
+		phase = "lock_users"
+		if err = repository.LockUsers(ctx, tx, userLocks); err != nil {
+			return err
+		}
 
-	actorID, err = uuid.Parse(p.UserID)
-	if err != nil {
-		return err
-	}
-
-	phase = "bump_authorization_version"
-	var org *uuid.UUID
-	if orgID != "" {
-		parsed, err := uuid.Parse(orgID)
+		phase = "resolve_session"
+		p, err := s.resolve(ctx, tx)
 		if err != nil {
-			return repository.ErrInvalid
-		}
-
-		org = &parsed
-		if err = repository.BumpOrganizationVersion(ctx, tx, parsed); err != nil {
 			return err
 		}
-	}
 
-	phase = "append_audit"
-	if err = repository.AppendAudit(ctx, tx, repository.Audit{
-		OrgID:      org,
-		ActorID:    &actorID,
-		ActorName:  p.Username,
-		Action:     action,
-		TargetType: targetType,
-		TargetID:   targetID,
-		RequestID:  requestID,
-		Metadata:   metadata,
-	}); err != nil {
-		return err
-	}
+		phase = "lock_organization"
+		if orgID != "" {
+			var lockedID uuid.UUID
+			if err = repository.LockOrganization(ctx, tx, orgID, &lockedID); err != nil {
+				return err
+			}
+		}
 
-	phase = "commit"
-	err = tx.Commit().Error
+		phase = "authorize"
+		if _, err = s.authorizeTx(ctx, tx, p, action, orgID); err != nil {
+			return err
+		}
+
+		phase = "apply_change"
+		metadata := map[string]any{}
+		if err = change(tx, p, metadata); err != nil {
+			return err
+		}
+
+		actorID, err = uuid.Parse(p.UserID)
+		if err != nil {
+			return err
+		}
+
+		phase = "bump_authorization_version"
+		var org *uuid.UUID
+		if orgID != "" {
+			parsed, err := uuid.Parse(orgID)
+			if err != nil {
+				return repository.ErrInvalid
+			}
+
+			org = &parsed
+			if err = repository.BumpOrganizationVersion(ctx, tx, parsed); err != nil {
+				return err
+			}
+		}
+
+		phase = "append_audit"
+		if err = repository.AppendAudit(ctx, tx, repository.Audit{
+			OrgID:      org,
+			ActorID:    &actorID,
+			ActorName:  p.Username,
+			Action:     action,
+			TargetType: targetType,
+			TargetID:   targetID,
+			RequestID:  requestID,
+			Metadata:   metadata,
+		}); err != nil {
+			return err
+		}
+
+		phase = "commit"
+		return nil
+	})
 	committed = err == nil
 	return err
 }

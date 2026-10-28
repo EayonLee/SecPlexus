@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-	"github.com/go-chi/chi/v5"
 
 	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
@@ -22,7 +23,9 @@ func TestBoundaryKeepsRequestIDAndRecoversBeforeCommit(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("X-Request-ID", "untrusted")
-		Boundary(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		router := NewEngine()
+		router.GET("/", func(c *gin.Context) {
+			w, r := c.Writer, c.Request
 			if RequestID(r) == "untrusted" || RequestID(r) == "" {
 				t.Fatal("request ID was not generated at the boundary")
 			}
@@ -32,7 +35,8 @@ func TestBoundaryKeepsRequestIDAndRecoversBeforeCommit(t *testing.T) {
 			}
 
 			result.Success(w, []string{})
-		})).ServeHTTP(w, r)
+		})
+		router.ServeHTTP(w, r)
 		var value common.Result[any]
 		if err := json.Unmarshal(w.Body.Bytes(), &value); err != nil {
 			t.Fatal(err)
@@ -54,22 +58,23 @@ func TestBoundaryLogsSafeRoute(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	router := chi.NewRouter()
-	router.With(CaptureRoute).Get("/items/{id}", func(w http.ResponseWriter, r *http.Request) {
+	router := NewEngine()
+	router.GET("/items/:id", func(c *gin.Context) {
+		r := c.Request
 		logging.From(r.Context()).Info("核心步骤", "event", "test.step")
 		panic("secret-panic")
 	})
 	request := httptest.NewRequest("GET", "/items/secret-id?token=secret-query", nil)
 	request.Header.Set("Authorization", "secret-header")
 	response := httptest.NewRecorder()
-	Boundary(router).ServeHTTP(response, request)
+	router.ServeHTTP(response, request)
 	if response.Code != 500 {
 		t.Fatal("panic did not return uniform failure")
 	}
 	if strings.Contains(output.String(), "secret-") {
 		t.Fatal("request or panic value leaked")
 	}
-	if !strings.Contains(output.String(), `"route":"/items/{id}"`) {
+	if !strings.Contains(output.String(), `"route":"/items/:id"`) {
 		t.Fatal("matched route missing")
 	}
 	scanner := bufio.NewScanner(&output)
@@ -90,11 +95,11 @@ func TestRejectedBeforeRouterStillLogsPattern(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	router := chi.NewRouter()
-	router.Get("/items/{id}", func(http.ResponseWriter, *http.Request) { t.Fatal("rejected request reached handler") })
-	rejected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { result.Fail(w, common.CodeOriginInvalid) })
-	Boundary(rejected, router).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/items/secret-id?token=secret-query", nil))
-	if strings.Contains(output.String(), "secret-") || !strings.Contains(output.String(), `"route":"/items/{id}"`) {
+	router := NewEngine()
+	router.Use(func(c *gin.Context) { result.Fail(c.Writer, common.CodeOriginInvalid); c.Abort() })
+	router.GET("/items/:id", func(*gin.Context) { t.Fatal("rejected request reached handler") })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/items/secret-id?token=secret-query", nil))
+	if strings.Contains(output.String(), "secret-") || !strings.Contains(output.String(), `"route":"/items/:id"`) {
 		t.Fatal("early rejection lost safe route correlation")
 	}
 }

@@ -1,0 +1,1199 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SecPlexus iam schemas",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "APIPrincipal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "session_id": {
+            "type": "string",
+            "x-go-name": "SessionID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "x-go-name": "IsSuperAdmin"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "AuthenticatedAt"
+          },
+          "reauthenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-go-name": "ReauthenticatedAt"
+          }
+        },
+        "required": [
+          "user_id",
+          "session_id",
+          "username",
+          "display_name",
+          "is_super_admin",
+          "auth_version",
+          "authenticated_at"
+        ]
+      },
+      "APIResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "x-go-name": "Type"
+          },
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "APIAuthorizedScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "x-go-name": "Kind"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "APIAuthorizeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cookie": {
+            "type": "string",
+            "x-go-name": "Cookie"
+          },
+          "method": {
+            "type": "string",
+            "x-go-name": "Method"
+          },
+          "path": {
+            "type": "string",
+            "x-go-name": "Path"
+          },
+          "origin": {
+            "type": "string",
+            "x-go-name": "Origin"
+          },
+          "csrf_token": {
+            "type": "string",
+            "x-go-name": "CSRFToken"
+          },
+          "action": {
+            "type": "string",
+            "x-go-name": "Action"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/APIResource",
+            "x-go-name": "Resource"
+          }
+        },
+        "required": [
+          "cookie",
+          "method",
+          "path",
+          "origin",
+          "csrf_token",
+          "action"
+        ]
+      },
+      "APICapabilityDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "x-go-name": "Allowed"
+          },
+          "decision_id": {
+            "type": "string",
+            "x-go-name": "DecisionID"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/APIAuthorizedScope",
+            "x-go-name": "Scope"
+          }
+        },
+        "required": [
+          "allowed",
+          "decision_id",
+          "principal",
+          "scope"
+        ]
+      },
+      "APIError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Result"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "data": {
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "APIUserInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "type": "string",
+            "x-go-name": "Username",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{2,63}$"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "username",
+          "display_name",
+          "password"
+        ]
+      },
+      "APIUserUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          }
+        },
+        "required": [
+          "display_name",
+          "status",
+          "auth_version"
+        ]
+      },
+      "APIOrganizationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "x-go-name": "Slug",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "admin_user_id": {
+            "type": "string",
+            "x-go-name": "AdminUserID"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "admin_user_id"
+        ]
+      },
+      "APIOrganizationUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "x-go-name": "Name",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "name",
+          "authz_version"
+        ]
+      },
+      "APIRoleInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Code",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Description",
+            "maxLength": 1000
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "x-go-type": "string"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Version"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "APIGrantsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,string"
+            },
+            "x-go-name": "Version"
+          }
+        },
+        "required": [
+          "permissions",
+          "version"
+        ]
+      },
+      "APIMemberRolesInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "role_ids",
+          "authz_version"
+        ]
+      },
+      "APIMemberUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "authz_version"
+        ]
+      },
+      "APIMemberInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "UserID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Username",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{2,63}$"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "DisplayName",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "email": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Password"
+          }
+        },
+        "required": []
+      },
+      "APIPreviewInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "RoleID"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Version"
+          },
+          "membership_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "MembershipID"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,omitempty,string"
+            },
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": []
+      },
+      "APILoginInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "APIChangePasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "old_password": {
+            "type": "string",
+            "x-go-name": "OldPassword"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "NewPassword"
+          }
+        },
+        "required": [
+          "old_password",
+          "new_password"
+        ]
+      },
+      "APIReauthenticateInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string",
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "password"
+        ]
+      },
+      "APIResetPasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "x-go-name": "Password"
+          }
+        },
+        "required": [
+          "password"
+        ]
+      },
+      "APISetSuperAdminInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "x-go-name": "Enabled"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "x-go-name": "Reason"
+          }
+        },
+        "required": [
+          "enabled",
+          "reason"
+        ]
+      },
+      "APIOrganization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "slug": {
+            "type": "string",
+            "x-go-name": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "status": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "Status"
+          },
+          "authz_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "authz_version,string"
+            },
+            "x-go-name": "AuthzVersion"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "authz_version"
+        ]
+      },
+      "APIMe": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          },
+          "organizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/APIOrganization"
+            },
+            "x-go-name": "Organizations"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Capabilities"
+          },
+          "platform_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "PlatformCapabilities"
+          },
+          "org_id": {
+            "type": "string",
+            "x-go-type-skip-optional-pointer": true,
+            "x-go-name": "OrgID"
+          }
+        },
+        "required": [
+          "principal",
+          "organizations",
+          "capabilities",
+          "platform_capabilities"
+        ]
+      },
+      "APIRole": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "code": {
+            "type": "string",
+            "x-go-name": "Code"
+          },
+          "name": {
+            "type": "string",
+            "x-go-name": "Name"
+          },
+          "description": {
+            "type": "string",
+            "x-go-name": "Description"
+          },
+          "kind": {
+            "type": "string",
+            "x-go-name": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "x-go-type": "string"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "version,string"
+            },
+            "x-go-name": "Version"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Permissions"
+          },
+          "member_count": {
+            "type": "integer",
+            "x-go-name": "MemberCount",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "AllowedActions"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "kind",
+          "status",
+          "version",
+          "permissions",
+          "member_count",
+          "allowed_actions"
+        ]
+      },
+      "APIUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "x-go-name": "Email"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "x-go-name": "IsSuperAdmin"
+          },
+          "auth_version": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "x-go-type": "int64",
+            "x-oapi-codegen-extra-tags": {
+              "json": "auth_version,string"
+            },
+            "x-go-name": "AuthVersion"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "email",
+          "status",
+          "is_super_admin",
+          "auth_version"
+        ]
+      },
+      "APIMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          },
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "username": {
+            "type": "string",
+            "x-go-name": "Username"
+          },
+          "display_name": {
+            "type": "string",
+            "x-go-name": "DisplayName"
+          },
+          "status": {
+            "type": "string",
+            "x-go-name": "Status"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "RoleIDs"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "username",
+          "display_name",
+          "status"
+        ]
+      },
+      "APIAuditEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "occurred_at",
+          "action",
+          "outcome",
+          "request_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "actor_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "actor_type": {
+            "type": "string",
+            "nullable": false
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "target_type": {
+            "type": "string",
+            "nullable": false
+          },
+          "target_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "APISession": {
+        "type": "object",
+        "required": [
+          "id",
+          "current",
+          "last_seen_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authenticated_at": {
+            "type": "string"
+          },
+          "idle_expires_at": {
+            "type": "string"
+          },
+          "absolute_expires_at": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          },
+          "client_ip": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "APIPermission": {
+        "type": "object",
+        "required": [
+          "key",
+          "scope",
+          "status",
+          "module",
+          "resource_type",
+          "action",
+          "description",
+          "risk_level",
+          "delegable",
+          "requires_recent_auth"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "delegable": {
+            "type": "boolean"
+          },
+          "requires_recent_auth": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "APIPermissionItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permission": {
+            "$ref": "#/components/schemas/APIPermission",
+            "x-go-name": "Permission"
+          },
+          "can_delegate": {
+            "type": "boolean",
+            "x-go-name": "CanDelegate"
+          }
+        },
+        "required": [
+          "permission",
+          "can_delegate"
+        ]
+      },
+      "APIPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Before"
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "After"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Added"
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "x-go-name": "Removed"
+          },
+          "affected_members": {
+            "type": "integer",
+            "x-go-name": "AffectedMembers",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          }
+        },
+        "required": [
+          "before",
+          "after",
+          "added",
+          "removed",
+          "affected_members"
+        ]
+      },
+      "APISecurityOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_idle_timeout": {
+            "type": "string",
+            "x-go-name": "SessionIdleTimeout"
+          },
+          "session_absolute_timeout": {
+            "type": "string",
+            "x-go-name": "SessionAbsoluteTimeout"
+          },
+          "reauth_window": {
+            "type": "string",
+            "x-go-name": "ReauthWindow"
+          },
+          "login_max_failures": {
+            "type": "integer",
+            "x-go-name": "LoginMaxFailures"
+          },
+          "login_lock_duration": {
+            "type": "string",
+            "x-go-name": "LoginLockDuration"
+          },
+          "self_registration": {
+            "type": "boolean",
+            "x-go-name": "SelfRegistration"
+          }
+        },
+        "required": [
+          "session_idle_timeout",
+          "session_absolute_timeout",
+          "reauth_window",
+          "login_max_failures",
+          "login_lock_duration",
+          "self_registration"
+        ]
+      },
+      "APICreated": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "x-go-name": "ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "APILoginResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/APIPrincipal",
+            "x-go-name": "Principal"
+          }
+        },
+        "required": [
+          "principal"
+        ]
+      },
+      "APICSRFContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "x-go-name": "CSRFToken"
+          }
+        },
+        "required": [
+          "csrf_token"
+        ]
+      },
+      "APIResult": {
+        "$ref": "#/components/schemas/Result"
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthenticated",
+          "permission_denied",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "internal_error",
+          "service_unavailable",
+          "payload_too_large",
+          "unsupported_media_type",
+          "method_not_allowed",
+          "iam.invalid_credentials",
+          "iam.invalid_current_password",
+          "iam.csrf_invalid",
+          "iam.origin_invalid",
+          "iam.recent_auth_required"
+        ]
+      },
+      "Result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "nullable": true
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "x-go-name": "RequestID"
+          }
+        }
+      }
+    }
+  }
+}

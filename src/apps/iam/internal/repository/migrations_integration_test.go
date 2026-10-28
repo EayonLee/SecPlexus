@@ -3,7 +3,9 @@
 package repository_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -133,5 +135,77 @@ func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
 
 	if obsolete != 0 {
 		t.Fatal("过时密码状态列未删除")
+	}
+}
+
+// TestSchemaInspectionNeverInitializesVersionTable 验证 serve/status 在空库中只读失败。
+func TestSchemaInspectionNeverInitializesVersionTable(t *testing.T) {
+	store := testutil.UnmigratedDatabase(t)
+	ctx := context.Background()
+	if err := store.VerifySchema(ctx); err == nil {
+		t.Fatal("empty schema reported ready")
+	}
+	var output bytes.Buffer
+	if err := repository.Status(ctx, store.Pool.Config().ConnConfig.ConnString(), &output); err == nil {
+		t.Fatal("empty schema reported initialized")
+	}
+	var exists bool
+	if err := store.Pool.QueryRow(ctx, `SELECT to_regclass('iam_goose_db_version') IS NOT NULL OR to_regnamespace('iam') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("schema inspection issued implicit initialization DDL")
+	}
+}
+
+// TestMigrationStatusDistinguishesPendingCurrentAndAhead 验证版本来自Provider而非硬编码常量。
+func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
+	store := testutil.UnmigratedDatabase(t)
+	ctx := context.Background()
+	db := stdlib.OpenDBFromPool(store.Pool)
+	defer func() { _ = db.Close() }()
+	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Seed(ctx, "status-admin", "isolated migration status password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifySchema(ctx); err == nil {
+		t.Fatal("pending migrations accepted for serving")
+	}
+	var output bytes.Buffer
+	if err := repository.Status(ctx, store.Pool.Config().ConnConfig.ConnString(), &output); err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Current int64 `json:"current_version"`
+		Target  int64 `json:"target_version"`
+		Pending bool  `json:"pending"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Pending || state.Target <= state.Current {
+		t.Fatal("pending state did not reflect migration sources")
+	}
+	if err := repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := versionStore.Insert(ctx, db, database.InsertRequest{Version: state.Target + 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifySchema(ctx); err == nil {
+		t.Fatal("future schema accepted by older application")
 	}
 }

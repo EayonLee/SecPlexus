@@ -1,0 +1,33 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SecPlexus result codes",
+    "version": "1.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthenticated",
+          "permission_denied",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "internal_error",
+          "service_unavailable",
+          "payload_too_large",
+          "unsupported_media_type",
+          "method_not_allowed",
+          "iam.invalid_credentials",
+          "iam.invalid_current_password",
+          "iam.csrf_invalid",
+          "iam.origin_invalid",
+          "iam.recent_auth_required"
+        ]
+      }
+    }
+  }
+}

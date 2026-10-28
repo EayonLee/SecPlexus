@@ -27,8 +27,10 @@ func configFile(t *testing.T) string {
 func TestConfigurationPrecedence(t *testing.T) {
 	file := configFile(t)
 	data, _ := os.ReadFile(file)
-	data = []byte(strings.Replace(string(data), "${SPX_IAM_PORT:8081}", "${SPX_IAM_PORT:9081}", 1))
-	os.WriteFile(file, data, 0600)
+	data = []byte(strings.Replace(string(data), "port: 8081", "port: 9081", 1))
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("SPX_IAM_PORT", "9082")
 	cfg, err := Load(file)
 	if err != nil {
@@ -51,8 +53,12 @@ func TestConfigurationPrecedence(t *testing.T) {
 func TestConfigurationRejectsUnknownFields(t *testing.T) {
 	file := configFile(t)
 	f, _ := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0600)
-	f.WriteString("\ntypo: true\n")
-	f.Close()
+	if _, err := f.WriteString("\ntypo: true\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Load(file); err == nil {
 		t.Fatal("unknown field accepted")
 	}
@@ -104,7 +110,9 @@ func TestSharedDatabaseDefaultsAndExplicitModuleOverride(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(file)
-	replaced := strings.NewReplacer("${SPX_POSTGRES_HOST:127.0.0.1}", "module-database", "${SPX_POSTGRES_USER:secplexus}", "module_user").Replace(string(data))
+	replaced := strings.NewReplacer("host: \"127.0.0.1\"", "host: \"module-database\"").Replace(string(data))
+	t.Setenv("SPX_IAM_POSTGRES_HOST", "module-database")
+	t.Setenv("SPX_IAM_POSTGRES_USER", "module_user")
 	if err = os.WriteFile(file, []byte(replaced), 0600); err != nil {
 		t.Fatal(err)
 	}

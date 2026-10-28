@@ -37,10 +37,10 @@ type Store struct {
 // NewStore 基于现有连接池创建 ORM；失败时不接管调用方连接池。
 func NewStore(pool *pgxpool.Pool) (*Store, error) {
 	sqlDB := stdlib.OpenDBFromPool(pool)
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{Logger: queryLogger{level: logger.Warn}})
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{TranslateError: true, Logger: queryLogger{level: logger.Warn}})
 	if err != nil {
-		sqlDB.Close()
-		return nil, err
+		closeErr := sqlDB.Close()
+		return nil, errors.Join(err, closeErr)
 	}
 
 	return &Store{
@@ -234,8 +234,8 @@ func CreateOrganization(ctx context.Context, tx *gorm.DB, id uuid.UUID, slug, na
 // VerifySchema 校验迁移版本及初始管理员，不在服务启动时自动改表。
 func (s *Store) VerifySchema(ctx context.Context) error {
 	var err error
-	var version int64
-	if err = s.Pool.QueryRow(ctx, `SELECT COALESCE(max(version_id),0) FROM public.iam_goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 2 {
+	current, target, pending, err := schemaState(ctx, s.sqlDB)
+	if err != nil || pending || current != target {
 		return errors.New("IAM schema version is incompatible; run the matching migration before serving")
 	}
 

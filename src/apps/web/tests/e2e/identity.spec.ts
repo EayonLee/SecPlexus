@@ -1,6 +1,6 @@
 import { type APIRequestContext, expect, type Page, request, test } from "@playwright/test";
 
-import type { components } from "../../src/auth/api.gen";
+import type { ApiRole } from "../../src/spx/api/iam/types.gen";
 import { randomBytes } from "node:crypto";
 
 declare global {
@@ -136,7 +136,7 @@ test("管理中心保留应用外壳，自定义角色可创建、配置权限�
   await page.getByRole("button", { name: "创建角色", exact: true }).click();
   await page.getByPlaceholder("例如 security_auditor").fill(`audit_${randomBytes(4).toString("hex")}`);
   const roleName = `审计角色 ${randomBytes(3).toString("hex")}`;
-  await page.getByPlaceholder("例如 审计员").fill(roleName);
+  await page.getByRole("dialog").getByLabel("角色名称", {exact:true}).fill(roleName);
   await page.getByRole("button", { name: "确定", exact: true }).click();
   const row = page.getByRole("row").filter({ hasText: roleName });
   await expect(row).toBeVisible();
@@ -144,7 +144,7 @@ test("管理中心保留应用外壳，自定义角色可创建、配置权限�
   await page.getByRole("tab", { name: "权限", exact: true }).click();
   await page.getByText("查看组织审计", { exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "查看组织审计", exact: true })).toBeChecked();
-  await page.getByRole("button", { name: "预览影响" }).click();
+  await page.getByRole("button", { name: "预览变更影响", exact: true }).click();
   await expect(page.getByText(/影响 0 位成员/)).toBeVisible();
   await page.getByRole("button", { name: "保存权限", exact: true }).click();
   await expect(page.getByText("权限已保存，后续请求立即生效")).toBeVisible();
@@ -172,9 +172,7 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
   const admin = await adminClient();
   const me = (await (await admin.get("/api/v1/iam/me")).json()).data;
   const org = me.organizations[0].id;
-  const roles: components["schemas"]["APIRole"][] = (
-    await (await admin.get(`/api/v1/iam/orgs/${org}/roles?limit=100`)).json()
-  ).data.items;
+  const roles: ApiRole[] = (await (await admin.get(`/api/v1/iam/orgs/${org}/roles?limit=100`)).json()).data.items;
   const orgAdmin = roles.find((role) => role.kind === "system" && role.code === "org_admin");
   if (!orgAdmin) throw new Error("Built-in organization administrator role is missing");
   for (const scenario of [

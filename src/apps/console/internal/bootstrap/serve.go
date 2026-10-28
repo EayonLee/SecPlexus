@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/handler"
@@ -17,13 +17,13 @@ import (
 )
 
 // Serve 初始化 Console 所需的客户端和 HTTP 服务，并管理它们的生命周期。
-func Serve(cfg config.Config) error {
+func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
 	if err != nil {
 		return err
 	}
 
-	defer closeLog()
+	defer func() { outcome = errors.Join(outcome, closeLog()) }()
 
 	slog.SetDefault(logger)
 	credential := cfg.IAM.Token
@@ -42,29 +42,30 @@ func Serve(cfg config.Config) error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
-	failures := make(chan error, 1)
-	go func() { failures <- server.ListenAndServe() }()
+	group, serving := errgroup.WithContext(ctx)
+	server.BaseContext = func(net.Listener) context.Context { return serving }
+	group.Go(func() error {
+		err := server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	})
+	group.Go(func() error {
+		<-serving.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := server.Shutdown(shutdown)
+		if err != nil {
+			err = errors.Join(err, server.Close())
+		}
+		return err
+	})
 	slog.Info("HTTP 监听启动中", "event", "service.starting", "addr", cfg.App.Addr())
-	select {
-	case <-ctx.Done():
-	case err = <-failures:
+	if err := group.Wait(); err != nil {
+		logging.From(ctx).Error("HTTP 服务关闭失败", "event", "service.listener_failed", "error", logging.Error(err))
+		return errors.New("console HTTP listener failed")
 	}
-
-	slog.Info("正在关闭 HTTP 服务", "event", "service.stopping")
-	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if stopErr := server.Shutdown(shutdown); stopErr != nil {
-		return stopErr
-	}
-
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("HTTP 监听异常结束", "event", "service.listener_failed", "error", logging.Error(err))
-		return errors.New("Console HTTP listener failed")
-	}
-
 	return nil
 }

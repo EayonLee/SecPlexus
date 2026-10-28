@@ -8,6 +8,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
+	"github.com/gin-gonic/gin/render"
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/contracts/common"
@@ -95,10 +96,11 @@ func write(w http.ResponseWriter, status int, value common.Result[any]) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	encoded := render.Data{ContentType: "application/json; charset=utf-8", Data: data}
+	encoded.WriteContentType(w)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil {
+	if err := encoded.Render(w); err != nil {
 		slog.Warn("响应已提交但发送失败", "event", "http.write_failed", "request_id", value.RequestID, "error", logging.Error(err))
 	}
 }
