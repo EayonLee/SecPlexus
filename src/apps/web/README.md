@@ -78,3 +78,11 @@ Use typed `useTranslations` / `getTranslations` message keys and ICU placeholder
 Translate platform text, stable permission labels and built-in role names. Preserve account names, organization names, custom role names, identifiers and other user data. API errors use stable result-code-to-message-key mappings; never translate or display raw internal error bodies. CRM sample labels retain their sales meaning: leads are 销售线索 and won projects are 成交项目, not invented security metrics.
 
 Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboard component rendering in both languages. Existing IAM E2E selects Chinese explicitly, so it does not depend on the default locale. Run the local unit/type/build checks after adding translations; browser checks should verify switching, refresh persistence, translated accessibility labels, metadata and narrow layouts.
+
+## Typed API, query and form boundaries
+
+`openapi-ts.config.ts` generates the public Fetch SDK, Zod validators and TanStack Query options under `src/spx/api/`. Do not edit that folder; the root manifest checks new, changed and removed outputs. `pnpm contracts:check` verifies generation without modifying the workspace. Internal IAM authorization never enters this SDK.
+
+`spx/iam/session.ts` configures the generated clients before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session, identity and organization authorization versions. Logout/organization changes cancel and clear caches. Password login, confirmation, change and reset call the SDK directly and never enter MutationCache or persistent storage.
+
+IAM lists use Query and the existing TanStack Table with controlled server pagination. RHF uses generated Zod schemas and existing shadcn Field/FieldError controls; business pages declare fields explicitly. There is no string-map form DSL or effect/revision list fetcher. See the [role implementation walkthrough](../../../docs/development/role-management.md).

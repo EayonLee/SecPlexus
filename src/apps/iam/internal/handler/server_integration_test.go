@@ -135,6 +135,7 @@ func newAPIClient(t *testing.T, base, origin string) *apiClient {
 
 // httpFixture 持有本用例独占的服务、数据和调用凭证。
 type httpFixture struct {
+	redis                         *redis.Client
 	server                        *Server
 	public, internal              *httptest.Server
 	initial, password, credential string
@@ -165,9 +166,9 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	public := httptest.NewUnstartedServer(nil)
 	cfg.App.PublicURL = "http://" + public.Listener.Addr().String()
 	cfg.Auth.CSRFKey = hex.EncodeToString(key)
-	cfg.App.TrustedProxyCIDRs = config.CIDRs{"127.0.0.1/32"}
+	cfg.App.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
 	credential := hex.EncodeToString(key) + hex.EncodeToString(key)
-	cfg.Internal.Clients = []config.InternalClient{{ID: "console", Token: credential, Actions: []string{"iam.organizations.read"}}}
+	cfg.Internal.Clients = map[string]config.InternalClient{"console": {Token: credential, Actions: []string{"iam.organizations.read"}}}
 	options, err := redis.ParseURL(os.Getenv("SPX_TEST_REDIS_URL"))
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +227,11 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	}
 
 	service := &service.Service{Store: store, Sessions: authentication.NewSessions(store, cfg), Config: cfg}
-	server, err := New(service, security, &authentication.Limiter{Client: redisClient}, func(ctx context.Context) error {
+	limiter, err := authentication.NewLimiter(redisClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(service, security, limiter, func(ctx context.Context) error {
 		if err := store.Pool.Ping(ctx); err != nil {
 			return err
 		}
@@ -242,7 +247,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	t.Cleanup(public.Close)
 	internal := httptest.NewTLSServer(server.InternalHandler())
 	t.Cleanup(internal.Close)
-	return &httpFixture{admin: adminUsername, member: memberUsername,
+	return &httpFixture{redis: redisClient, admin: adminUsername, member: memberUsername,
 		server:     server,
 		public:     public,
 		internal:   internal,

@@ -13,7 +13,7 @@
   "paths": {
     "/api/v1/console/orgs/{org_id}/context": {
       "get": {
-        "operationId": "getApiV1ConsoleOrgsOrgIdContext",
+        "operationId": "context",
         "responses": {
           "200": {
             "description": "Success",
@@ -22,7 +22,7 @@
                 "schema": {
                   "allOf": [
                     {
-                      "$ref": "#/components/schemas/APIResult"
+                      "$ref": "schemas.source.json#/components/schemas/APIResult"
                     },
                     {
                       "type": "object",
@@ -34,9 +34,13 @@
                           ]
                         },
                         "data": {
-                          "$ref": "#/components/schemas/APIConsoleContext"
+                          "$ref": "schemas.source.json#/components/schemas/APIConsoleContext"
                         }
-                      }
+                      },
+                      "required": [
+                        "code",
+                        "data"
+                      ]
                     }
                   ]
                 }
@@ -83,7 +87,7 @@
     },
     "/api/v1/console/orgs/{org_id}/events": {
       "get": {
-        "operationId": "getApiV1ConsoleOrgsOrgIdEvents",
+        "operationId": "events",
         "responses": {
           "200": {
             "description": "SSE, authorization rechecked every 30 seconds",
@@ -143,66 +147,13 @@
         "description": "HTTPS deployments use __Host-spx_session instead."
       }
     },
-    "schemas": {
-      "APIError": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/APIResult"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "code": {
-                "$ref": "#/components/schemas/ErrorCode"
-              },
-              "data": {
-                "nullable": true,
-                "enum": [
-                  null
-                ]
-              }
-            }
-          }
-        ]
-      },
-      "APIConsoleContext": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "org_id": {
-            "type": "string",
-            "x-go-name": "OrgID"
-          },
-          "user_id": {
-            "type": "string",
-            "x-go-name": "UserID"
-          },
-          "decision_id": {
-            "type": "string",
-            "x-go-name": "DecisionID"
-          }
-        },
-        "required": [
-          "org_id",
-          "user_id",
-          "decision_id"
-        ]
-      },
-      "APIResult": {
-        "$ref": "../common/openapi.json#/components/schemas/Result"
-      },
-      "ErrorCode": {
-        "type": "string",
-        "x-spx-error-codes": true
-      }
-    },
     "responses": {
       "BadRequest": {
         "description": "Invalid input",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -212,7 +163,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -222,7 +173,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -232,7 +183,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -242,7 +193,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -252,7 +203,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -262,7 +213,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -272,7 +223,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -282,7 +233,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }
@@ -292,7 +243,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/APIError"
+              "$ref": "schemas.source.json#/components/schemas/APIError"
             }
           }
         }

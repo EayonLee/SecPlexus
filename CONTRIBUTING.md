@@ -250,14 +250,12 @@ For a checkout with the `upstream` remote configured above, start a branch with:
 
 ```sh
 git fetch upstream
-git switch -c fix/session-expiry upstream/main
+git switch -c session-expiry upstream/main
 ```
 
-Name new work branches `<type>/<description>`, using the commit types below and
-a short lowercase kebab-case description, such as `feat/iam-login` or
-`docs/contribution-guide`. When a change relates to an existing issue, include
-its number: `fix/123-session-expiry`. An issue is not required for every change;
-do not create one just to obtain a branch name.
+Name branches with at most three lowercase words separated by hyphens, such as
+`iam-login` or `contribution-guide`. Do not use slashes or type prefixes.
+An issue is not required for every change.
 
 Use `type(scope): summary` for commit messages and PR titles; the scope is
 optional. Supported types are `feat`, `fix`, `docs`, `chore`, `refactor`, and
@@ -294,3 +292,9 @@ and sync your fork for the next contribution.
 AI-assisted contributions follow the same process. You are responsible for
 understanding the submitted changes, checking generated code, and verifying the
 reported test results.
+
+### Framework integration
+
+Use native Gin handlers and middleware with the generated OpenAPI routes. IAM credential use cases take typed values; Argon2id, SCS, CSRF and the Redis limiter own their mechanisms. Use GORM projections/transactions and Goose migrations, and Viper/mapstructure with Cobra for configuration and commands. See the [actual role management walkthrough](docs/development/role-management.md); do not create another generic utility or routing layer for an existing framework capability.
+
+Generate public Web SDK/Zod/Query outputs through the root command. Query owns server state; RHF and generated schemas own forms. Sensitive password operations stay outside MutationCache. Preserve the template components/styles and next-intl catalogs. Run `make lint-go`, `make vuln-go` and the applicable checks in the [testing guide](docs/testing.md); these are local checks, not a deployment or CI workflow.

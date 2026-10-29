@@ -13,8 +13,10 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 
 - Brand `SecPlexus`, abbreviation `spx`, environment prefix `SPX_`. Apps: `src/apps`; real shared code: `src/packages`; authoritative contracts: `src/contracts`. No cross-module private access or manual edits to generated files.
 - APIs: `/api/v1/{module}/...` and authenticated, isolated `/internal/v1/{module}/...`. Register routes in `internal/router`; synchronize contracts and clients. Shared responses use `src/packages/go/result`, request binding uses `httpx`, and common middleware uses `httpx/middleware`; follow OpenAPI, including streaming/empty responses. Default same-origin; preserve server authorization and credentialed CORS restrictions.
+- Go HTTP uses Gin and generated OpenAPI handlers. Use native groups, errors/recovery, trusted proxies and streaming; keep IAM session commit protection narrow. Credential use cases accept typed values; do not add HTTP replay or a second authentication/session stack.
+- Generate Web SDK/Zod/Query from public contracts only. Use Query for server state, RHF with generated schemas for forms; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Do not hand-edit generated files.
 - Console owns security operations business and necessary operational query aggregation. It is not a mandatory gateway for other modules. IAM owns identity and authorization; route its APIs through the same-origin entry without duplicating handlers, DTOs or business rules in Console. See the Console README for ownership boundaries.
-- Modules own config, startup, and tables. Go uses structured `config.yaml` with environment placeholders/defaults; Web uses native environment configuration. Validate configuration at loading, derive endpoints, centralize typed cache keys, and allow module overrides of shared connections. See [configuration](docs/configuration.md).
+- Modules own config, startup, and tables. Go uses plain structured `config.yaml` with Viper/mapstructure, explicit environment bindings and typed defaults; Web uses native environment configuration. Validate configuration at loading, derive endpoints, centralize typed cache keys, and allow module overrides of shared connections. See [configuration](docs/configuration.md).
 - Read environment variables only during configuration loading. Assemble dependencies at startup and pass explicitly; context carries cancellation, deadlines, and request data, not dependencies. Extract shared code only for actual cross-app reuse.
 
 ## Style Guide
@@ -44,7 +46,7 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 - Behavior changes start with a focused failing test. Unit: rules/boundaries; integration: real component contracts; E2E: core flows/access boundaries. Avoid mocks, duplicated implementation logic, and permanent integration/E2E cases for temporary diagnostics.
 - Isolate test resources, await readiness, and clean up only owned resources. No sleeps/retries masking failure. Run relevant checks and report actual results/gaps; see [testing](docs/testing.md) for commands and standards.
-- New branches: `<type>/<short-kebab-description>`; types match commits below, e.g. `feat/iam-login`. Include an existing issue number when relevant: `fix/123-session-expiry`; creating an issue is not mandatory.
+- Branches: at most three hyphen-separated words, no slashes/type prefixes.
 - Create one short-lived branch per change from the latest `main`; keep review fixes on the same PR branch and delete it after merge.
 - Commits/PRs: `type(scope): summary`; optional scope; types `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
 

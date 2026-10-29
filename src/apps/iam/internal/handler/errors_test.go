@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/contracts/common"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TestErrorMappingKeepsHTTPAndPublicCode 校验真实状态语义，未知错误和数据库 Detail 不能返回前端。
@@ -22,6 +24,7 @@ func TestErrorMappingKeepsHTTPAndPublicCode(t *testing.T) {
 		code   common.Code
 	}{
 		{repository.ErrUnauthenticated, 401, common.CodeUnauthenticated},
+		{authentication.ErrInvalidCredentials, 401, common.CodeInvalidCredentials},
 		{repository.ErrInvalid, 400, common.CodeInvalidRequest},
 		{context.DeadlineExceeded, 503, common.CodeServiceUnavailable},
 		{context.Canceled, 503, common.CodeServiceUnavailable},

@@ -6,7 +6,7 @@
 
 | 计划 ID | 需求名称 | 范围 | 状态 | Spec | Plan |
 |---|---|---|---|---|---|
-| gin-service-refactor | Gin 服务基础与业务开发规范重构 | IAM / Console / HTTP 与配置 / ORM / 契约生成 / 开发范例与治理 | 计划草案，待审核；未实施 | [Spec](gin-service-refactor/spec.md) | [Plan](gin-service-refactor/plan.md) |
+| gin-service-refactor | Gin 与全栈框架能力重构 | IAM / Console / Gin 中间件 / 数据与配置命令 / 限流 / 契约与 Web 工程 / 治理 | 实现及本地验收完成，待 PR 审查 | [Spec](gin-service-refactor/spec.md) | [Plan](gin-service-refactor/plan.md) |
 | local-origin-compatibility | 本机来源兼容 | IAM / CSRF / 浏览器验收 | 实施及本地验收完成；未提交 | [Spec](local-origin-compatibility/spec.md) | [Plan](local-origin-compatibility/plan.md) |
 | web-internationalization | Web 中英文国际化 | next-intl / 消息词典 / 语言切换 / 格式与文档 | 实施及本地验证完成；真实认证E2E未执行 | [Spec](web-internationalization/spec.md) | [Plan](web-internationalization/plan.md) |
 | web-workbench | 安全智驾工作台与服务职责收敛 | Console 边界 / Web 页面与菜单 / 按需模板接入 | 实施及本地检查完成；登录后浏览器验收受限 | [Spec](web-workbench/spec.md) | [Plan](web-workbench/plan.md) |

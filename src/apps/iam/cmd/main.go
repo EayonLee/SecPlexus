@@ -5,16 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/bootstrap"
@@ -31,51 +30,65 @@ func main() {
 	}
 }
 
-// run 读取命令参数与配置，再选择启动或数据库维护入口。
+// run 通过 Cobra 执行命令，并向所有用例传递进程取消信号。
 func run() error {
-	command := "serve"
-	args := os.Args[1:]
-
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		command = args[0]
-		args = args[1:]
-	}
-
-	flags := flag.NewFlagSet("iam", flag.ContinueOnError)
-	filename := flags.String("config", "", "IAM YAML configuration file (default config.yaml)")
-	printEndpoints := flags.Bool("print-endpoints", false, "print only effective listen endpoints for orchestration")
-	userID := flags.String("user-id", "", "existing account UUID for operator password recovery")
-
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	if flags.NArg() != 0 {
-		return errors.New("unexpected IAM arguments")
-	}
-
-	cfg, err := config.Load(*filename)
-
-	if err != nil {
-		return err
-	}
-
-	if *printEndpoints {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"public_addr": cfg.App.Addr(), "internal_addr": cfg.Internal.Addr()})
-	}
-
-	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
-
-	if err != nil {
-		return err
-	}
-
-	defer closeLog()
-
-	slog.SetDefault(logger)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	return newCommand().ExecuteContext(ctx)
+}
 
+// newCommand 创建独立命令树，不持有全局配置或运行连接。
+func newCommand() *cobra.Command {
+	var filename, userID string
+	var printEndpoints bool
+	run := func(cmd *cobra.Command, _ []string) error {
+		cfg, err := config.Load(filename)
+		if err != nil {
+			return err
+		}
+		if printEndpoints {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"public_addr": cfg.App.Addr(), "internal_addr": cfg.Internal.Addr()})
+		}
+		name := cmd.Name()
+		if name == "iam" {
+			name = "serve"
+		}
+		return execute(cmd.Context(), name, cfg, userID)
+	}
+	root := &cobra.Command{Use: "iam", Short: "SecPlexus identity service", Args: cobra.NoArgs, RunE: run, SilenceUsage: true, SilenceErrors: true}
+	root.PersistentFlags().StringVar(&filename, "config", "", "IAM YAML configuration file")
+	root.PersistentFlags().BoolVar(&printEndpoints, "print-endpoints", false, "print effective endpoints without connecting dependencies")
+	for _, name := range []string{"serve", "migrate", "status", "maintain", "revoke-after-restore", "reset-password"} {
+		command := &cobra.Command{Use: name, Args: cobra.NoArgs, RunE: run}
+		if name == "reset-password" {
+			command.Flags().StringVar(&userID, "user-id", "", "existing account UUID")
+			_ = command.MarkFlagRequired("user-id")
+			command.Args = func(cmd *cobra.Command, args []string) error {
+				if err := cobra.NoArgs(cmd, args); err != nil {
+					return err
+				}
+				if _, err := uuid.Parse(userID); err != nil {
+					return errors.New("--user-id must identify an existing account")
+				}
+				return nil
+			}
+		}
+		root.AddCommand(command)
+	}
+	return root
+}
+
+// execute 在命令参数和配置验证后创建用例实际需要的资源。
+func execute(ctx context.Context, command string, cfg config.Config, userID string) (outcome error) {
+	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
+	if err != nil {
+		return err
+	}
+	defer func() { outcome = errors.Join(outcome, closeLog()) }()
+	slog.SetDefault(logger)
+	if command == "status" {
+		return repository.Status(ctx, cfg.DB.URL, os.Stdout)
+	}
 	if command == "migrate" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
@@ -96,7 +109,7 @@ func run() error {
 			return err
 		}
 
-		defer store.Close()
+		defer func() { outcome = errors.Join(outcome, store.Close()) }()
 
 		if err = store.Seed(migrationCtx, cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
 			return err
@@ -122,7 +135,7 @@ func run() error {
 			return err
 		}
 
-		defer store.Close()
+		defer func() { outcome = errors.Join(outcome, store.Close()) }()
 
 		switch command {
 		case "maintain":
@@ -130,7 +143,7 @@ func run() error {
 		case "revoke-after-restore":
 			return store.RevokeAfterRestore(maintenance)
 		case "reset-password":
-			id, err := uuid.Parse(*userID)
+			id, err := uuid.Parse(userID)
 			if err != nil {
 				return errors.New("--user-id must identify an existing account")
 			}
@@ -165,10 +178,6 @@ func run() error {
 
 			return err
 		}
-	}
-
-	if command != "serve" {
-		return errors.New("supported IAM commands: serve, migrate, maintain, revoke-after-restore, reset-password")
 	}
 
 	return bootstrap.Serve(ctx, cfg)

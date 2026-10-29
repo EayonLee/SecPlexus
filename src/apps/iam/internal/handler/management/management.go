@@ -1,41 +1,39 @@
 package management
 
 import (
-	"net/http"
-	"strconv"
+	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
+
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// pagination 绑定并限制列表页大小与偏移量。
-func pagination(r *http.Request) (int, int, error) {
-	limit, offset := 50, 0
-	for key, target := range map[string]*int{"limit": &limit, "offset": &offset} {
-		if value := r.URL.Query().Get(key); value != "" {
-			parsed, err := strconv.Atoi(value)
-			if err != nil {
-				return 0, 0, repository.ErrInvalid
-			}
-
-			*target = parsed
-		}
+// pagination 只补充协议默认值；格式与范围由生成绑定器和OpenAPI负责。
+func pagination(limit, offset *int) (int, int) {
+	size, start := 50, 0
+	if limit != nil {
+		size = *limit
 	}
-
-	if limit < 1 || limit > 100 || offset < 0 || offset > 100000 {
-		return 0, 0, repository.ErrInvalid
+	if offset != nil {
+		start = *offset
 	}
-
-	return limit, offset, nil
+	return size, start
 }
 
-// permissions 返回当前组织可查看的权限目录。
-func (s *Handler) permissions(w http.ResponseWriter, r *http.Request) error {
-	items, err := s.Service.PermissionCatalog(r.Context(), r.URL.Query().Get("org_id"))
+// Permissions 返回当前组织可查看的权限目录。
+func (s *Handler) Permissions(c *gin.Context, params router.PermissionsParams) {
+	w := c.Writer
+	r := c.Request
+	orgID := ""
+	if params.OrgId != nil {
+		orgID = *params.OrgId
+	}
+	items, err := s.Service.PermissionCatalog(r.Context(), orgID)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, map[string]any{"items": items})
-	return nil
 }

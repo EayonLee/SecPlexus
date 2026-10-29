@@ -42,7 +42,8 @@
       "!dist",
       "!out",
       "!src/components/ui",
-      "!src/components/calendar"
+      "!src/components/calendar",
+      "!src/spx/api"
     ]
   },
   "formatter": {

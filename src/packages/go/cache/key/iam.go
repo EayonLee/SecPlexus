@@ -1,7 +1,10 @@
 // Package key 定义平台实际使用的 Redis key 模板。
 package key
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Template 表示固定 spx 前缀的缓存 key 模板。
 type Template string
@@ -13,3 +16,11 @@ const (
 
 // Format 将已摘要的业务标识代入模板，不接受可配置前缀。
 func (t Template) Format(identifier string) string { return fmt.Sprintf(string(t), identifier) }
+
+// Prefix 是共享组件拼接缓存键时的固定平台命名空间。
+const Prefix = "spx"
+
+// ComponentKey 返回组件自行添加平台前缀时使用的局部键。
+func (t Template) ComponentKey(identifier string) string {
+	return strings.TrimPrefix(t.Format(identifier), Prefix+":")
+}

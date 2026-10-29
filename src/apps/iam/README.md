@@ -6,7 +6,7 @@
 
 ## 1. 产品与服务边界
 
-IAM负责账号、组织、密码、Session、自定义角色/授权和身份审计；Web提供统一界面；Console负责安全运营业务与必要的查询汇总，未来业务模块拥有各自资源、状态和执行规则；Console不是IAM API的必经中转层。Authboss/SCS是Go进程内的库，不是新部署的身份产品。AI Gateway不承担这些控制面HTTP路由。
+IAM负责账号、组织、密码、Session、自定义角色/授权和身份审计；Web提供统一界面；Console负责安全运营业务与必要的查询汇总，未来业务模块拥有各自资源、状态和执行规则；Console不是IAM API的必经中转层。Gin、Argon2id、SCS和CSRF组件嵌入Go进程，不部署独立身份产品。AI Gateway不承担这些控制面HTTP路由。
 
 ```mermaid
 flowchart LR
@@ -14,7 +14,7 @@ flowchart LR
     E -->|/api/v1/iam| I[IAM Go]
     E -->|/api/v1/console| C[Console Go]
     C -->|受保护的内部Authorize| I
-    I --> A[Authboss认证流程]
+    I --> A[Gin原生认证入口]
     I --> S[SCS Cookie及会话存储]
     I --> P[(PG iam schema)]
     I --> R[(Redis限流)]
@@ -101,9 +101,13 @@ flowchart TD
 
 ### 3.1 复用库，但不扩成身份产品
 
-Authboss仅启用`auth`模块，通过JSON BodyReader/Responder、事件钩子和ServerStorer接领域模型。锁定计数与退出由IAM事务实现，避免默认整对象Save覆盖并发状态；适配器的通用Save明确拒绝写入。关闭公开register、confirm、recover、remember、expire和未交付的MFA/SSO模块；管理员创建用户/改密属于我们自己的应用用例。角色授权不是Authboss的职责。
+Gin承接全部公开和内部HTTP入口，公开路由由OpenAPI生成；内部authorize使用生成的strict server。中间件按请求标识/受控Recovery → IAM会话提交屏障 → 统一错误 → CSRF/Origin → 来源限流 → OpenAPI验证 → 生成绑定器/Handler排序。内部监听只挂内部契约，要求TLS、服务凭证和action白名单，不暴露给Web代理。
 
-SCS负责Token随机数、编码、Cookie及PG store；IAM补逻辑会话注册表和用户状态检查。使用 GORM、pgx/v5 和 Goose；确切版本已锁定在根go.mod/go.sum：Authboss 3.5.3、SCS 2.9.0、pgx 5.11.0、Goose 3.24.3；使用Go 1.27.3，不安装独立IdP。密码通过Authboss Core.Hasher适配维护中的Argon2id实现，保存含参数的PHC格式；禁止手写密码算法，校验前限制输入及哈希参数资源。
+登录和二次认证使用`authentication.Authenticator`的类型化用例。Argon2id负责密码哈希与比较，SCS负责Token、编码、Cookie及PG store；gorilla/csrf负责CSRF机制。IAM保留失败锁定/审计、逻辑会话注册表、身份版本和撤销规则。ulule/limiter的Redis Store负责双桶原子计数及TTL，项目只维护摘要键与策略；故障503并拒绝放行，计数操作禁用自动重试。
+
+Gin使用原生路由、代理IP、错误收集及Recovery，不再保留Chi或Authboss适配栈。HTTP Handler只绑定已由OpenAPI验证的值，再调用业务用例；不重新构造登录JSON请求。SCS的LoadAndSave不能直接保证提交失败后正文不继续写出，因此仅IAM非流式响应保留提交屏障：缓存失败或panic时不发送认证Cookie/成功正文，并补偿撤销新逻辑会话。Console SSE不经过此屏障。
+
+版本以根`go.mod/go.sum`和[框架能力记录](../../../docs/plans/gin-service-refactor/framework-capabilities.md)为准。GORM的泛型投影、回调事务、批量关联与错误翻译和现有pgx池共用连接；Goose Provider执行显式迁移。`serve`和`status`先只读确认版本表已初始化，不因状态查询隐式建表。密码保存含参数的PHC格式，比较前限制输入及哈希参数资源。
 
 ```mermaid
 sequenceDiagram
@@ -345,7 +349,7 @@ src/apps/iam/
     middleware/               # Session 提交、CSRF/来源、内部身份、契约验证
     service/                  # 用例、最终授权、组织范围、事务和审计顺序
     repository/               # GORM 查询/写入、必要锁与 SQL、初始化和维护
-    authentication/           # Authboss/SCS 与可撤销逻辑会话适配
+    authentication/           # 类型化凭证用例、SCS 与可撤销逻辑会话
     authorization/            # 无 HTTP/存储依赖的权限求值和委派规则
     identity/                 # 账号与密码规则、Argon2id
     testutil/                 # 集成标签下的隔离测试数据库
@@ -356,7 +360,7 @@ src/apps/iam/
 Console复用[窄客户端](../../packages/go/iamclient/client.go)，不共享IAM仓储或密码实现。
 Python调用方以后按同一契约生成客户端，当前没有空SDK。
 
-核心设计模式及目的：Adapter隔离Authboss/SCS；Application Service集中事务/管理员不变量；中央Policy Decision与路由执行点分离；关系模型组合权限而不是角色继承；Repository 使用 GORM、必要的参数化 SQL、org_id 和真实 FK；乐观锁防编辑覆盖。未来换求值实现不改每个接口，但不提前引入Casbin/OpenFGA等第二策略真源。
+核心设计模式及目的：协议边界与类型化认证用例分离；Application Service集中事务/管理员不变量；中央Policy Decision与路由执行点分离；关系模型组合权限而不是角色继承；Repository 使用 GORM、必要的参数化 SQL、org_id 和真实 FK；乐观锁防编辑覆盖。未来换求值实现不改每个接口，但不提前引入Casbin/OpenFGA等第二策略真源。
 
 make公开入口仍dev/build/stop；应用启动与基础组件生命周期分开，默认连接已配置依赖，普通启动不调用Docker；Compose是独立显式部署入口。开发入口先按配置执行迁移/种子，再启动IAM、Console、Web并监听代码热重载；stop按工作区归属识别进程及Compose容器并保留数据，外部组件不受管理。迁移、运行和维护共用同一数据库账号；迁移用显式PG锁，常驻serve检查schema兼容版本。
 
@@ -405,3 +409,9 @@ config 只处理文件、环境占位、类型和校验。bootstrap 创建并释
 Web采用Next.js/shadcn，统一组件与样式基准。真实登录及管理页面在新增的`src/spx/`和产品路由中重建，API仍遵循本模块契约。上游`/auth`和`/dashboard`保留演示语义，不作为身份或权限来源。具体入口和上游基准校验见[Web README](../web/README.md)。
 
 运行诊断见 [日志与错误定位](../../../docs/observability.md)。管理事务、鉴权、认证/会话与数据库诊断通过 request_id 关联；运行日志不替代事务审计。
+
+## 框架重构后的开发入口
+
+- [Cobra命令](cmd/main.go)：`serve`、`migrate`、`status`、`maintain`、`revoke-after-restore`、`reset-password`。`--print-endpoints`只加载配置，不访问数据库/Redis。
+- [Gin公开入口](internal/handler/server.go)与[路由注册](internal/router/routes.go)：路由来自契约，业务错误统一进入Gin错误链；生成文件不能手改。
+- [角色开发贯通示例](../../../docs/development/role-management.md)：从协议、事务、仓储到生成SDK、Query/RHF和验收。

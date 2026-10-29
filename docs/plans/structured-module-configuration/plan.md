@@ -1,5 +1,7 @@
 # 实施计划
 
+> 后续实现说明（2026-10-29）：本页保留历史方案与验收记录。HTTP/认证编排、配置加载和生成客户端的当前实现由 [Gin 全栈重构](../gin-service-refactor/acceptance.md)承接；历史 Authboss/Chi/环境占位方案不再约束当前实现。
+
 > 密码行为以 [简化密码策略](../simplify-password-policy/spec.md) 为准；本文的其他功能和验证范围保持不变。
 > Web 基准更新：本文的 Arco/Vite/Redux 前端实现记录已由 [Web 整体替换计划](../replace-web-template/plan.md) 承接。现采用 Next.js/shadcn 基准并重建 IAM 页面；服务端业务与授权契约继续有效。
 

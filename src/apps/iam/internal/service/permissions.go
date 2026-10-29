@@ -34,14 +34,14 @@ func (s *Service) PermissionCatalog(ctx context.Context, orgID string) ([]Permis
 	for rows.Next() {
 		var key string
 		if err = rows.Scan(&key); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 
 		effective[key] = true
 	}
 
-	rows.Close()
+	_ = rows.Close()
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}

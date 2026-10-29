@@ -3,20 +3,26 @@
 import { z } from "zod";
 import { create } from "zustand";
 
-import type { components } from "@/auth/api.gen";
-import { resultCodes, resultStatuses } from "@/auth/result.gen";
+import { resultStatuses } from "@/auth/result.gen";
+import { client as consoleClient } from "@/spx/api/console/client.gen";
+import { client } from "@/spx/api/iam/client.gen";
+import {
+  authContext,
+  reauthenticate as confirmPassword,
+  login,
+  logout,
+  logoutAll,
+  me,
+  changePassword as updatePassword,
+} from "@/spx/api/iam/sdk.gen";
+import { zApiError } from "@/spx/api/iam/zod.gen";
 
 import type messages from "../../../messages/en.json";
 import { organizationFromPath } from "./navigation";
-import { type AuthState, type Identity, initialAuth } from "./types";
+import { queryClient } from "./query";
+import { type AuthState, initialAuth } from "./types";
 
 export const useIdentity = create<AuthState>(() => initialAuth);
-const envelope = z.object({
-  code: z.enum(Object.values(resultCodes)),
-  message: z.string(),
-  data: z.unknown(),
-  request_id: z.string(),
-});
 let epoch = 0;
 let identityRequest = 0;
 let controller = new AbortController();
@@ -39,6 +45,8 @@ export class APIError extends Error {
 function clear(status: AuthState["status"] = "anonymous") {
   epoch++;
   controller.abort();
+  void queryClient.cancelQueries();
+  queryClient.clear();
   controller = new AbortController();
   csrfToken = "";
   csrfPending = undefined;
@@ -58,29 +66,25 @@ export function initializeSession() {
   return refreshIdentity();
 }
 
-/** decode 在统一边界解析 Result，页面不自行拆响应信封。 */
-async function decode<T>(response: Response): Promise<T> {
-  if (response.status === 204) return undefined as T;
-  const result = envelope.parse(await response.json());
-  if (response.ok && result.code === "ok") return result.data as T;
-  if (response.ok || resultStatuses[result.code] !== response.status) throw new Error("Invalid API response");
-  throw new APIError(response.status, result.code, result.request_id);
+/** mutationHeaders 声明生成 SDK 的必需协议头，真实安全值由请求拦截器填入。 */
+export const mutationHeaders = { "X-CSRF-Token": "", Origin: "" };
+
+/** dataOf 解开已由生成 Zod 验证的成功信封；204 无业务正文。 */
+export async function dataOf<T>(operation: Promise<{ data: { data: T } }>): Promise<T> {
+  const started = epoch;
+  const result = await operation;
+  if (started !== epoch) throw new DOMException("Identity changed", "AbortError");
+  return result.data.data;
 }
 
-/** csrf 只复用当前身份周期内的安全凭据，不持久化认证材料。 */
 async function csrf(): Promise<string> {
   if (csrfToken) return csrfToken;
   if (!csrfPending) {
     const started = epoch;
-    csrfPending = fetch("/api/v1/iam/auth/context", {
-      signal: controller.signal,
-      credentials: "same-origin",
-      cache: "no-store",
-    })
-      .then((response) => decode<components["schemas"]["APICSRFContext"]>(response))
-      .then((context) => {
+    csrfPending = dataOf(authContext({ throwOnError: true }))
+      .then((value) => {
         if (started !== epoch) throw new DOMException("Identity changed", "AbortError");
-        csrfToken = context.csrf_token;
+        csrfToken = value.csrf_token;
         return csrfToken;
       })
       .finally(() => {
@@ -90,83 +94,76 @@ async function csrf(): Promise<string> {
   return csrfPending;
 }
 
-/** api 统一请求、协议错误与身份失效处理，不在日志中输出请求参数。 */
-export async function api<T>(
-  path: string,
-  options: { method?: string; body?: unknown; signal?: AbortSignal } = {},
-): Promise<T> {
-  const started = epoch;
-  const method = options.method ?? "GET";
-  const headers = new Headers({ Accept: "application/json" });
-  if (options.body !== undefined) headers.set("Content-Type", "application/json");
-  let phase = "network";
-  let status = 0;
-  let requestID = "";
-  try {
-    if (!["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("X-CSRF-Token", await csrf());
-    if (started !== epoch) throw new DOMException("Identity changed", "AbortError");
-    const signal = AbortSignal.any([
-      controller.signal,
-      AbortSignal.timeout(15000),
-      ...(options.signal ? [options.signal] : []),
-    ]);
-    const response = await fetch(`/api/v1${path}`, {
-      method,
-      headers,
-      signal,
-      credentials: "same-origin",
-      cache: "no-store",
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    });
-    if (started !== epoch) throw new DOMException("Identity changed", "AbortError");
-    phase = "decode_result";
-    status = response.status;
-    requestID = z.uuid().safeParse(response.headers.get("x-request-id")).data ?? "";
-    try {
-      return await decode<T>(response);
-    } catch (error) {
-      if (!(error instanceof APIError) && [401, 503].includes(status)) {
-        // 代理返回非 JSON 时仍按 HTTP 状态失效身份，不能保留过期的登录状态。
-        console.error(
-          JSON.stringify({
-            time: new Date().toISOString(),
-            level: "ERROR",
-            service: "web",
-            layer: "browser",
-            event: "api.protocol_failed",
-            phase,
-            status,
-            request_id: requestID,
-          }),
-        );
-        throw new APIError(status, status === 401 ? "unauthenticated" : "service_unavailable", requestID);
-      }
-      throw error;
+const requestEpochs = new WeakMap<Request, number>();
+for (const sdk of [client, consoleClient]) {
+  sdk.setConfig({
+    baseUrl: typeof window === "undefined" ? "" : window.location.origin,
+    credentials: "same-origin",
+    cache: "no-store",
+    throwOnError: true,
+  });
+  sdk.interceptors.request.use(async (request) => {
+    const started = epoch;
+    const currentController = controller;
+    const headers = new Headers(request.headers);
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      headers.set("X-CSRF-Token", await csrf());
+      headers.set("Origin", window.location.origin);
     }
-  } catch (error) {
     if (started !== epoch) throw new DOMException("Identity changed", "AbortError");
-    if (error instanceof APIError) {
-      if (error.status === 401 && path !== "/iam/auth/login") clear();
-      if (error.status === 503) useIdentity.setState({ status: "unavailable" });
-      if (error.code === "iam.csrf_invalid") csrfToken = "";
-      if (error.code === "permission_denied" && !path.startsWith("/iam/me")) void refreshIdentity();
-    } else if (!(error instanceof DOMException && error.name === "AbortError")) {
-      // 不输出 Error、fetch 参数或响应正文，避免泄露连接及身份数据。
+    const next = new Request(request, {
+      headers,
+      signal: AbortSignal.any([request.signal, currentController.signal, AbortSignal.timeout(15000)]),
+    });
+    requestEpochs.set(next, started);
+    return next;
+  });
+  sdk.interceptors.response.use(async (response, request) => {
+    if (requestEpochs.get(request) !== epoch) throw new DOMException("Identity changed", "AbortError");
+    if (response.ok) return response;
+    let value: unknown;
+    // 代理在故障时可能返回文本；仅公开状态与稳定错误码。
+    const raw = await response.clone().text();
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      value = undefined;
+    }
+    const parsed = zApiError.safeParse(value);
+    let code = "internal_error";
+    if (parsed.success && resultStatuses[parsed.data.code] === response.status) code = parsed.data.code;
+    else if (response.status === 401) code = "unauthenticated";
+    else if (response.status === 503) code = "service_unavailable";
+    const error = new APIError(
+      response.status,
+      code,
+      parsed.success ? parsed.data.request_id : (z.uuid().safeParse(response.headers.get("x-request-id")).data ?? ""),
+    );
+    const path = new URL(request.url).pathname;
+    if (error.status === 401 && path !== "/api/v1/iam/auth/login") clear();
+    if (error.status === 503) useIdentity.setState({ status: "unavailable" });
+    if (error.code === "iam.csrf_invalid") csrfToken = "";
+    if (error.code === "permission_denied" && !path.startsWith("/api/v1/iam/me")) void refreshIdentity();
+    throw error;
+  });
+  sdk.interceptors.error.use((error, response, _request, options) => {
+    if (error instanceof z.ZodError) {
       console.error(
         JSON.stringify({
           time: new Date().toISOString(),
           level: "ERROR",
           service: "web",
           layer: "browser",
-          event: "api.failed",
-          phase,
-          status,
-          request_id: requestID,
+          event: "api.protocol_failed",
+          route: options.url,
+          status: response?.status,
+          request_id: response?.headers.get("x-request-id"),
+          issues: error.issues.map((issue) => ({ code: issue.code, path: issue.path })),
         }),
       );
     }
-    throw error;
-  }
+    return error;
+  });
 }
 
 /** refreshIdentity 只接受当前身份周期的最新结果，隔离组织切换的并发响应。 */
@@ -177,10 +174,10 @@ export async function refreshIdentity(
   const started = epoch;
   const request = ++identityRequest;
   try {
-    let data = await api<Identity>(`/iam/me${orgID ? `?org_id=${encodeURIComponent(orgID)}` : ""}`);
+    let data = await dataOf(me({ query: orgID ? { org_id: orgID } : undefined, throwOnError: true }));
     if (!orgID && data.organizations.length) {
       orgID = data.organizations[0].id;
-      data = await api<Identity>(`/iam/me?org_id=${encodeURIComponent(orgID)}`);
+      data = await dataOf(me({ query: { org_id: orgID }, throwOnError: true }));
     }
     if (started === epoch && request === identityRequest)
       useIdentity.setState({ ...data, status: "authenticated" }, true);
@@ -189,7 +186,7 @@ export async function refreshIdentity(
     if (error instanceof APIError && error.status === 401) return;
     if (error instanceof APIError && error.status === 403 && orgID) {
       try {
-        const data = await api<Identity>("/iam/me");
+        const data = await dataOf(me({ throwOnError: true }));
         if (started === epoch && request === identityRequest)
           useIdentity.setState({ ...data, org_id: orgID, capabilities: [], status: "authenticated" }, true);
       } catch {
@@ -203,7 +200,7 @@ export async function refreshIdentity(
 
 /** signIn 登录成功后重新加载身份，并通知其他标签页。 */
 export async function signIn(username: string, password: string) {
-  await api("/iam/auth/login", { method: "POST", body: { username, password } });
+  await login({ body: { username, password }, headers: mutationHeaders, throwOnError: true });
   clear("unknown");
   channel?.postMessage("session_changed");
   await refreshIdentity();
@@ -211,21 +208,21 @@ export async function signIn(username: string, password: string) {
 
 /** signOut 先请求服务端撤销，再清理当前标签的身份投影。 */
 export async function signOut(all = false) {
-  await api(all ? "/iam/auth/logout-all" : "/iam/auth/logout", { method: "POST" });
+  await (all ? logoutAll : logout)({ headers: mutationHeaders, throwOnError: true });
   clear();
   channel?.postMessage("session_changed");
 }
 
 /** changePassword 成功后清理旧会话，不记录新旧密码。 */
 export async function changePassword(old_password: string, new_password: string) {
-  await api("/iam/me/password", { method: "POST", body: { old_password, new_password } });
+  await updatePassword({ body: { old_password, new_password }, headers: mutationHeaders, throwOnError: true });
   clear();
   channel?.postMessage("session_changed");
 }
 
 /** reauthenticate 确认当前账号密码，再刷新能力与安全凭据。 */
 export async function reauthenticate(password: string) {
-  await api("/iam/auth/reauthenticate", { method: "POST", body: { password } });
+  await confirmPassword({ body: { password }, headers: mutationHeaders, throwOnError: true });
   csrfToken = "";
   channel?.postMessage("session_changed");
   await refreshIdentity();

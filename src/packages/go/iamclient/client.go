@@ -2,13 +2,10 @@
 package iamclient
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,6 +17,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/contracts/iam/internalclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -40,8 +38,8 @@ func (e *Error) Unwrap() error { return e.Cause }
 
 // Client 通过内部接口请求 IAM 授权。
 type Client struct {
-	baseURL, credential string
-	http                *http.Client
+	sdk  *internalclient.Client
+	http *http.Client
 }
 
 // New 创建使用 TLS 和服务凭证的 IAM 客户端。
@@ -76,15 +74,16 @@ func New(baseURL, credential, caFile string) (*Client, error) {
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = tlsConfig
-	return &Client{
-		baseURL:    strings.TrimSuffix(baseURL, "/"),
-		credential: credential,
-		http: &http.Client{
-			Transport:     transport,
-			Timeout:       5 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}, nil
+	httpClient := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	sdk, err := internalclient.NewClient(strings.TrimSuffix(baseURL, "/"), internalclient.WithHTTPClient(httpClient), internalclient.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
+		request.Header.Set("Authorization", "Bearer "+credential)
+		return nil
+	}))
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, errors.New("invalid IAM internal client configuration")
+	}
+	return &Client{sdk: sdk, http: httpClient}, nil
 }
 
 // Authorize 从原始请求获取会话；操作和组织由服务端路由确定，不能信任浏览器提交的值。
@@ -124,54 +123,56 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 	}
 
 	input := contract.AuthorizeRequest{Cookie: original.Header.Get("Cookie"), Method: original.Method, Path: original.URL.RequestURI(), Origin: original.Header.Get("Origin"), CSRFToken: original.Header.Get("X-CSRF-Token"), Action: action, OrgID: orgID, Resource: resource}
-	body, err := json.Marshal(input)
-	if err != nil {
-		return decision, err
-	}
-	request, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/internal/v1/iam/authorize", bytes.NewReader(body))
-	if err != nil {
-		return decision, err
-	}
-	request.Header.Set("Authorization", "Bearer "+c.credential)
-	request.Header.Set("Content-Type", "application/json")
-
-	// 保留 TLS/网络故障供服务端排障，对外仍统一依赖不可用。
-	response, err := c.http.Do(request)
+	// 请求构造与JSON编解码来自内部契约生成器；这里只维护TLS/凭证/超时及结果策略。
+	response, err := c.sdk.AuthorizeInternal(ctx, input)
 	if err != nil {
 		return decision, unavailable("transport", err)
 	}
-	defer response.Body.Close()
 	upstreamID = response.Header.Get("X-Request-ID")
 	// 上游标识也是输入，仅接受本平台生成的 UUID，不能让任意响应头污染日志。
 	if _, parseErr := uuid.Parse(upstreamID); parseErr != nil {
 		upstreamID = ""
 	}
 
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 64*1024))
-	var decoded common.Result[contract.CapabilityDecision]
-	if err := decoder.Decode(&decoded); err != nil {
+	// 对生成解析器的标准响应体设置上限，避免读取无界上游数据。
+	response.Body = http.MaxBytesReader(nil, response.Body, 64*1024)
+	parsed, err := internalclient.ParseAuthorizeInternalResponse(response)
+	if err != nil {
 		return decision, unavailable("decode_result", err)
 	}
-	definition, known := common.Lookup(decoded.Code)
-	if !known || decoded.RequestID == "" || (response.StatusCode != http.StatusOK && definition.Status != response.StatusCode) {
-		return decision, unavailable("invalid_result_status", nil)
-	}
-	if id, parseErr := uuid.Parse(decoded.RequestID); parseErr == nil {
-		upstreamID = id.String()
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return decision, unavailable("trailing_result_data", err)
-	}
-
 	if response.StatusCode != http.StatusOK {
-		if response.StatusCode != 401 && response.StatusCode != 403 && response.StatusCode != 429 {
+		var rejected *contract.APIError
+		switch response.StatusCode {
+		case 401:
+			rejected = parsed.JSON401
+		case 403:
+			rejected = parsed.JSON403
+		case 429:
+			rejected = parsed.JSON429
+		default:
 			return decision, unavailable("upstream_unavailable", nil)
 		}
-		return decision, &Error{Status: response.StatusCode, Code: decoded.Code, Reason: "authorization_rejected", RequestID: upstreamID}
+		if rejected == nil {
+			return decision, unavailable("invalid_result_status", nil)
+		}
+		definition, known := common.Lookup(common.Code(rejected.Code))
+		if !known || definition.Status != response.StatusCode || rejected.RequestID == "" || rejected.Data != nil {
+			return decision, unavailable("invalid_result_status", nil)
+		}
+		if id, err := uuid.Parse(rejected.RequestID); err == nil {
+			upstreamID = id.String()
+		}
+		return decision, &Error{Status: response.StatusCode, Code: common.Code(rejected.Code), Reason: "authorization_rejected", RequestID: upstreamID}
+	}
+	decoded := parsed.JSON200
+	if decoded == nil || decoded.RequestID == "" {
+		return decision, unavailable("invalid_result_status", nil)
+	}
+	if id, err := uuid.Parse(decoded.RequestID); err == nil {
+		upstreamID = id.String()
 	}
 	decision = decoded.Data
-	if decoded.Code != common.CodeOK || !decision.Allowed || decision.Principal.UserID == "" || decision.Principal.SessionID == "" || decision.DecisionID == "" {
+	if common.Code(decoded.Code) != common.CodeOK || !decision.Allowed || decision.Principal.UserID == "" || decision.Principal.SessionID == "" || decision.DecisionID == "" {
 		return contract.CapabilityDecision{}, unavailable("invalid_decision", nil)
 	}
 	if orgID != "" && (decision.Scope.Kind != "organization" || decision.Scope.OrgID != orgID) {

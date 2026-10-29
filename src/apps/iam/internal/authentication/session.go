@@ -1,4 +1,4 @@
-// Package authentication 将 Authboss 和 SCS 接入可撤销的 IAM 会话。
+// Package authentication 将 SCS 接入可撤销的 IAM 会话。
 package authentication
 
 import (

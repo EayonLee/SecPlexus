@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { api, useIdentity } from "../../src/spx/iam/session";
+import { client } from "../../src/spx/api/iam/client.gen";
+import { me } from "../../src/spx/api/iam/sdk.gen";
+import { useIdentity } from "../../src/spx/iam/session";
 
 beforeEach(() => {
+  client.setConfig({ baseUrl: "http://localhost" });
   vi.stubGlobal("fetch", vi.fn());
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   useIdentity.setState({ status: "authenticated" });
@@ -17,14 +20,18 @@ it("expires identity on a non-JSON 401 and keeps the safe request ID", async () 
   vi.mocked(fetch).mockResolvedValue(
     new Response("secret-response-body", { status: 401, headers: { "X-Request-ID": id } }),
   );
-  await expect(api("/iam/me")).rejects.toMatchObject({ status: 401, code: "unauthenticated", requestID: id });
+  await expect(me({ throwOnError: true })).rejects.toMatchObject({
+    status: 401,
+    code: "unauthenticated",
+    requestID: id,
+  });
   expect(useIdentity.getState().status).toBe("anonymous");
   expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-");
 });
 
 it("marks a malformed 503 unavailable without logging its body", async () => {
   vi.mocked(fetch).mockResolvedValue(new Response("secret-upstream-error", { status: 503 }));
-  await expect(api("/iam/me")).rejects.toMatchObject({ status: 503, code: "service_unavailable" });
+  await expect(me({ throwOnError: true })).rejects.toMatchObject({ status: 503, code: "service_unavailable" });
   expect(useIdentity.getState().status).toBe("unavailable");
   expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-");
 });

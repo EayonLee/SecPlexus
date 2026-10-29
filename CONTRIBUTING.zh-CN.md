@@ -179,10 +179,10 @@ pnpm test:e2e --docker
 
 ```sh
 git fetch upstream
-git switch -c fix/session-expiry upstream/main
+git switch -c session-expiry upstream/main
 ```
 
-新工作分支使用 `<type>/<description>`，类型与下文提交类型一致，描述使用简短的小写英文和连字符，例如 `feat/iam-login`、`docs/contribution-guide`。有关联的已有 Issue 时带上编号，例如 `fix/123-session-expiry`；不要求每次变更都创建 Issue，也不为分支命名单独创建 Issue。
+新分支名称使用最多三个由连字符连接的小写英文单词，例如`iam-login`、`contribution-guide`，不使用斜杠或类型前缀。不要求每次变更都创建Issue。
 
 提交消息和 PR 标题使用 `type(scope): summary`，scope 可省略。类型包括
 `feat`、`fix`、`docs`、`chore`、`refactor` 和 `test`，例如：
@@ -207,3 +207,9 @@ PR 描述说明问题、变更后的行为、审查所需的设计决策和实�
 如果 PR 存在冲突，将项目最新的 `main` 更新到自己的工作分支，并在本地解决。PR 合并后，可以删除工作分支，同步 Fork 后继续下一次贡献。
 
 使用 AI 辅助开发的贡献遵循相同流程。提交者需要理解所提交的变更，检查生成的代码，并验证所报告的测试结果。
+
+### 框架接入
+
+使用Gin原生Handler/中间件与OpenAPI生成路由。IAM凭证用例接收类型化值，Argon2id、SCS、CSRF和Redis limiter分别负责机制；数据使用GORM投影/事务与Goose迁移，配置/命令使用Viper、mapstructure和Cobra。参照[实际角色管理链路](docs/development/role-management.md)，已有框架能力不要再套一层通用工具或影子路由。
+
+从根命令生成公开Web SDK/Zod/Query。Query管理服务端状态，RHF和生成schema管理表单；密码操作不进入MutationCache。保留模板组件/样式及next-intl词典。执行`make lint-go`、`make vuln-go`和[测试指南](docs/testing.md)中的相关检查；均为本地检查，不是部署或CI流程。

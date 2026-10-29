@@ -13,7 +13,7 @@
   "paths": {
     "/api/v1/console/orgs/{org_id}/context": {
       "get": {
-        "operationId": "getApiV1ConsoleOrgsOrgIdContext",
+        "operationId": "context",
         "responses": {
           "200": {
             "description": "Success",
@@ -22,7 +22,7 @@
                 "schema": {
                   "allOf": [
                     {
-                      "$ref": "#/components/schemas/APIResult"
+                      "$ref": "#/components/schemas/Result"
                     },
                     {
                       "type": "object",
@@ -36,7 +36,11 @@
                         "data": {
                           "$ref": "#/components/schemas/APIConsoleContext"
                         }
-                      }
+                      },
+                      "required": [
+                        "code",
+                        "data"
+                      ]
                     }
                   ]
                 }
@@ -83,7 +87,7 @@
     },
     "/api/v1/console/orgs/{org_id}/events": {
       "get": {
-        "operationId": "getApiV1ConsoleOrgsOrgIdEvents",
+        "operationId": "events",
         "responses": {
           "200": {
             "description": "SSE, authorization rechecked every 30 seconds",
@@ -141,99 +145,6 @@
         "in": "cookie",
         "name": "spx_session",
         "description": "HTTPS deployments use __Host-spx_session instead."
-      }
-    },
-    "schemas": {
-      "APIError": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/APIResult"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "code": {
-                "$ref": "#/components/schemas/ErrorCode"
-              },
-              "data": {
-                "nullable": true,
-                "enum": [
-                  null
-                ]
-              }
-            }
-          }
-        ]
-      },
-      "APIConsoleContext": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "org_id": {
-            "type": "string",
-            "x-go-name": "OrgID"
-          },
-          "user_id": {
-            "type": "string",
-            "x-go-name": "UserID"
-          },
-          "decision_id": {
-            "type": "string",
-            "x-go-name": "DecisionID"
-          }
-        },
-        "required": [
-          "org_id",
-          "user_id",
-          "decision_id"
-        ]
-      },
-      "APIResult": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "data": {
-            "nullable": true
-          },
-          "request_id": {
-            "type": "string",
-            "minLength": 1,
-            "x-go-name": "RequestID"
-          }
-        }
-      },
-      "ErrorCode": {
-        "type": "string",
-        "enum": [
-          "invalid_request",
-          "unauthenticated",
-          "permission_denied",
-          "not_found",
-          "conflict",
-          "rate_limited",
-          "internal_error",
-          "service_unavailable",
-          "payload_too_large",
-          "unsupported_media_type",
-          "method_not_allowed",
-          "iam.invalid_credentials",
-          "iam.invalid_current_password",
-          "iam.csrf_invalid",
-          "iam.origin_invalid",
-          "iam.recent_auth_required"
-        ]
       }
     },
     "responses": {
@@ -316,26 +227,99 @@
             }
           }
         }
-      },
-      "PayloadTooLarge": {
-        "description": "Request body too large",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/APIError"
-            }
+      }
+    },
+    "schemas": {
+      "Result": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "nullable": true
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "x-go-name": "RequestID"
           }
         }
       },
-      "UnsupportedMediaType": {
-        "description": "Unsupported request media type",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/APIError"
+      "APIConsoleContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "org_id": {
+            "type": "string",
+            "x-go-name": "OrgID"
+          },
+          "user_id": {
+            "type": "string",
+            "x-go-name": "UserID"
+          },
+          "decision_id": {
+            "type": "string",
+            "x-go-name": "DecisionID"
+          }
+        },
+        "required": [
+          "org_id",
+          "user_id",
+          "decision_id"
+        ]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthenticated",
+          "permission_denied",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "internal_error",
+          "service_unavailable",
+          "payload_too_large",
+          "unsupported_media_type",
+          "method_not_allowed",
+          "iam.invalid_credentials",
+          "iam.invalid_current_password",
+          "iam.csrf_invalid",
+          "iam.origin_invalid",
+          "iam.recent_auth_required"
+        ]
+      },
+      "APIError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Result"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "data": {
+                "nullable": true,
+                "enum": [
+                  null
+                ]
+              }
             }
           }
-        }
+        ]
       }
     }
   }

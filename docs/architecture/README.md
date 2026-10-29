@@ -1,6 +1,6 @@
 # SecPlexus 架构文档
 
-> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM已内嵌Authboss/SCS并接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM/Console使用Gin，IAM通过类型化凭证用例、Argon2id/SCS/CSRF接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。当前框架接入见[Gin重构计划](../plans/gin-service-refactor/plan.md)；三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
 
 
 > AI 原生安全运营平台 —— 告警运营、漏洞运营、大模型护栏、智能体安全，编织成一张互联的安全网络。

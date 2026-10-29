@@ -6,15 +6,15 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/configfile"
+	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // App 描述 Console 服务自身的监听配置。
 type App struct {
-	Name string `yaml:"name"` // 服务名称，用于日志标识。
-	Host string `yaml:"host"` // HTTP 监听地址。
-	Port int    `yaml:"port"` // HTTP 监听端口。
+	Name string `yaml:"name"`                                     // 服务名称，用于日志标识。
+	Host string `yaml:"host" validate:"required,ip|eq=localhost"` // HTTP 监听地址。
+	Port int    `yaml:"port" validate:"gte=1,lte=65535"`          // HTTP 监听端口。
 }
 
 // Addr 返回 HTTP 监听地址。
@@ -38,12 +38,20 @@ func Load(filename string) (Config, error) {
 	}
 
 	var c Config
-	if err := configfile.Load(filename, &c); err != nil {
+	settings, err := configuration.Read(filename)
+	if err != nil {
+		return c, err
+	}
+	bindEnvironment(settings)
+	if err := configuration.Decode(settings, &c); err != nil {
 		return c, err
 	}
 
-	if c.App.Name == "" || len(c.App.Name) > 64 || c.App.Port < 1 || c.App.Port > 65535 || (net.ParseIP(c.App.Host) == nil && c.App.Host != "localhost") {
-		return c, errors.New("invalid Console app name, host or port")
+	if err := configuration.Validate(c); err != nil {
+		return c, err
+	}
+	if c.App.Name == "" || len(c.App.Name) > 64 {
+		return c, errors.New("invalid console service name")
 	}
 
 	return c, c.Logging.Validate()

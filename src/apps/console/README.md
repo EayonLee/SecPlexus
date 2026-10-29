@@ -59,7 +59,7 @@ sequenceDiagram
 go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 ```
 
-占位符`${ENV:default}`声明环境覆盖及默认值。主要变量为`SPX_CONSOLE_HOST`、`SPX_CONSOLE_PORT`、`SPX_CONSOLE_IAM_BASE_URL`、`SPX_CONSOLE_IAM_TOKEN`、`SPX_CONSOLE_IAM_CA_FILE`。token直接来自环境，不通过凭证文件。
+普通YAML保存字面默认值，Viper显式绑定环境，mapstructure严格解码；不支持旧占位符语法。主要变量为`SPX_CONSOLE_HOST`、`SPX_CONSOLE_PORT`、`SPX_CONSOLE_IAM_BASE_URL`、`SPX_CONSOLE_IAM_TOKEN`、`SPX_CONSOLE_IAM_CA_FILE`。token直接来自环境，不通过凭证文件。
 
 默认本机日志为`logs/console.log`，同时输出stdout；容器默认仅stdout，由Docker轮转。与IAM及其他副本使用不同日志文件，不能共写同一个轮转文件。
 
@@ -67,7 +67,7 @@ go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 
 ### 启动与路由代码
 
-`cmd/main.go` 读取配置，`internal/bootstrap/serve.go` 初始化 IAM 客户端和 HTTP 服务，并负责服务关闭。接口统一在 `internal/router/routes.go` 注册，处理函数通过显式依赖访问 IAM；配置加载器负责环境变量解析。
+`cmd/main.go` 读取配置，`internal/bootstrap/serve.go` 初始化 IAM 客户端和 HTTP 服务，并负责服务关闭。Gin接口统一在 `internal/router/routes.go` 注册，普通路由来自生成契约，SSE使用原生SSEvent/Writer.Flush，处理函数通过显式依赖访问 IAM；配置加载器负责环境变量解析。
 
 
 普通接口通过 `src/packages/go/result` 返回统一 Result，SSE 直接使用流协议。公共请求标识、日志和异常恢复在共享 HTTP middleware；组织访问由 IAM 内部客户端校验，不读取 IAM 私表。config 只解析/校验文件，bootstrap 按配置创建客户端并负责关闭空闲连接。Console 没有实际 DB/cache 依赖，不增加占位配置。

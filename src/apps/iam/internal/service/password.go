@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/google/uuid"
+
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"

@@ -84,17 +84,24 @@ func ReplaceGrants(ctx context.Context, tx *gorm.DB, orgID, roleID string, permi
 		return err
 	}
 
+	var existing []string
+	if err := tx.WithContext(ctx).Table("iam.role_permissions").Where("org_id = ? AND role_id = ?", orgID, roleID).Pluck("permission_key", &existing).Error; err != nil {
+		return err
+	}
+	previous := make(map[string]bool, len(existing))
+	for _, key := range existing {
+		previous[key] = true
+	}
+	grants := make([]rolePermission, 0, len(permissions))
 	for _, key := range permissions {
-		// 历史授权可以保留，但新增授权仍经过原有数据库触发器。
-		var count int64
-		if err := tx.WithContext(ctx).Table("iam.role_permissions").Where("org_id = ? AND role_id = ? AND permission_key = ?", orgID, roleID, key).Count(&count).Error; err != nil {
-			return err
+		// 仅插入新增关系，历史已弃用授权仍可保留，不重新触发新增授权约束。
+		if !previous[key] {
+			grants = append(grants, rolePermission{OrgID: orgID, RoleID: roleID, PermissionKey: key})
 		}
-
-		if count == 0 {
-			if err := tx.WithContext(ctx).Table("iam.role_permissions").Create(map[string]any{"org_id": orgID, "role_id": roleID, "permission_key": key}).Error; err != nil {
-				return err
-			}
+	}
+	if len(grants) > 0 {
+		if err := gorm.G[rolePermission](tx).Table("iam.role_permissions").CreateInBatches(ctx, &grants, 100); err != nil {
+			return err
 		}
 	}
 
@@ -129,13 +136,15 @@ func ReplaceMemberRoles(ctx context.Context, tx *gorm.DB, orgID, memberID string
 		return err
 	}
 
-	for _, id := range ids {
-		if err := tx.WithContext(ctx).Table("iam.membership_roles").Create(map[string]any{"org_id": orgID, "membership_id": memberID, "role_id": id, "created_by": actorID}).Error; err != nil {
-			return err
-		}
+	if len(ids) == 0 {
+		return nil
 	}
+	rows := make([]membershipRole, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, membershipRole{OrgID: orgID, MembershipID: memberID, RoleID: id, CreatedBy: actorID})
+	}
+	return gorm.G[membershipRole](tx).Table("iam.membership_roles").CreateInBatches(ctx, &rows, 100)
 
-	return nil
 }
 
 // ProtectLastAdministrators 保持平台和各有效组织至少一个有效管理员。
@@ -182,7 +191,7 @@ func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limi
 		return nil, 0, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := []contract.APIRole{}
 	for rows.Next() {
@@ -196,4 +205,19 @@ func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limi
 	}
 
 	return items, total, rows.Err()
+}
+
+// rolePermission 是组织隔离的授权关联写入模型。
+type rolePermission struct {
+	OrgID         string
+	RoleID        string
+	PermissionKey string
+}
+
+// membershipRole 是已经通过组织与委派校验的成员角色关联。
+type membershipRole struct {
+	OrgID        string
+	MembershipID string
+	RoleID       string
+	CreatedBy    string
 }

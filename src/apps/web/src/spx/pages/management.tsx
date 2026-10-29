@@ -1,24 +1,37 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { usePathname, useRouter } from "next/navigation";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
 import { useFormatter, useTranslations } from "next-intl";
-import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import type { z } from "zod";
 
-import type { components } from "@/auth/api.gen";
 import { permissions } from "@/auth/permissions.gen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { getOrganizationQueryKey, securityOverviewQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
+import {
+  getOrganization,
+  listAuditEvents,
+  listOrganizationAuditEvents,
+  securityOverview,
+  updateCurrentOrganization,
+} from "@/spx/api/iam/sdk.gen";
+import type { ApiAuditEvent, ApiOrganization } from "@/spx/api/iam/types.gen";
+import { zUpdateCurrentOrganizationBody } from "@/spx/api/iam/zod.gen";
 
 import { AccessDenied, Can, RequireAccess } from "../components/access";
-import { DataTable, useAction, useList } from "../components/data";
+import { DataTable, useAction, usePagedQuery } from "../components/data";
 import { managementPages, visibleManagementPages } from "../iam/navigation";
-import { api, refreshIdentity, useIdentity } from "../iam/session";
+import { identityScope } from "../iam/query";
+import { dataOf, mutationHeaders, refreshIdentity, useIdentity } from "../iam/session";
 import { AccountsPage } from "./accounts";
 import { MembersPage } from "./members";
 import { OrganizationsPage } from "./organizations";
@@ -70,24 +83,16 @@ export function ManagementPage() {
   );
 }
 function OverviewPage() {
-  const perform = useAction();
-
   const t = useTranslations("Management");
 
-  const org = useIdentity((state) => state.org_id);
-  const [data, setData] = useState<components["schemas"]["APIOrganization"]>();
-  const [revision, setRevision] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 保存后通过 revision 刷新服务端组织版本。
-  useEffect(() => {
-    const controller = new AbortController();
-    void perform(async () => {
-      const result = await api<components["schemas"]["APIOrganization"]>(`/iam/orgs/${org}`, {
-        signal: controller.signal,
-      });
-      if (!controller.signal.aborted) setData(result);
-    });
-    return () => controller.abort();
-  }, [org, revision]);
+  const auth = useIdentity();
+  const org = auth.org_id ?? "";
+  const organization = useQuery({
+    queryKey: [...getOrganizationQueryKey({ path: { org_id: org } }), ...identityScope(auth)],
+    queryFn: ({ signal }) => dataOf(getOrganization({ path: { org_id: org }, signal, throwOnError: true })),
+    enabled: !!org,
+  });
+  const data = organization.data;
   if (!data) return null;
   return (
     <div className="flex flex-col gap-6">
@@ -106,37 +111,14 @@ function OverviewPage() {
         </div>
       </dl>
       <Can action={permissions.IAMOrganizationsManage}>
-        <form
-          className="max-w-lg"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const values = new FormData(event.currentTarget);
-            void perform(async () => {
-              await api(`/iam/orgs/${org}`, {
-                method: "PATCH",
-                body: { name: values.get("name"), authz_version: data.authz_version },
-              });
-              await refreshIdentity(org);
-              setRevision((value) => value + 1);
-              toast.success(t("orgNameSaved"));
-            });
+        <OrganizationNameForm
+          key={data.authz_version}
+          organization={data}
+          onSaved={async () => {
+            await refreshIdentity(org);
+            await organization.refetch();
           }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="org-name">{t("orgName")}</FieldLabel>
-              <Input
-                key={data.authz_version}
-                id="org-name"
-                name="name"
-                defaultValue={data.name}
-                required
-                maxLength={100}
-              />
-            </Field>
-            <Button type="submit">{t("saveOrg")}</Button>
-          </FieldGroup>
-        </form>
+        />
       </Can>
     </div>
   );
@@ -145,10 +127,13 @@ function AuditPage({ platform }: { platform: boolean }) {
   const t = useTranslations("Management");
   const format = useFormatter();
 
-  const org = useIdentity((state) => state.org_id);
-  const state = useList<components["schemas"]["APIAuditEvent"]>(
-    platform ? "/iam/audit-events" : `/iam/orgs/${org}/audit-events`,
+  const org = useIdentity((state) => state.org_id) ?? "";
+  const state = usePagedQuery<ApiAuditEvent>(["audit", platform, org], (query, signal) =>
+    platform
+      ? dataOf(listAuditEvents({ query, signal, throwOnError: true }))
+      : dataOf(listOrganizationAuditEvents({ path: { org_id: org }, query, signal, throwOnError: true })),
   );
+
   return (
     <DataTable
       state={state}
@@ -175,21 +160,14 @@ function AuditPage({ platform }: { platform: boolean }) {
   );
 }
 function SecurityOverview() {
-  const perform = useAction();
-
   const t = useTranslations("Management");
 
-  const [data, setData] = useState<components["schemas"]["APISecurityOverview"]>();
-  useEffect(() => {
-    const controller = new AbortController();
-    void perform(async () => {
-      const result = await api<components["schemas"]["APISecurityOverview"]>("/iam/security/overview", {
-        signal: controller.signal,
-      });
-      if (!controller.signal.aborted) setData(result);
-    });
-    return () => controller.abort();
-  }, [perform]);
+  const auth = useIdentity();
+  const query = useQuery({
+    queryKey: [...securityOverviewQueryKey(), ...identityScope(auth)],
+    queryFn: ({ signal }) => dataOf(securityOverview({ signal, throwOnError: true })),
+  });
+  const data = query.data;
   return (
     <div className="flex flex-col gap-6">
       <Alert>
@@ -213,5 +191,49 @@ function SecurityOverview() {
         </dl>
       )}
     </div>
+  );
+}
+
+function OrganizationNameForm({
+  organization,
+  onSaved,
+}: {
+  organization: ApiOrganization;
+  onSaved: () => Promise<void>;
+}) {
+  const t = useTranslations("Management");
+  const errors = useTranslations("Errors");
+  const perform = useAction();
+  const form = useForm<z.infer<typeof zUpdateCurrentOrganizationBody>>({
+    resolver: zodResolver(zUpdateCurrentOrganizationBody),
+    defaultValues: { name: organization.name, authz_version: organization.authz_version },
+  });
+  return (
+    <form
+      className="max-w-lg"
+      noValidate
+      onSubmit={form.handleSubmit(async (body) => {
+        await perform(async () => {
+          await updateCurrentOrganization({
+            path: { org_id: organization.id },
+            body,
+            headers: mutationHeaders,
+            throwOnError: true,
+          });
+          await onSaved();
+        }, t("orgNameSaved"));
+      })}
+    >
+      <fieldset disabled={form.formState.isSubmitting}>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="org-name">{t("orgName")}</FieldLabel>
+            <Input id="org-name" {...form.register("name")} aria-invalid={!!form.formState.errors.name} />
+            {form.formState.errors.name && <FieldError>{errors("invalidRequest")}</FieldError>}
+          </Field>
+          <Button type="submit">{t("saveOrg")}</Button>
+        </FieldGroup>
+      </fieldset>
+    </form>
   );
 }

@@ -21,7 +21,7 @@ func listJSON(ctx context.Context, db *gorm.DB, limit, offset int, sql string, a
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := []json.RawMessage{}
 	var total int64
@@ -55,8 +55,8 @@ func ListUsers(ctx context.Context, db *gorm.DB, limit, offset int, query string
 		return nil, err
 	}
 
-	items := []contract.APIUser{}
-	if err := filter.Order("created_at,id").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+	items, err := gorm.G[contract.APIUser](db).Table("iam.users").Select("id,username,display_name,email,status,is_super_admin,auth_version").Where("? = '' OR username_normalized LIKE lower(?)||'%' OR display_name ILIKE '%'||?||'%'", query, query, query).Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -71,8 +71,8 @@ func ListOrganizations(ctx context.Context, db *gorm.DB, limit, offset int) (map
 		return nil, err
 	}
 
-	items := []contract.APIOrganization{}
-	if err := filter.Order("created_at,id").Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+	items, err := gorm.G[contract.APIOrganization](db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 

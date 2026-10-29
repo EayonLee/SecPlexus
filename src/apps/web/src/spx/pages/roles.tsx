@@ -1,75 +1,135 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { useFormatter, useTranslations } from "next-intl";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 
-import type { components } from "@/auth/api.gen";
 import { permissions } from "@/auth/permissions.gen";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  listRoleMembersQueryKey,
+  listRolesOptions,
+  listRolesQueryKey,
+  permissionsQueryKey,
+  setRolePermissionsMutation,
+} from "@/spx/api/iam/@tanstack/react-query.gen";
+import {
+  createRole,
+  deleteRole,
+  getRole,
+  listRoleMembers,
+  permissions as permissionCatalog,
+  previewPermission,
+  updateRole,
+} from "@/spx/api/iam/sdk.gen";
+import type { ApiPreview, ApiRole } from "@/spx/api/iam/types.gen";
+import {
+  zCreateRoleBody,
+  zPreviewPermissionBody,
+  zSetRolePermissionsBody,
+  zUpdateRoleBody,
+} from "@/spx/api/iam/zod.gen";
 
 import { Can, useCan } from "../components/access";
-import { DataTable, type PageData, useAction, useList } from "../components/data";
-import { FormDialog } from "../components/forms";
-import { api, refreshIdentity, useIdentity } from "../iam/session";
+import { DataTable, useAction } from "../components/data";
+import { FormDialog, FormInput } from "../components/forms";
+import { identityScope, queryClient } from "../iam/query";
+import { dataOf, errorMessageKey, mutationHeaders, refreshIdentity, useIdentity } from "../iam/session";
 import { useRoleLabel } from "../iam/use-role-label";
 
-type Role = components["schemas"]["APIRole"];
-type Member = components["schemas"]["APIMember"];
-type PermissionItem = components["schemas"]["APIPermissionItem"];
-type Preview = components["schemas"]["APIPreview"];
 export function RolesPage() {
   const roleLabel = useRoleLabel();
+  const roleForm = useForm<z.infer<typeof zUpdateRoleBody>>({ resolver: zodResolver(zUpdateRoleBody) });
   const perform = useAction();
 
   const t = useTranslations("Management");
-  const format = useFormatter();
+  const errors = useTranslations("Errors");
   const permissionText = useTranslations("Permissions");
   const permissionLabels = Object.fromEntries(Object.values(permissions).map((key) => [key, permissionText(key)]));
 
   const auth = useIdentity();
-  const org = auth.org_id;
-  const base = `/iam/orgs/${org}/roles`;
-  const authzVersion = auth.organizations.find((entry) => entry.id === org)?.authz_version;
-  const state = useList<Role>(base);
+  const org = auth.org_id ?? "";
+  const [page, setPage] = useState(1);
+  const options = listRolesOptions({ path: { org_id: org }, query: { limit: 20, offset: (page - 1) * 20 } });
+  // 使用生成键的 tags 元数据隔离身份/授权版本，不发送额外身份 HTTP 头。
+  options.queryKey[0].tags = identityScope(auth).map((value) => value ?? "");
+  const roleQuery = useQuery({
+    ...options,
+    enabled: auth.status === "authenticated",
+    select: (response) => response.data,
+  });
+  const state = {
+    items: roleQuery.data?.items ?? [],
+    total: roleQuery.data?.total ?? 0,
+    loading: roleQuery.isFetching,
+    error: roleQuery.error ? errorMessageKey(roleQuery.error) : ("" as const),
+    page,
+    setPage,
+    reload: () => {
+      void roleQuery.refetch();
+    },
+  };
   const canMembers = useCan(permissions.IAMMembersRead);
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Role>();
-  const [removing, setRemoving] = useState<Role>();
-  const [catalog, setCatalog] = useState<PermissionItem[]>([]);
+  const [editing, setEditing] = useState<ApiRole | undefined>(undefined);
+  const [removing, setRemoving] = useState<ApiRole | undefined>(undefined);
+
   const [grants, setGrants] = useState<string[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [preview, setPreview] = useState<Preview>();
-  const canEdit = editing?.allowed_actions?.includes(permissions.IAMRolesManage) || false;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 授权版本变化后重新获取可委派权限。
-  useEffect(() => {
-    const controller = new AbortController();
-    void perform(async () => {
-      const data = await api<{ items: PermissionItem[] }>(`/iam/permissions?org_id=${org}`, {
-        signal: controller.signal,
+
+  const [preview, setPreview] = useState<ApiPreview | undefined>(undefined);
+  const canEdit = editing?.allowed_actions.includes(permissions.IAMRolesManage) ?? false;
+  const catalogQuery = useQuery({
+    queryKey: [...permissionsQueryKey({ query: { org_id: org } }), ...identityScope(auth)],
+    queryFn: ({ signal }) => dataOf(permissionCatalog({ query: { org_id: org }, signal, throwOnError: true })),
+    enabled: auth.status === "authenticated",
+  });
+  const catalog = catalogQuery.data?.items ?? [];
+  const memberQuery = useQuery({
+    queryKey: [
+      ...listRoleMembersQueryKey({ path: { org_id: org, id: editing?.id ?? "" }, query: { limit: 100 } }),
+      ...identityScope(auth),
+    ],
+    enabled: !!editing && canMembers,
+    queryFn: ({ signal }) =>
+      dataOf(
+        listRoleMembers({
+          path: { org_id: org, id: editing?.id ?? "" },
+          query: { limit: 100 },
+          signal,
+          throwOnError: true,
+        }),
+      ),
+  });
+  const members = memberQuery.data?.items ?? [];
+  const grantsMutation = useMutation({
+    ...setRolePermissionsMutation({ headers: mutationHeaders }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: listRolesQueryKey({ path: { org_id: org } }),
+        refetchType: "none",
       });
-      if (!controller.signal.aborted) setCatalog(data.items);
-    });
-    return () => controller.abort();
-  }, [org, authzVersion]);
-  async function open(role: Role) {
+      await reloadRole(variables.path.id);
+      toast.success(t("permissionsSaved"));
+    },
+  });
+  function open(role: ApiRole) {
+    roleForm.reset({ name: role.name, description: role.description, status: role.status, version: role.version });
     setEditing(role);
     setGrants(role.permissions);
     setPreview(undefined);
-    setMembers([]);
-    if (canMembers) {
-      const data = await api<PageData<Member>>(`${base}/${role.id}/members?limit=100`);
-      setMembers(data.items);
-    }
   }
   async function reloadRole(id: string) {
     await refreshIdentity(org);
@@ -78,7 +138,8 @@ export function RolesPage() {
       setEditing(undefined);
       return;
     }
-    const role = await api<Role>(`${base}/${id}`);
+    const role = await dataOf(getRole({ throwOnError: true, path: { org_id: org, id } }));
+    roleForm.reset({ name: role.name, description: role.description, status: role.status, version: role.version });
     setEditing(role);
     setGrants(role.permissions);
     setPreview(undefined);
@@ -110,10 +171,10 @@ export function RolesPage() {
             title: t("action"),
             cell: (role) => (
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => void perform(() => open(role))}>
+                <Button variant="ghost" onClick={() => open(role)}>
                   {t("view")}
                 </Button>
-                {role.allowed_actions?.includes(permissions.IAMRolesManage) && (
+                {role.allowed_actions.includes(permissions.IAMRolesManage) && (
                   <Button variant="ghost" onClick={() => setRemoving(role)}>
                     {t("delete")}
                   </Button>
@@ -126,34 +187,61 @@ export function RolesPage() {
       {creating && (
         <FormDialog
           title={t("createCustomRole")}
-          fields={[
-            {
-              name: "code",
-              label: t("roleCode"),
-              required: true,
-              pattern: "[a-z][a-z0-9_]{2,63}",
-              placeholder: t("exampleRoleCode"),
-              description: t("roleCodeDescription"),
-            },
-            { name: "name", label: t("roleName"), required: true, maxLength: 100, placeholder: t("exampleRoleName") },
-            { name: "description", label: t("description"), type: "textarea", maxLength: 1000 },
-          ]}
+          schema={zCreateRoleBody.required({ code: true })}
+          defaultValues={{ code: "", name: "", description: "" }}
           onClose={() => setCreating(false)}
           onSubmit={async (values) => {
-            await api(base, { method: "POST", body: values });
+            await dataOf(
+              createRole({
+                throwOnError: true,
+                path: { org_id: org },
+                headers: mutationHeaders,
+                body: values,
+              }),
+            );
             state.reload();
             await refreshIdentity(org);
           }}
-        />
+        >
+          {(form) => (
+            <>
+              <FormInput
+                label={t("roleCode")}
+                registration={form.register("code")}
+                error={form.formState.errors.code}
+                placeholder={t("exampleRoleCode")}
+                description={t("roleCodeDescription")}
+              />
+              <FormInput
+                label={t("roleName")}
+                registration={form.register("name")}
+                error={form.formState.errors.name}
+                placeholder={t("exampleRoleName")}
+              />
+              <FormInput
+                label={t("description")}
+                type="textarea"
+                registration={form.register("description")}
+                error={form.formState.errors.description}
+              />
+            </>
+          )}
+        </FormDialog>
       )}
       {removing && (
         <FormDialog
           title={t("deleteRole")}
           description={t("deleteRoleDescription", { name: removing.name })}
-          fields={[]}
+          schema={z.object({})}
+          defaultValues={{}}
           onClose={() => setRemoving(undefined)}
           onSubmit={async () => {
-            await api(`${base}/${removing.id}?version=${removing.version}`, { method: "DELETE" });
+            await deleteRole({
+              throwOnError: true,
+              path: { org_id: org, id: removing.id },
+              query: { version: removing.version },
+              headers: mutationHeaders,
+            });
             state.reload();
           }}
         />
@@ -162,7 +250,7 @@ export function RolesPage() {
         <Dialog
           open
           onOpenChange={(value) => {
-            if (!value) {
+            if (!value && !grantsMutation.isPending && !roleForm.formState.isSubmitting) {
               setEditing(undefined);
               setPreview(undefined);
             }
@@ -183,24 +271,20 @@ export function RolesPage() {
               </TabsList>
               <TabsContent value="information">
                 <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const values = new FormData(event.currentTarget);
-                    void perform(async () => {
-                      await api(`${base}/${editing.id}`, {
-                        method: "PATCH",
-                        body: {
-                          name: values.get("name"),
-                          description: values.get("description"),
-                          status: values.get("status"),
-                          version: editing.version,
-                        },
+                  noValidate
+                  onSubmit={roleForm.handleSubmit(async (body) => {
+                    await perform(async () => {
+                      await updateRole({
+                        path: { org_id: org, id: editing.id },
+                        body,
+                        headers: mutationHeaders,
+                        throwOnError: true,
                       });
                       await reloadRole(editing.id);
                     }, t("roleSaved"));
-                  }}
+                  })}
                 >
-                  <fieldset disabled={!canEdit}>
+                  <fieldset disabled={!canEdit || roleForm.formState.isSubmitting || grantsMutation.isPending}>
                     <FieldGroup>
                       <Field>
                         <FieldLabel htmlFor="role-code">{t("roleCode")}</FieldLabel>
@@ -211,10 +295,9 @@ export function RolesPage() {
                         <Input
                           key={editing.version}
                           id="role-name"
-                          name="name"
+                          {...roleForm.register("name")}
                           required
                           maxLength={100}
-                          defaultValue={editing.name}
                         />
                       </Field>
                       <Field>
@@ -222,23 +305,20 @@ export function RolesPage() {
                         <Textarea
                           key={editing.version}
                           id="role-description"
-                          name="description"
+                          {...roleForm.register("description")}
                           maxLength={1000}
-                          defaultValue={editing.description}
                         />
                       </Field>
                       <Field>
                         <FieldLabel htmlFor="role-status">{t("status")}</FieldLabel>
-                        <NativeSelect
-                          key={editing.version}
-                          id="role-status"
-                          name="status"
-                          defaultValue={editing.status}
-                        >
+                        <NativeSelect key={editing.version} id="role-status" {...roleForm.register("status")}>
                           <NativeSelectOption value="active">{t("active")}</NativeSelectOption>
                           <NativeSelectOption value="disabled">{t("disabled")}</NativeSelectOption>
                         </NativeSelect>
                       </Field>
+                      {Object.keys(roleForm.formState.errors).length > 0 && (
+                        <FieldError>{errors("invalidRequest")}</FieldError>
+                      )}
                       {canEdit && <Button type="submit">{t("saveRole")}</Button>}
                     </FieldGroup>
                   </fieldset>
@@ -285,14 +365,14 @@ export function RolesPage() {
                 {canEdit && (
                   <div className="flex flex-wrap gap-2">
                     <Button
+                      disabled={grantsMutation.isPending || roleForm.formState.isSubmitting}
                       onClick={() =>
                         void perform(async () => {
-                          await api(`${base}/${editing.id}/permissions`, {
-                            method: "PUT",
-                            body: { permissions: grants, version: editing.version },
+                          await grantsMutation.mutateAsync({
+                            path: { org_id: org, id: editing.id },
+                            headers: mutationHeaders,
+                            body: zSetRolePermissionsBody.parse({ permissions: grants, version: editing.version }),
                           });
-                          await reloadRole(editing.id);
-                          toast.success(t("permissionsSaved"));
                         })
                       }
                     >
@@ -304,10 +384,18 @@ export function RolesPage() {
                         onClick={() =>
                           void perform(async () => {
                             setPreview(
-                              await api<Preview>(`/iam/orgs/${org}/permission-preview`, {
-                                method: "POST",
-                                body: { role_id: editing.id, permissions: grants, version: editing.version },
-                              }),
+                              await dataOf(
+                                previewPermission({
+                                  throwOnError: true,
+                                  path: { org_id: org },
+                                  headers: mutationHeaders,
+                                  body: zPreviewPermissionBody.parse({
+                                    role_id: editing.id,
+                                    permissions: grants,
+                                    version: editing.version,
+                                  }),
+                                }),
+                              ),
                             );
                           })
                         }
@@ -321,8 +409,8 @@ export function RolesPage() {
                   <p>
                     {t("impact", {
                       count: preview.affected_members,
-                      added: format.list(preview.added.map((key) => permissionLabels[key] ?? key)) || t("none"),
-                      removed: format.list(preview.removed.map((key) => permissionLabels[key] ?? key)) || t("none"),
+                      added: preview.added.map((key) => permissionLabels[key] ?? key).join(", ") || t("none"),
+                      removed: preview.removed.map((key) => permissionLabels[key] ?? key).join(", ") || t("none"),
                     })}
                   </p>
                 )}

@@ -21,7 +21,6 @@
     "certs:generate": "node scripts/generate-certs.mjs"
   },
   "devDependencies": {
-    "openapi-typescript": "7.13.0",
-    "typescript": "5.9.3"
+    "@redocly/cli": "2.7.0"
   }
 }

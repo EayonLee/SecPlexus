@@ -2,8 +2,10 @@ package management
 
 import (
 	"encoding/json"
-	"net/http"
-	"unicode/utf8"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
@@ -14,122 +16,139 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// listUsers 按查询条件与分页读取平台用户。
-func (s *Handler) listUsers(w http.ResponseWriter, r *http.Request) error {
-	query := r.URL.Query().Get("q")
-	if len(query) > 400 || utf8.RuneCountInString(query) > 100 {
-		return repository.ErrInvalid
+// ListUsers 按查询条件与分页读取平台用户。
+func (s *Handler) ListUsers(c *gin.Context, params router.ListUsersParams) {
+	w := c.Writer
+	r := c.Request
+	query := ""
+	if params.Q != nil {
+		query = *params.Q
 	}
 
-	limit, offset, err := pagination(r)
-	if err != nil {
-		return err
-	}
+	limit, offset := pagination(params.Limit, params.Offset)
 
 	response, err := s.Service.ListUsers(r.Context(), limit, offset, query)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, response)
-	return nil
 }
 
-// getUser 读取平台用户的公开字段。
-func (s *Handler) getUser(w http.ResponseWriter, r *http.Request) error {
-	data, err := s.Service.User(r.Context(), r.PathValue("id"))
+// GetUser 读取平台用户的公开字段。
+func (s *Handler) GetUser(c *gin.Context, id string) {
+	w := c.Writer
+	r := c.Request
+	data, err := s.Service.User(r.Context(), id)
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Success(w, json.RawMessage(data))
-	return nil
 }
 
-// createUser 限制密码计算并创建用户，凭据不会进入结果。
-func (s *Handler) createUser(w http.ResponseWriter, r *http.Request) error {
+// CreateUser 限制密码计算并创建用户，凭据不会进入结果。
+func (s *Handler) CreateUser(c *gin.Context, params router.CreateUserParams) {
+	w := c.Writer
+	r := c.Request
 	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformUsersManage, ""); err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	var input service.UserInput
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
 	select {
 	case s.HashSlots <- struct{}{}:
 		defer func() { <-s.HashSlots }()
 	default:
-		return authentication.ErrRateLimited
+		httpx.Reject(c, authentication.ErrRateLimited)
+		return
 	}
 
 	id, err := s.Service.CreateUser(r.Context(), input, middleware.RequestID(r))
 	if err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.Created(w, map[string]string{"id": id})
-	return nil
 }
 
-// updateUser 按身份版本更新用户资料和状态。
-func (s *Handler) updateUser(w http.ResponseWriter, r *http.Request) error {
+// UpdateUser 按身份版本更新用户资料和状态。
+func (s *Handler) UpdateUser(c *gin.Context, id string, params router.UpdateUserParams) {
+	w := c.Writer
+	r := c.Request
 	var input service.UserUpdate
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.UpdateUser(r.Context(), r.PathValue("id"), input, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.UpdateUser(r.Context(), id, input, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// setSuperAdmin 处理需要近期认证的管理员身份变更。
-func (s *Handler) setSuperAdmin(w http.ResponseWriter, r *http.Request) error {
+// SetSuperAdmin 处理需要近期认证的管理员身份变更。
+func (s *Handler) SetSuperAdmin(c *gin.Context, id string, params router.SetSuperAdminParams) {
+	w := c.Writer
+	r := c.Request
 	var input struct {
 		Enabled bool   `json:"enabled"`
 		Reason  string `json:"reason"`
 	}
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
-	if err := s.Service.SetSuperAdmin(r.Context(), r.PathValue("id"), input.Enabled, input.Reason, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.SetSuperAdmin(r.Context(), id, input.Enabled, input.Reason, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }
 
-// resetUserPassword 限制密码计算并通过用例重置密码。
-func (s *Handler) resetUserPassword(w http.ResponseWriter, r *http.Request) error {
+// ResetUserPassword 限制密码计算并通过用例重置密码。
+func (s *Handler) ResetUserPassword(c *gin.Context, id string, params router.ResetUserPasswordParams) {
+	w := c.Writer
+	r := c.Request
 	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformUsersManage, ""); err != nil {
-		return err
+		httpx.Reject(c, err)
+		return
 	}
 
 	var input struct {
 		Password string `json:"password"`
 	}
-	if err := httpx.Decode(w, r, &input); err != nil {
-		return repository.ErrInvalid
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 
 	select {
 	case s.HashSlots <- struct{}{}:
 		defer func() { <-s.HashSlots }()
 	default:
-		return authentication.ErrRateLimited
+		httpx.Reject(c, authentication.ErrRateLimited)
+		return
 	}
 
-	if err := s.Service.ResetPassword(r.Context(), r.PathValue("id"), input.Password, middleware.RequestID(r)); err != nil {
-		return err
+	if err := s.Service.ResetPassword(r.Context(), id, input.Password, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
 	}
 
 	result.NoContent(w)
-	return nil
 }

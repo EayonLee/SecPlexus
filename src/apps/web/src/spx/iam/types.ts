@@ -1,9 +1,8 @@
-import type { components } from "@/auth/api.gen";
+import type { ApiMe } from "@/spx/api/iam/types.gen";
 
-export type Identity = components["schemas"]["APIMe"];
 export type AuthStatus = "unknown" | "anonymous" | "authenticated" | "unavailable";
-export interface AuthState extends Omit<Identity, "principal"> {
-  principal?: Identity["principal"];
+export interface AuthState extends Omit<ApiMe, "principal"> {
+  principal?: ApiMe["principal"];
   status: AuthStatus;
 }
 export const initialAuth: AuthState = {

@@ -13,7 +13,6 @@ import (
 
 // Roles 返回角色和当前用户可执行的操作；实际写入时仍须在 Manage 中重新鉴权。
 func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset int) ([]contract.APIRole, int64, error) {
-	items := []contract.APIRole{}
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err := tx.Error
 	if err != nil {

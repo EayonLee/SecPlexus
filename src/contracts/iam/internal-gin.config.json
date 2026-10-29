@@ -1,0 +1,13 @@
+{
+  "package": "internalapi",
+  "generate": {
+    "gin-server": true,
+    "strict-server": true,
+    "models": true
+  },
+  "import-mapping": {
+    "schemas.source.json": "github.com/EayonLee/SecPlexus/src/contracts/iam"
+  },
+  "output": "src/apps/iam/internal/router/internalapi/api.gen.go",
+  "allow-remote-refs-from": []
+}

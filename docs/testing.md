@@ -79,3 +79,24 @@ E2E优先语义定位（role/label等）和用户可见结果，避免内部CSS�
 构建与类型检查覆盖全部 Next.js 路由。E2E 使用真实 Cookie、CSRF、主动改密、角色权限、组织隔离及 SSE 撤权。通过 `pnpm test:e2e --docker --grep <名称>` 可定向运行。安装浏览器使用 `pnpm --dir src/apps/web exec playwright install chromium`。原作者站点统计、仓库星数和托管配置已移除；测试不依赖这些外部服务。
 
 国际化回归还覆盖中英文词典键、ICU变量和复数、Dashboard真实组件的双语渲染。既有IAM浏览器用例在登录前显式选择中文，独立于默认语言；语言切换浏览器检查覆盖 Cookie 持久化、html lang、元信息和窄屏显示。
+
+## 本地框架检查与人工浏览器验收
+
+```sh
+pnpm contracts:generate
+pnpm contracts:check
+pnpm test:unit
+pnpm typecheck
+pnpm lint
+go vet ./src/...
+make lint-go
+make vuln-go
+make build
+pnpm test:integration --docker --race
+pnpm test:e2e --docker
+pnpm test:e2e --docker --manual
+```
+
+`lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.3工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。
+
+manual模式创建相同的独立双副本栈，在权限0600的临时文件中提供仅本次测试的URL/账号，保持运行等待标准输入结束，再精确清理本次资源。不要把此文件、凭据、截图或trace提交到仓库。浏览器操作按AGENTS.md委派到专用代理；桌面/窄屏、双语切换及刷新、主题各选项和CRM V1基准、核心管理流程及console/network都需实际检查，不能以自动化成功代替视觉验收。

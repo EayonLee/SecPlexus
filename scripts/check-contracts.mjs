@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import path from 'node:path';
-const specifications = ['iam','console'].map((module) => JSON.parse(readFileSync(`src/contracts/${module}/openapi.json`, 'utf8')));
+const specifications = ['iam/openapi', 'console/openapi', 'iam/internal'].map(name => JSON.parse(readFileSync(`src/contracts/${name}.json`, 'utf8')));
+for (const module of ['iam', 'console']) {
+  const publicSpec = JSON.parse(readFileSync(`src/contracts/${module}/openapi.json`, 'utf8'));
+  assert(Object.keys(publicSpec.paths).every(pathname => pathname.startsWith(`/api/v1/${module}/`)), 'Public contract contains an internal path');
+  assert(!publicSpec.components?.securitySchemes?.serviceCredential, 'Public contract contains the internal service credential scheme');
+}
+assert(!readFileSync('src/apps/web/src/spx/api/iam/types.gen.ts', 'utf8').includes('AuthorizeInternal'), 'Internal authorization entered the Web SDK');
 const catalog = JSON.parse(readFileSync('src/contracts/iam/permissions.json', 'utf8'));
 const permissions = new Set();
 for (const permission of catalog) {
@@ -10,6 +15,7 @@ for (const permission of catalog) {
   assert(['platform', 'organization'].includes(permission.scope));
   assert(!(permission.scope === 'platform' && permission.delegable));
 }
+assert(!readFileSync('src/apps/web/src/spx/api/iam/types.gen.ts', 'utf8').includes('ApiAuthorizeRequest'), 'Internal request schema entered the Web SDK');
 const declared = new Set();
 for (const specification of specifications) for (const [pathname, methods] of Object.entries(specification.paths)) {
   assert(/^\/(api|internal)\/v1\/(iam|console)\//.test(pathname), `Invalid API prefix ${pathname}`);
@@ -27,3 +33,6 @@ for (const entry of codes) {
   assert(entry.message && entry.module);
 }
 console.log(`API contract checked: ${declared.size} mounted routes, ${permissions.size} permissions, ${codes.length} result codes.`);
+
+const generated = spawnSync(process.execPath, ['scripts/generate-contracts.mjs', '--check'], { stdio: 'inherit' });
+if (generated.error || generated.status !== 0) process.exit(generated.status || 1);

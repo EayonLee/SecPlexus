@@ -1,45 +1,54 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useRouter } from "next/navigation";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
 import { useFormatter, useTranslations } from "next-intl";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 
-import type { components } from "@/auth/api.gen";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { listSessionsQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
+import { listSessions, revokeSession } from "@/spx/api/iam/sdk.gen";
+import { zChangePasswordBody, zReauthenticateBody } from "@/spx/api/iam/zod.gen";
 
 import { useAction } from "../components/data";
-import { FormDialog } from "../components/forms";
-import { api, changePassword, reauthenticate, signOut, useIdentity } from "../iam/session";
+import { FormDialog, FormInput } from "../components/forms";
+import { changePassword, dataOf, mutationHeaders, reauthenticate, signOut, useIdentity } from "../iam/session";
 
 export function SecurityPage() {
   const perform = useAction();
 
   const t = useTranslations("Account");
+  const errors = useTranslations("Errors");
   const format = useFormatter();
 
   const auth = useIdentity();
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [sessions, setSessions] = useState<components["schemas"]["APISession"][]>([]);
-  const [revision, setRevision] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 手动刷新和设备撤销后重新读取会话列表。
-  useEffect(() => {
-    const controller = new AbortController();
-    void perform(async () => {
-      const data = await api<{ items: components["schemas"]["APISession"][] }>("/iam/me/sessions", {
-        signal: controller.signal,
-      });
-      if (!controller.signal.aborted) setSessions(data.items);
+  const passwordSchema = zChangePasswordBody
+    .extend({ confirm_password: z.string() })
+    .refine((value) => value.new_password === value.confirm_password, {
+      path: ["confirm_password"],
+      message: t("passwordMismatch"),
     });
-    return () => controller.abort();
-  }, [revision]);
+  const passwordForm = useForm<z.infer<typeof passwordSchema>>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { old_password: "", new_password: "", confirm_password: "" },
+  });
+  const busy = passwordForm.formState.isSubmitting;
+  const [confirming, setConfirming] = useState(false);
+  const devices = useQuery({
+    queryKey: [...listSessionsQueryKey(), auth.principal?.session_id, auth.principal?.auth_version],
+    queryFn: ({ signal }) => dataOf(listSessions({ signal, throwOnError: true })),
+  });
+  const sessions = devices.data?.items ?? [];
   return (
     <div className="flex w-full flex-col gap-6">
       <Card>
@@ -52,23 +61,15 @@ export function SecurityPage() {
         <CardContent className="flex flex-col gap-6">
           <form
             className="max-w-lg"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const values = new FormData(event.currentTarget);
-              const form = event.currentTarget;
-              if (values.get("new_password") !== values.get("confirm_password")) {
-                toast.error(t("passwordMismatch"));
-                return;
-              }
-              setBusy(true);
+            noValidate
+            onSubmit={passwordForm.handleSubmit(async (values) => {
               await perform(async () => {
-                await changePassword(String(values.get("old_password")), String(values.get("new_password")));
-                form.reset();
+                await changePassword(values.old_password, values.new_password);
+                passwordForm.reset();
                 toast.success(t("passwordChanged"));
                 router.replace("/login");
               });
-              setBusy(false);
-            }}
+            })}
           >
             <fieldset disabled={busy}>
               <FieldGroup>
@@ -76,7 +77,7 @@ export function SecurityPage() {
                   <FieldLabel htmlFor="old-password">{t("currentPassword")}</FieldLabel>
                   <Input
                     id="old-password"
-                    name="old_password"
+                    {...passwordForm.register("old_password")}
                     type="password"
                     autoComplete="current-password"
                     required
@@ -86,7 +87,7 @@ export function SecurityPage() {
                   <FieldLabel htmlFor="new-password">{t("newPassword")}</FieldLabel>
                   <Input
                     id="new-password"
-                    name="new_password"
+                    {...passwordForm.register("new_password")}
                     type="password"
                     autoComplete="new-password"
                     minLength={8}
@@ -98,12 +99,17 @@ export function SecurityPage() {
                   <FieldLabel htmlFor="confirm-password">{t("confirmPassword")}</FieldLabel>
                   <Input
                     id="confirm-password"
-                    name="confirm_password"
+                    {...passwordForm.register("confirm_password")}
                     type="password"
                     autoComplete="new-password"
                     required
                   />
                 </Field>
+                {Object.keys(passwordForm.formState.errors).length > 0 && (
+                  <FieldError>
+                    {passwordForm.formState.errors.confirm_password?.message ?? errors("invalidRequest")}
+                  </FieldError>
+                )}
                 <Field orientation="horizontal">
                   <Button type="submit" disabled={busy}>
                     {t("changeAndSignOut")}
@@ -134,7 +140,7 @@ export function SecurityPage() {
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => setConfirming(true)}>{t("reauthenticate")}</Button>
-            <Button variant="outline" onClick={() => setRevision((value) => value + 1)}>
+            <Button variant="outline" onClick={() => void devices.refetch()}>
               {t("refresh")}
             </Button>
             <Button
@@ -171,10 +177,14 @@ export function SecurityPage() {
                       variant="ghost"
                       onClick={() =>
                         void perform(async () => {
-                          await api(`/iam/me/sessions/${session.id}`, { method: "DELETE" });
+                          await revokeSession({
+                            throwOnError: true,
+                            path: { id: session.id },
+                            headers: mutationHeaders,
+                          });
                           if (session.current) {
                             window.location.assign("/login");
-                          } else setRevision((value) => value + 1);
+                          } else void devices.refetch();
                         })
                       }
                     >
@@ -190,14 +200,24 @@ export function SecurityPage() {
       {confirming && (
         <FormDialog
           title={t("confirmCurrentPassword")}
-          fields={[{ name: "password", label: t("confirmCurrentPassword"), type: "password", required: true }]}
+          schema={zReauthenticateBody}
+          defaultValues={{ password: "" }}
           onClose={() => setConfirming(false)}
           onSubmit={async (values) => {
             await reauthenticate(values.password);
-            setRevision((value) => value + 1);
+            void devices.refetch();
             toast.success(t("verified"));
           }}
-        />
+        >
+          {(form) => (
+            <FormInput
+              label={t("confirmCurrentPassword")}
+              type="password"
+              registration={form.register("password")}
+              error={form.formState.errors.password}
+            />
+          )}
+        </FormDialog>
       )}
     </div>
   );

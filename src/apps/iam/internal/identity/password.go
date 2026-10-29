@@ -7,7 +7,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/aarondl/authboss/v3"
 	"github.com/alexedwards/argon2id"
 )
 
@@ -35,10 +34,8 @@ func ValidatePassword(password string) error {
 	return nil
 }
 
-// PasswordHasher 使用受限的 PHC 参数实现认证库密码哈希接口。
+// PasswordHasher 使用成熟 Argon2id 组件并限制 PHC 参数资源成本。
 type PasswordHasher struct{}
-
-var _ authboss.Hasher = PasswordHasher{}
 
 // GenerateHash 校验密码并生成 Argon2id 哈希。
 func (PasswordHasher) GenerateHash(password string) (string, error) {
