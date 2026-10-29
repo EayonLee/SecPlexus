@@ -9,7 +9,7 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // CreateMember 在组织中创建成员关系。
@@ -41,12 +41,12 @@ func (s *Service) CreateMember(ctx context.Context, orgID string, input MemberIn
 	membershipID := uuid.New()
 	err = s.Manage(
 		ctx,
-		contract.PermissionIAMMembersManage,
+		iamclient.PermissionIAMMembersManage,
 		orgID,
 		requestID,
 		"membership",
 		&membershipID,
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			userID := uuid.New()
 			if input.UserID != "" {
 				if !p.IsSuperAdmin {
@@ -90,18 +90,15 @@ func (s *Service) CreateMember(ctx context.Context, orgID string, input MemberIn
 
 // UpdateMember 更新或移除组织成员。
 func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, input MemberUpdate, remove bool, requestID string) error {
-	if input.AuthzVersion < 1 || (!remove && input.Status != "active" && input.Status != "disabled") {
-		return repository.ErrInvalid
-	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMMembersManage,
+		iamclient.PermissionIAMMembersManage,
 		orgID,
 		requestID,
 		"membership",
 		uuidPointer(memberID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			var version int64
 			if err := repository.LockOrganizationVersion(ctx, tx, orgID, &version); err != nil {
 				return err

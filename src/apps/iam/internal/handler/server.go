@@ -6,15 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-
 	"log/slog"
 	"net"
 	"net/http"
-
 	"net/url"
 	"strconv"
-
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
@@ -25,50 +21,40 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
-	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router/internalapi"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
+	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 )
 
 // Server 显式装配 IAM 用例与 HTTP 安全边界。
 type Server struct {
 	*management.Handler
-	Service                    *service.Service
-	Auth                       *authentication.Authenticator
-	Security                   *iammiddleware.Security
-	Limiter                    *authentication.Limiter
-	hashSlots                  chan struct{}
-	validate, validateInternal gin.HandlerFunc
-	readyCheck                 func(context.Context) error
+	Service    *service.Service
+	Auth       *authentication.Authenticator
+	Security   *iammiddleware.Security
+	Limiter    *authentication.Limiter
+	hashSlots  chan struct{}
+	ReadyCheck func(context.Context) error
 }
 
-// New 在启动时验证契约并装配有界认证资源。
-func New(svc *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, readyCheck func(context.Context) error) (*Server, error) {
-	validate, err := middleware.ContractValidation(contract.OpenAPI, map[string]int64{"/api/v1/iam/auth/login": 2048, "/api/v1/iam/auth/reauthenticate": 2048})
-	if err != nil {
-		return nil, errors.New("invalid public IAM contract")
-	}
-	internal, err := middleware.ContractValidation(contract.InternalOpenAPI, nil)
-	if err != nil {
-		return nil, errors.New("invalid internal IAM contract")
-	}
+// New 在启动时装配有界认证资源和显式 HTTP 依赖。
+func New(svc *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, ReadyCheck func(context.Context) error) (*Server, error) {
 	slots := make(chan struct{}, 4)
 	auth, err := authentication.NewAuthenticator(svc.Sessions, limiter, slots)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, hashSlots: slots, validate: validate, validateInternal: internal, readyCheck: readyCheck}, nil
+	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, hashSlots: slots, ReadyCheck: ReadyCheck}, nil
 }
 
-// errors 将 Gin 收集的业务错误在响应及会话提交前统一映射。
-func (s *Server) errors(c *gin.Context) {
+// Errors 将 Gin 收集的业务错误在响应及会话提交前统一映射。
+func (s *Server) Errors(c *gin.Context) {
 	c.Next()
 	if len(c.Errors) > 0 && !c.Writer.Written() {
 		s.writeError(c.Writer, c.Request, c.Errors.Last().Err)
@@ -77,28 +63,28 @@ func (s *Server) errors(c *gin.Context) {
 
 // writeError 将业务错误集中映射为公共注册表中的结果码。
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
-	code := common.CodeInternalError
+	code := result.CodeInternalError
 	switch {
 	case errors.Is(err, authentication.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, sql.ErrConnDone):
-		code = common.CodeServiceUnavailable
+		code = result.CodeServiceUnavailable
 	case errors.Is(err, authentication.ErrInvalidCredentials):
-		code = common.CodeInvalidCredentials
+		code = result.CodeInvalidCredentials
 	case errors.Is(err, identity.ErrPasswordMismatch):
-		code = common.CodeInvalidCurrentPassword
+		code = result.CodeInvalidCurrentPassword
 	case errors.Is(err, repository.ErrUnauthenticated):
-		code = common.CodeUnauthenticated
+		code = result.CodeUnauthenticated
 	case errors.Is(err, authorization.ErrRecentAuthRequired):
-		code = common.CodeRecentAuthRequired
+		code = result.CodeRecentAuthRequired
 	case errors.Is(err, authorization.ErrDenied):
-		code = common.CodePermissionDenied
+		code = result.CodePermissionDenied
 	case errors.Is(err, repository.ErrInvalid):
-		code = common.CodeInvalidRequest
+		code = result.CodeInvalidRequest
 	case errors.Is(err, repository.ErrConflict):
-		code = common.CodeConflict
+		code = result.CodeConflict
 	case errors.Is(err, repository.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, sql.ErrNoRows):
-		code = common.CodeNotFound
+		code = result.CodeNotFound
 	case errors.Is(err, authentication.ErrRateLimited):
-		code = common.CodeRateLimited
+		code = result.CodeRateLimited
 		w.Header().Set("Retry-After", "1")
 		var limited *authentication.RateLimitError
 		if errors.As(err, &limited) {
@@ -109,22 +95,22 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		if errors.As(err, &pgerr) {
 			switch pgerr.Code {
 			case "08000", "08001", "08003", "08004", "08006", "08007", "08P01", "57P01", "57P02", "57P03":
-				code = common.CodeServiceUnavailable
+				code = result.CodeServiceUnavailable
 			case "23505", "23503":
-				code = common.CodeConflict
+				code = result.CodeConflict
 			case "23514", "22P02":
-				code = common.CodeInvalidRequest
+				code = result.CodeInvalidRequest
 			}
 		}
 	}
 
 	var network *net.OpError
-	if code == common.CodeInternalError && errors.As(err, &network) {
-		code = common.CodeServiceUnavailable
+	if code == result.CodeInternalError && errors.As(err, &network) {
+		code = result.CodeServiceUnavailable
 	}
 
 	level := slog.LevelWarn
-	if code == common.CodeInternalError || code == common.CodeServiceUnavailable {
+	if code == result.CodeInternalError || code == result.CodeServiceUnavailable {
 		level = slog.LevelError
 	}
 	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
@@ -139,30 +125,9 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 // requestID 读取入口生成的关联标识。
 func requestID(r *http.Request) string { return middleware.RequestID(r) }
 
-// PublicHandler 只向公开监听器挂载公开契约和有状态安全中间件。
-func (s *Server) PublicHandler() http.Handler {
-	engine := middleware.NewEngine()
-	engine.RemoteIPHeaders = []string{"X-Forwarded-For"}
-	if err := engine.SetTrustedProxies(s.Service.Config.App.TrustedProxyCIDRs); err != nil {
-		panic("invalid trusted proxies")
-	}
-	public := engine.Group("")
-	public.Use(iammiddleware.Session(s.Service.Sessions), s.errors, s.Security.GinProtect(), func(c *gin.Context) {
-		if c.FullPath() == "/api/v1/iam/auth/login" || c.FullPath() == "/api/v1/iam/auth/reauthenticate" {
-			if err := s.Limiter.CheckIP(c.Request.Context(), c.ClientIP()); err != nil {
-				httpx.Reject(c, err)
-				return
-			}
-		}
-		c.Next()
-	}, s.validate)
-	router.RegisterPublic(public, s, s.ready)
-	return engine
-}
-
-// Login 将经过契约验证的凭据传入认证用例。
-func (s *Server) Login(c *gin.Context, params router.LoginParams) {
-	var input contract.APILoginInput
+// Login 将原生绑定后的凭据传入认证用例。
+func (s *Server) Login(c *gin.Context) {
+	var input model.APILoginInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -176,8 +141,8 @@ func (s *Server) Login(c *gin.Context, params router.LoginParams) {
 }
 
 // Reauthenticate 仅校验当前账号，不重新构造 HTTP 登录请求。
-func (s *Server) Reauthenticate(c *gin.Context, params router.ReauthenticateParams) {
-	var input contract.APIReauthenticateInput
+func (s *Server) Reauthenticate(c *gin.Context) {
+	var input model.APIReauthenticateInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -194,30 +159,17 @@ func (s *Server) metadata(c *gin.Context) authentication.RequestMetadata {
 	return authentication.RequestMetadata{RequestID: requestID(c.Request), ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
 }
 
-func (s *Server) authenticated(c *gin.Context, p contract.Principal, reauth bool) {
+func (s *Server) authenticated(c *gin.Context, p iamclient.Principal, reauth bool) {
 	a := authentication.CurrentAttempt(c.Request.Context())
 	a.Principal = &p
 	a.Reauthenticate = reauth
 	s.Security.ClearCSRF(c.Writer)
-	result.Success(c.Writer, contract.APILoginResponse{Principal: p})
+	result.Success(c.Writer, model.APILoginResponse{Principal: p})
 }
 
-// InternalHandler 只在独立的内部监听器挂载严格生成的服务间契约。
-func (s *Server) InternalHandler() http.Handler {
-	engine := middleware.NewEngine()
-	engine.Use(s.errors, s.validateInternal)
-	strict := internalapi.NewStrictHandlerWithOptions(s, nil, internalapi.StrictGinServerOptions{
-		RequestErrorHandlerFunc:  func(c *gin.Context, _ error) { httpx.Reject(c, repository.ErrInvalid) },
-		HandlerErrorFunc:         func(c *gin.Context, err error) { httpx.Reject(c, err) },
-		ResponseErrorHandlerFunc: func(c *gin.Context, err error) { httpx.Reject(c, err) },
-	})
-	internalapi.RegisterHandlersWithOptions(engine, strict, internalapi.GinServerOptions{ErrorHandler: func(c *gin.Context, _ error, _ int) { httpx.Reject(c, repository.ErrInvalid) }})
-	return engine
-}
-
-// ready 检查真实依赖，不触发迁移或初始化。
-func (s *Server) ready(c *gin.Context) {
-	if err := s.readyCheck(c.Request.Context()); err != nil {
+// Ready 检查真实依赖，不触发迁移或初始化。
+func (s *Server) Ready(c *gin.Context) {
+	if err := s.ReadyCheck(c.Request.Context()); err != nil {
 		httpx.Reject(c, authentication.ErrUnavailable)
 		return
 	}
@@ -230,25 +182,31 @@ func (s *Server) AuthContext(c *gin.Context) {
 }
 
 // AuthorizeInternal 先确认服务身份，再按转发的原始会话执行权限检查。
-func (s *Server) AuthorizeInternal(ctx context.Context, request internalapi.AuthorizeInternalRequestObject) (internalapi.AuthorizeInternalResponseObject, error) {
-	c := ctx.(*gin.Context)
+func (s *Server) AuthorizeInternal(c *gin.Context) {
 	r := c.Request
-	input := request.Body
+	var input iamclient.AuthorizeRequest
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
 	if !s.Security.InternalClient(r, input.Action) {
-		return nil, authorization.ErrDenied
+		httpx.Reject(c, authorization.ErrDenied)
+		return
 	}
 	if input.Resource != nil {
-		return nil, repository.ErrInvalid
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 	parsed, err := url.ParseRequestURI(input.Path)
 	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Path == "" || input.Method == "" || len(input.Cookie) > 8192 {
-		return nil, repository.ErrInvalid
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
 	original := (&http.Request{Method: input.Method, URL: parsed, Header: make(http.Header), RemoteAddr: r.RemoteAddr}).WithContext(r.Context())
 	original.Header.Set("Cookie", input.Cookie)
 	original.Header.Set("Origin", input.Origin)
 	original.Header.Set("X-CSRF-Token", input.CSRFToken)
-	var decision contract.CapabilityDecision
+	var decision iamclient.CapabilityDecision
 	var failure error
 	buffer := iammiddleware.NewBuffer()
 	s.Security.Protect(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
@@ -264,17 +222,18 @@ func (s *Server) AuthorizeInternal(ctx context.Context, request internalapi.Auth
 		decision, failure = s.Service.Authorize(loaded, input.Action, input.OrgID)
 	})).ServeHTTP(buffer, original)
 	if failure != nil {
-		return nil, failure
+		httpx.Reject(c, failure)
+		return
 	}
 	if buffer.Status >= 400 {
 		// 保留成熟CSRF组件的公开错误码；仅此HTTP适配边界解开它自己的错误响应。
-		var rejected contract.APIError
+		var rejected result.Result[any]
 		if buffer.Status != http.StatusForbidden || json.Unmarshal(buffer.Body.Bytes(), &rejected) != nil {
-			return nil, errors.New("invalid security component response")
+			httpx.Reject(c, errors.New("invalid security component response"))
+			return
 		}
-		rejected.RequestID = requestID(r)
-		return internalapi.AuthorizeInternal403JSONResponse{ForbiddenJSONResponse: internalapi.ForbiddenJSONResponse(rejected)}, nil
+		result.Fail(c.Writer, rejected.Code)
+		return
 	}
-	definition, _ := common.Lookup(common.CodeOK)
-	return internalapi.AuthorizeInternal200JSONResponse{Code: internalapi.AuthorizeInternal200JSONResponseBodyCode(common.CodeOK), Data: decision, Message: definition.Message, RequestID: requestID(r)}, nil
+	result.Success(c.Writer, decision)
 }

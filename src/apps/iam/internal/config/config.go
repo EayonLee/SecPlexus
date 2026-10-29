@@ -5,11 +5,14 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
@@ -170,5 +173,47 @@ func (c Config) Validate() error {
 		return errors.New("invalid cache connection configuration")
 	}
 
+	if _, err := pgx.ParseConfig(c.DB.URL); err != nil {
+		return errors.New("invalid database connection configuration")
+	}
+	if err := c.ValidateSecurity(false); err != nil {
+		return err
+	}
 	return c.Logging.Validate()
+}
+
+// ValidateSecurity 校验已提供的安全值；required 仅在运行认证服务时要求完整配置。
+func (c Config) ValidateSecurity(required bool) error {
+	if (required || c.Auth.CSRFKey != "") && len(c.Auth.CSRFKey) != 32 {
+		return errors.New("CSRF signing key must contain exactly 32 bytes")
+	}
+	if required && len(c.Internal.Clients) == 0 {
+		return errors.New("at least one internal client is required")
+	}
+	catalog := authorization.Catalog()
+	for id, client := range c.Internal.Clients {
+		if id == "" || len(client.Actions) == 0 || ((required || client.Token != "") && (len(client.Token) < 32 || len(client.Token) > 512)) {
+			return errors.New("internal clients require an ID, 32–512 byte token and allowed actions")
+		}
+		for _, action := range client.Actions {
+			if !slices.ContainsFunc(catalog, func(permission authorization.Permission) bool { return permission.Key == action }) {
+				return errors.New("internal client action is not registered in the contract")
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateServe 在创建运行资源前校验服务专用前置条件。
+func (c Config) ValidateServe() error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if err := c.ValidateSecurity(true); err != nil {
+		return err
+	}
+	if c.Internal.TLSCertFile == "" || c.Internal.TLSKeyFile == "" {
+		return errors.New("internal TLS certificate/key are required")
+	}
+	return nil
 }

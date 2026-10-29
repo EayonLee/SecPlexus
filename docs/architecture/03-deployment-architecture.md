@@ -8,7 +8,6 @@
 src/apps/web/            Next.js/React/shadcn，Node进程提供页面及公开API代理
 src/apps/iam/            Go身份与授权服务，config.yaml
 src/apps/console/        Go安全运营业务服务，config.yaml
-src/contracts/          HTTP契约与权限目录
 src/packages/go/        两个Go应用实际复用的实现
 scripts/                根启动、构建、停止及配置工具
 deploy/compose/          显式整套部署与基础组件

@@ -7,28 +7,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // PreviewInput 描述拟预览的角色或成员权限变更。
-type PreviewInput struct {
-	RoleID       string    `json:"role_id"`              // 目标角色标识。
-	Permissions  *[]string `json:"permissions"`          // 有效权限键集合。
-	Version      int64     `json:"version,string"`       // 角色乐观锁版本。
-	MembershipID string    `json:"membership_id"`        // 目标组织成员关系。
-	RoleIDs      *[]string `json:"role_ids"`             // 拟设置的角色标识集合。
-	AuthzVersion int64     `json:"authz_version,string"` // 组织权限版本，防止过期写入。
-}
+type PreviewInput = model.APIPreviewInput
 
 // Preview 描述权限变更前后的差异及影响范围。
-type Preview struct {
-	Before          []string `json:"before"`           // 变更前有效权限。
-	After           []string `json:"after"`            // 拟变更后的有效权限。
-	Added           []string `json:"added"`            // 新增权限。
-	Removed         []string `json:"removed"`          // 移除权限。
-	AffectedMembers int64    `json:"affected_members"` // 受影响成员数量。
-}
+type Preview = model.APIPreview
 
 // Preview 比较角色权限或成员角色变更前后的权限。
 func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput) (Preview, error) {
@@ -51,14 +39,14 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 		return response, err
 	}
 
-	for _, action := range []string{contract.PermissionIAMRolesRead, contract.PermissionIAMMembersRead} {
+	for _, action := range []string{iamclient.PermissionIAMRolesRead, iamclient.PermissionIAMMembersRead} {
 		if _, err = s.authorizeTx(ctx, tx, p, action, orgID); err != nil {
 			return response, err
 		}
 	}
 
 	if input.RoleID != "" && input.Permissions != nil && input.MembershipID == "" && input.RoleIDs == nil {
-		if _, err = s.authorizeTx(ctx, tx, p, contract.PermissionIAMRolesManage, orgID); err != nil {
+		if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesManage, orgID); err != nil {
 			return response, err
 		}
 
@@ -77,7 +65,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 
 		response.Before, response.After, response.AffectedMembers = role.Permissions, *input.Permissions, role.MemberCount
 	} else if input.MembershipID != "" && input.RoleIDs != nil && input.RoleID == "" && input.Permissions == nil {
-		if _, err = s.authorizeTx(ctx, tx, p, contract.PermissionIAMRolesAssign, orgID); err != nil {
+		if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesAssign, orgID); err != nil {
 			return response, err
 		}
 
@@ -108,14 +96,6 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			return response, err
 		}
 
-		seen := map[string]bool{}
-		for _, id := range *input.RoleIDs {
-			if seen[id] {
-				return response, repository.ErrInvalid
-			}
-
-			seen[id] = true
-		}
 		// 预览与实际写入使用相同的变更前后委派边界。
 		for _, set := range [][]string{previous, *input.RoleIDs} {
 			for _, id := range set {

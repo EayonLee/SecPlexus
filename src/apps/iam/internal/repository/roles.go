@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 )
 
 // Role 保存角色及其当前权限；仅在模块内部用于委派校验。
@@ -170,7 +170,7 @@ func ProtectLastAdministrators(ctx context.Context, tx *gorm.DB) error {
 }
 
 // ListRoles 返回角色公开投影；数组通过 pgx 的 SQL Scanner 解码，不依赖驱动返回原生切片。
-func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limit, offset int) ([]contract.APIRole, int64, error) {
+func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limit, offset int) ([]model.APIRole, int64, error) {
 	filter := db.WithContext(ctx).Table("iam.roles").Where("org_id = ?", org)
 	if target != nil {
 		filter = filter.Where("id = ?", target)
@@ -193,9 +193,9 @@ func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limi
 
 	defer func() { _ = rows.Close() }()
 
-	items := []contract.APIRole{}
+	items := []model.APIRole{}
 	for rows.Next() {
-		var role contract.APIRole
+		var role model.APIRole
 		role.Permissions = []string{}
 		if err := rows.Scan(&role.ID, &role.Code, &role.Name, &role.Description, &role.Kind, &role.Status, &role.Version, pgtype.NewMap().SQLScanner(&role.Permissions), &role.MemberCount); err != nil {
 			return nil, 0, err

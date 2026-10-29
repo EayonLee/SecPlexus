@@ -1,7 +1,7 @@
 # Console只配置实际使用的能力，没有数据库/Redis占位项。
 app:
   name: "console"
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8080
 
 # IAM内部地址及每服务凭证；不读取IAM数据库。

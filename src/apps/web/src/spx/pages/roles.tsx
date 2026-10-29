@@ -20,34 +20,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  listRoleMembersQueryKey,
-  listRolesOptions,
-  listRolesQueryKey,
-  permissionsQueryKey,
-  setRolePermissionsMutation,
-} from "@/spx/api/iam/@tanstack/react-query.gen";
-import {
   createRole,
   deleteRole,
   getRole,
   listRoleMembers,
+  listRoles,
   permissions as permissionCatalog,
   previewPermission,
+  setRolePermissions,
   updateRole,
-} from "@/spx/api/iam/sdk.gen";
-import type { ApiPreview, ApiRole } from "@/spx/api/iam/types.gen";
+} from "@/spx/api/iam/management";
+import type { ApiPreview, ApiRole } from "@/spx/api/iam/schemas";
 import {
   zCreateRoleBody,
   zPreviewPermissionBody,
   zSetRolePermissionsBody,
   zUpdateRoleBody,
-} from "@/spx/api/iam/zod.gen";
+} from "@/spx/api/iam/schemas";
 
 import { Can, useCan } from "../components/access";
 import { DataTable, useAction } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
+import { managementChanged } from "../iam/management";
 import { identityScope, queryClient } from "../iam/query";
-import { dataOf, errorMessageKey, mutationHeaders, refreshIdentity, useIdentity } from "../iam/session";
+import { errorMessageKey, useIdentity } from "../iam/session";
 import { useRoleLabel } from "../iam/use-role-label";
 
 export function RolesPage() {
@@ -63,13 +59,10 @@ export function RolesPage() {
   const auth = useIdentity();
   const org = auth.org_id ?? "";
   const [page, setPage] = useState(1);
-  const options = listRolesOptions({ path: { org_id: org }, query: { limit: 20, offset: (page - 1) * 20 } });
-  // 使用生成键的 tags 元数据隔离身份/授权版本，不发送额外身份 HTTP 头。
-  options.queryKey[0].tags = identityScope(auth).map((value) => value ?? "");
   const roleQuery = useQuery({
-    ...options,
+    queryKey: ["iam", "roles", org, page, ...identityScope(auth)],
+    queryFn: ({ signal }) => listRoles(org, { limit: 20, offset: (page - 1) * 20 }, signal),
     enabled: auth.status === "authenticated",
-    select: (response) => response.data,
   });
   const state = {
     items: roleQuery.data?.items ?? [],
@@ -92,36 +85,35 @@ export function RolesPage() {
   const [preview, setPreview] = useState<ApiPreview | undefined>(undefined);
   const canEdit = editing?.allowed_actions.includes(permissions.IAMRolesManage) ?? false;
   const catalogQuery = useQuery({
-    queryKey: [...permissionsQueryKey({ query: { org_id: org } }), ...identityScope(auth)],
-    queryFn: ({ signal }) => dataOf(permissionCatalog({ query: { org_id: org }, signal, throwOnError: true })),
+    queryKey: ["iam", "permissions", org, ...identityScope(auth)],
+    queryFn: ({ signal }) => permissionCatalog(org, signal),
     enabled: auth.status === "authenticated",
   });
   const catalog = catalogQuery.data?.items ?? [];
   const memberQuery = useQuery({
-    queryKey: [
-      ...listRoleMembersQueryKey({ path: { org_id: org, id: editing?.id ?? "" }, query: { limit: 100 } }),
-      ...identityScope(auth),
-    ],
+    queryKey: ["iam", "role-members", org, editing?.id, ...identityScope(auth)],
     enabled: !!editing && canMembers,
-    queryFn: ({ signal }) =>
-      dataOf(
-        listRoleMembers({
-          path: { org_id: org, id: editing?.id ?? "" },
-          query: { limit: 100 },
-          signal,
-          throwOnError: true,
-        }),
-      ),
+    queryFn: ({ signal }) => listRoleMembers(org, editing?.id ?? "", { limit: 100 }, signal),
   });
   const members = memberQuery.data?.items ?? [];
-  const grantsMutation = useMutation({
-    ...setRolePermissionsMutation({ headers: mutationHeaders }),
+  const create = useMutation({ mutationFn: createRole, onSuccess: managementChanged });
+  const remove = useMutation({ mutationFn: deleteRole, onSuccess: managementChanged });
+  const edit = useMutation({
+    mutationFn: updateRole,
     onSuccess: async (_data, variables) => {
-      await queryClient.invalidateQueries({
-        queryKey: listRolesQueryKey({ path: { org_id: org } }),
-        refetchType: "none",
-      });
-      await reloadRole(variables.path.id);
+      await managementChanged();
+      await reloadRole(variables.id);
+    },
+  });
+  const impact = useMutation({
+    mutationFn: previewPermission,
+    onSuccess: (response) => setPreview(response),
+  });
+  const grantsMutation = useMutation({
+    mutationFn: setRolePermissions,
+    onSuccess: async (_data, variables) => {
+      await managementChanged();
+      await reloadRole(variables.id);
       toast.success(t("permissionsSaved"));
     },
   });
@@ -132,13 +124,14 @@ export function RolesPage() {
     setPreview(undefined);
   }
   async function reloadRole(id: string) {
-    await refreshIdentity(org);
-    state.reload();
     if (!useIdentity.getState().capabilities.includes(permissions.IAMRolesRead)) {
       setEditing(undefined);
       return;
     }
-    const role = await dataOf(getRole({ throwOnError: true, path: { org_id: org, id } }));
+    const role = await queryClient.fetchQuery({
+      queryKey: ["iam", "role", org, id, ...identityScope(useIdentity.getState())],
+      queryFn: ({ signal }) => getRole(org, id, signal),
+    });
     roleForm.reset({ name: role.name, description: role.description, status: role.status, version: role.version });
     setEditing(role);
     setGrants(role.permissions);
@@ -191,16 +184,7 @@ export function RolesPage() {
           defaultValues={{ code: "", name: "", description: "" }}
           onClose={() => setCreating(false)}
           onSubmit={async (values) => {
-            await dataOf(
-              createRole({
-                throwOnError: true,
-                path: { org_id: org },
-                headers: mutationHeaders,
-                body: values,
-              }),
-            );
-            state.reload();
-            await refreshIdentity(org);
+            await create.mutateAsync({ orgId: org, body: values });
           }}
         >
           {(form) => (
@@ -236,13 +220,11 @@ export function RolesPage() {
           defaultValues={{}}
           onClose={() => setRemoving(undefined)}
           onSubmit={async () => {
-            await deleteRole({
-              throwOnError: true,
-              path: { org_id: org, id: removing.id },
-              query: { version: removing.version },
-              headers: mutationHeaders,
+            await remove.mutateAsync({
+              orgId: org,
+              id: removing.id,
+              version: removing.version,
             });
-            state.reload();
           }}
         />
       )}
@@ -274,13 +256,11 @@ export function RolesPage() {
                   noValidate
                   onSubmit={roleForm.handleSubmit(async (body) => {
                     await perform(async () => {
-                      await updateRole({
-                        path: { org_id: org, id: editing.id },
+                      await edit.mutateAsync({
+                        orgId: org,
+                        id: editing.id,
                         body,
-                        headers: mutationHeaders,
-                        throwOnError: true,
                       });
-                      await reloadRole(editing.id);
                     }, t("roleSaved"));
                   })}
                 >
@@ -369,8 +349,8 @@ export function RolesPage() {
                       onClick={() =>
                         void perform(async () => {
                           await grantsMutation.mutateAsync({
-                            path: { org_id: org, id: editing.id },
-                            headers: mutationHeaders,
+                            orgId: org,
+                            id: editing.id,
                             body: zSetRolePermissionsBody.parse({ permissions: grants, version: editing.version }),
                           });
                         })
@@ -383,20 +363,14 @@ export function RolesPage() {
                         variant="outline"
                         onClick={() =>
                           void perform(async () => {
-                            setPreview(
-                              await dataOf(
-                                previewPermission({
-                                  throwOnError: true,
-                                  path: { org_id: org },
-                                  headers: mutationHeaders,
-                                  body: zPreviewPermissionBody.parse({
-                                    role_id: editing.id,
-                                    permissions: grants,
-                                    version: editing.version,
-                                  }),
-                                }),
-                              ),
-                            );
+                            await impact.mutateAsync({
+                              orgId: org,
+                              body: zPreviewPermissionBody.parse({
+                                role_id: editing.id,
+                                permissions: grants,
+                                version: editing.version,
+                              }),
+                            });
                           })
                         }
                       >

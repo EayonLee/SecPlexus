@@ -2,11 +2,15 @@
 package iamclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,16 +19,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
-	"github.com/EayonLee/SecPlexus/src/contracts/iam/internalclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // Error 描述 IAM 接口返回的授权错误。
 type Error struct {
 	Status    int         // IAM 返回或本地映射的 HTTP 状态。
-	Code      common.Code // 对外使用的统一结果码。
+	Code      result.Code // 对外使用的统一结果码。
 	Reason    string      // 受控失败阶段，不包含上游响应正文。
 	RequestID string      // 上游生成的请求标识，用于跨服务关联。
 	Cause     error       // 原始技术错误只供服务端诊断。
@@ -38,19 +40,15 @@ func (e *Error) Unwrap() error { return e.Cause }
 
 // Client 通过内部接口请求 IAM 授权。
 type Client struct {
-	sdk  *internalclient.Client
-	http *http.Client
+	origin     string
+	credential string
+	http       *http.Client
 }
 
 // New 创建使用 TLS 和服务凭证的 IAM 客户端。
 func New(baseURL, credential, caFile string) (*Client, error) {
-	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return nil, errors.New("IAM internal URL must be an HTTPS origin")
-	}
-
-	if len(credential) < 32 || len(credential) > 512 {
-		return nil, errors.New("internal credential must contain 32–512 bytes")
+	if err := ValidateConfig(baseURL, credential, true); err != nil {
+		return nil, err
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
@@ -75,19 +73,11 @@ func New(baseURL, credential, caFile string) (*Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = tlsConfig
 	httpClient := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	sdk, err := internalclient.NewClient(strings.TrimSuffix(baseURL, "/"), internalclient.WithHTTPClient(httpClient), internalclient.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
-		request.Header.Set("Authorization", "Bearer "+credential)
-		return nil
-	}))
-	if err != nil {
-		transport.CloseIdleConnections()
-		return nil, errors.New("invalid IAM internal client configuration")
-	}
-	return &Client{sdk: sdk, http: httpClient}, nil
+	return &Client{origin: strings.TrimSuffix(baseURL, "/"), credential: credential, http: httpClient}, nil
 }
 
 // Authorize 从原始请求获取会话；操作和组织由服务端路由确定，不能信任浏览器提交的值。
-func (c *Client) Authorize(ctx context.Context, original *http.Request, action, orgID string, resource *contract.Resource) (decision contract.CapabilityDecision, err error) {
+func (c *Client) Authorize(ctx context.Context, original *http.Request, action, orgID string, resource *Resource) (decision CapabilityDecision, err error) {
 	ctx = logging.With(ctx, "operation", "iam.authorize_rpc", "action", action, "org_id", orgID)
 	started := time.Now()
 	var upstreamID string
@@ -119,70 +109,92 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 		log.Error("IAM 内部请求构造失败", "event", "rpc.failed", "error", logging.Error(err))
 	}()
 	unavailable := func(reason string, cause error) error {
-		return &Error{Status: 503, Code: common.CodeServiceUnavailable, Reason: reason, RequestID: upstreamID, Cause: cause}
+		return &Error{Status: 503, Code: result.CodeServiceUnavailable, Reason: reason, RequestID: upstreamID, Cause: cause}
 	}
 
-	input := contract.AuthorizeRequest{Cookie: original.Header.Get("Cookie"), Method: original.Method, Path: original.URL.RequestURI(), Origin: original.Header.Get("Origin"), CSRFToken: original.Header.Get("X-CSRF-Token"), Action: action, OrgID: orgID, Resource: resource}
-	// 请求构造与JSON编解码来自内部契约生成器；这里只维护TLS/凭证/超时及结果策略。
-	response, err := c.sdk.AuthorizeInternal(ctx, input)
+	input := AuthorizeRequest{Cookie: original.Header.Get("Cookie"), Method: original.Method, Path: original.URL.RequestURI(), Origin: original.Header.Get("Origin"), CSRFToken: original.Header.Get("X-CSRF-Token"), Action: action, OrgID: orgID, Resource: resource}
+	// 单个授权 RPC 直接使用标准库和共享 DTO，不另建通用传输或解析框架。
+	body, err := json.Marshal(input)
+	if err != nil {
+		return decision, unavailable("encode_request", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+"/internal/v1/iam/authorize", bytes.NewReader(body))
+	if err != nil {
+		return decision, unavailable("construct_request", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+c.credential)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(request)
 	if err != nil {
 		return decision, unavailable("transport", err)
 	}
+	defer func() { _ = response.Body.Close() }()
 	upstreamID = response.Header.Get("X-Request-ID")
 	// 上游标识也是输入，仅接受本平台生成的 UUID，不能让任意响应头污染日志。
 	if _, parseErr := uuid.Parse(upstreamID); parseErr != nil {
 		upstreamID = ""
 	}
 
-	// 对生成解析器的标准响应体设置上限，避免读取无界上游数据。
-	response.Body = http.MaxBytesReader(nil, response.Body, 64*1024)
-	parsed, err := internalclient.ParseAuthorizeInternalResponse(response)
+	media, _, parseErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if parseErr != nil || media != "application/json" {
+		return decision, unavailable("invalid_content_type", parseErr)
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(nil, response.Body, 64*1024))
 	if err != nil {
 		return decision, unavailable("decode_result", err)
 	}
+	var decoded result.Result[json.RawMessage]
+	if err := json.Unmarshal(data, &decoded); err != nil || decoded.RequestID == "" {
+		return decision, unavailable("decode_result", err)
+	}
 	if response.StatusCode != http.StatusOK {
-		var rejected *contract.APIError
-		switch response.StatusCode {
-		case 401:
-			rejected = parsed.JSON401
-		case 403:
-			rejected = parsed.JSON403
-		case 429:
-			rejected = parsed.JSON429
-		default:
+		if response.StatusCode != 401 && response.StatusCode != 403 && response.StatusCode != 429 {
 			return decision, unavailable("upstream_unavailable", nil)
 		}
-		if rejected == nil {
-			return decision, unavailable("invalid_result_status", nil)
+		var rejected result.Result[any]
+		if err := json.Unmarshal(data, &rejected); err != nil || string(decoded.Data) != "null" {
+			return decision, unavailable("invalid_result_status", err)
 		}
-		definition, known := common.Lookup(common.Code(rejected.Code))
+		definition, known := result.Lookup(result.Code(rejected.Code))
 		if !known || definition.Status != response.StatusCode || rejected.RequestID == "" || rejected.Data != nil {
 			return decision, unavailable("invalid_result_status", nil)
 		}
 		if id, err := uuid.Parse(rejected.RequestID); err == nil {
 			upstreamID = id.String()
 		}
-		return decision, &Error{Status: response.StatusCode, Code: common.Code(rejected.Code), Reason: "authorization_rejected", RequestID: upstreamID}
-	}
-	decoded := parsed.JSON200
-	if decoded == nil || decoded.RequestID == "" {
-		return decision, unavailable("invalid_result_status", nil)
+		return decision, &Error{Status: response.StatusCode, Code: result.Code(rejected.Code), Reason: "authorization_rejected", RequestID: upstreamID}
 	}
 	if id, err := uuid.Parse(decoded.RequestID); err == nil {
 		upstreamID = id.String()
 	}
-	decision = decoded.Data
-	if common.Code(decoded.Code) != common.CodeOK || !decision.Allowed || decision.Principal.UserID == "" || decision.Principal.SessionID == "" || decision.DecisionID == "" {
-		return contract.CapabilityDecision{}, unavailable("invalid_decision", nil)
+	if err := json.Unmarshal(decoded.Data, &decision); err != nil {
+		return decision, unavailable("invalid_decision", err)
+	}
+	if result.Code(decoded.Code) != result.CodeOK || !decision.Allowed || decision.Principal.UserID == "" || decision.Principal.SessionID == "" || decision.DecisionID == "" {
+		return CapabilityDecision{}, unavailable("invalid_decision", nil)
 	}
 	if orgID != "" && (decision.Scope.Kind != "organization" || decision.Scope.OrgID != orgID) {
-		return contract.CapabilityDecision{}, unavailable("organization_scope_mismatch", nil)
+		return CapabilityDecision{}, unavailable("organization_scope_mismatch", nil)
 	}
 	if orgID == "" && (decision.Scope.Kind != "platform" || decision.Scope.OrgID != "") {
-		return contract.CapabilityDecision{}, unavailable("platform_scope_mismatch", nil)
+		return CapabilityDecision{}, unavailable("platform_scope_mismatch", nil)
 	}
 	return decision, nil
 }
 
 // Close 释放不再使用的空闲 HTTP 连接。
 func (c *Client) Close() { c.http.CloseIdleConnections() }
+
+// ValidateConfig 只校验内部调用配置，不读取文件或建立网络连接。
+func ValidateConfig(baseURL, credential string, required bool) error {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return errors.New("IAM internal URL must be an HTTPS origin")
+	}
+
+	if (required || credential != "") && (len(credential) < 32 || len(credential) > 512) {
+		return errors.New("internal credential must contain 32–512 bytes")
+	}
+
+	return nil
+}

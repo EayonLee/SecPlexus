@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 )
 
 // Queries 将数据操作绑定到调用方的连接或事务；方法不会切回根连接。
@@ -113,8 +113,8 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, input RevokeUserSessio
 }
 
 // GetOrganization 读取组织状态与权限版本。
-func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (contract.APIOrganization, error) {
-	return gorm.G[contract.APIOrganization](q.db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Where("id = ?", id).Take(ctx)
+func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (model.APIOrganization, error) {
+	return gorm.G[model.APIOrganization](q.db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Where("id = ?", id).Take(ctx)
 }
 
 // GetOrganizationPermissionsParams 标识组织和用户范围。

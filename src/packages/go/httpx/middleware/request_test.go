@@ -13,8 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
@@ -37,7 +35,7 @@ func TestBoundaryKeepsRequestIDAndRecoversBeforeCommit(t *testing.T) {
 			result.Success(w, []string{})
 		})
 		router.ServeHTTP(w, r)
-		var value common.Result[any]
+		var value result.Result[any]
 		if err := json.Unmarshal(w.Body.Bytes(), &value); err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +94,7 @@ func TestRejectedBeforeRouterStillLogsPattern(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 	router := NewEngine()
-	router.Use(func(c *gin.Context) { result.Fail(c.Writer, common.CodeOriginInvalid); c.Abort() })
+	router.Use(func(c *gin.Context) { result.Fail(c.Writer, result.CodeOriginInvalid); c.Abort() })
 	router.GET("/items/:id", func(*gin.Context) { t.Fatal("rejected request reached handler") })
 	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/items/secret-id?token=secret-query", nil))
 	if strings.Contains(output.String(), "secret-") || !strings.Contains(output.String(), `"route":"/items/:id"`) {

@@ -6,17 +6,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-
 	"github.com/alexedwards/scs/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
-	httpmiddleware "github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
+	httpmiddleware "github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
 )
 
 // Session 等待 SCS 会话持久化完成后再发送响应；
@@ -42,7 +40,7 @@ func Session(sessions *authentication.Sessions) gin.HandlerFunc {
 		loaded, err := sessions.Manager.Load(ctx, token)
 		if err != nil {
 			logging.From(ctx).Error("会话数据加载失败", "event", "session.load_failed", "error", logging.Error(err))
-			result.Fail(w, common.CodeServiceUnavailable)
+			result.Fail(w, result.CodeServiceUnavailable)
 			c.Abort()
 			return
 		}
@@ -75,7 +73,7 @@ func Session(sessions *authentication.Sessions) gin.HandlerFunc {
 				if err != nil {
 					logging.From(loaded).Error("会话保存失败，拒绝发送成功响应", "event", "session.commit_failed", "error", logging.Error(err))
 
-					result.Fail(w, common.CodeServiceUnavailable)
+					result.Fail(w, result.CodeServiceUnavailable)
 					return
 				}
 				committed = true

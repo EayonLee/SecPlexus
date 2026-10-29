@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
@@ -42,14 +41,14 @@ func NewEngine() *gin.Engine {
 			"panic_kind", fmt.Sprintf("%T", failure), "stack", logging.Stack())
 		c.Abort()
 		if !c.Writer.Written() {
-			result.Fail(c.Writer, common.CodeInternalError)
+			result.Fail(c.Writer, result.CodeInternalError)
 		}
 	}))
 	router.NoRoute(func(c *gin.Context) {
-		result.Fail(c.Writer, common.CodeNotFound)
+		result.Fail(c.Writer, result.CodeNotFound)
 	})
 	router.NoMethod(func(c *gin.Context) {
-		result.Fail(c.Writer, common.CodeMethodNotAllowed)
+		result.Fail(c.Writer, result.CodeMethodNotAllowed)
 	})
 	return router
 }

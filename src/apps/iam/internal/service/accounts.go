@@ -4,33 +4,33 @@ import (
 	"context"
 	"net/mail"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // UserInput 是创建用户的请求参数。
-type UserInput = contract.APIUserInput
+type UserInput = model.APIUserInput
 
 // UserUpdate 是更新用户的请求参数。
-type UserUpdate = contract.APIUserUpdate
+type UserUpdate = model.APIUserUpdate
 
 // OrganizationInput 是创建组织的请求参数。
-type OrganizationInput = contract.APIOrganizationInput
+type OrganizationInput = model.APIOrganizationInput
 
 // OrganizationUpdate 是更新组织的请求参数。
-type OrganizationUpdate = contract.APIOrganizationUpdate
+type OrganizationUpdate = model.APIOrganizationUpdate
 
 // MemberInput 是创建组织成员的请求参数。
-type MemberInput = contract.APIMemberInput
+type MemberInput = model.APIMemberInput
 
 // MemberUpdate 是更新组织成员的请求参数。
-type MemberUpdate = contract.APIMemberUpdate
+type MemberUpdate = model.APIMemberUpdate
 
 // validEmail 校验账号邮件地址的业务约束。
 func validEmail(value string) bool {
@@ -57,12 +57,12 @@ func (s *Service) CreateUser(ctx context.Context, input UserInput, requestID str
 	id := uuid.New()
 	err = s.Manage(
 		ctx,
-		contract.PermissionIAMPlatformUsersManage,
+		iamclient.PermissionIAMPlatformUsersManage,
 		"",
 		requestID,
 		"user",
 		&id,
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			return insertUser(ctx, tx, id, input, normalized, hash)
 		},
 	)
@@ -81,18 +81,18 @@ func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserInput,
 
 // UpdateUser 更新用户信息并检查版本。
 func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdate, requestID string) error {
-	if !validName(input.DisplayName) || !validEmail(input.Email) || (input.Status != "active" && input.Status != "disabled") || input.AuthVersion < 1 {
+	if !validName(input.DisplayName) || !validEmail(input.Email.GetOrZero()) {
 		return repository.ErrInvalid
 	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMPlatformUsersManage,
+		iamclient.PermissionIAMPlatformUsersManage,
 		"",
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid
@@ -124,18 +124,18 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 
 // SetSuperAdmin 变更超级管理员身份并保护管理员不变量。
 func (s *Service) SetSuperAdmin(ctx context.Context, userID string, enabled bool, reason, requestID string) error {
-	if strings.TrimSpace(reason) == "" || utf8.RuneCountInString(reason) > 500 {
+	if strings.TrimSpace(reason) == "" {
 		return repository.ErrInvalid
 	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMPlatformSuperAdminsManage,
+		iamclient.PermissionIAMPlatformSuperAdminsManage,
 		"",
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid
@@ -175,12 +175,12 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMPlatformUsersManage,
+		iamclient.PermissionIAMPlatformUsersManage,
 		"",
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid

@@ -4,17 +4,15 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"errors"
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
@@ -38,10 +36,10 @@ type InternalClient struct {
 
 // NewSecurity 根据配置初始化安全检查和内部调用方。
 func NewSecurity(cfg config.Config) (*Security, error) {
-	key := cfg.Auth.CSRFKey
-	if len(key) != 32 {
-		return nil, errors.New("CSRF signing key must contain exactly 32 bytes")
+	if err := cfg.ValidateSecurity(true); err != nil {
+		return nil, err
 	}
+	key := cfg.Auth.CSRFKey
 
 	origin := strings.TrimSuffix(cfg.App.PublicURL, "/")
 	parsed, err := url.Parse(origin)
@@ -76,13 +74,10 @@ func NewSecurity(cfg config.Config) (*Security, error) {
 		csrf.RequestHeader("X-CSRF-Token"),
 		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			logging.From(r.Context()).Warn("CSRF 校验拒绝请求", "event", "security.csrf_rejected")
-			result.Fail(w, common.CodeCSRFInvalid)
+			result.Fail(w, result.CodeCSRFInvalid)
 		})),
 	)
 	for id, client := range cfg.Internal.Clients {
-		if id == "" || len(client.Token) < 32 || len(client.Token) > 512 || len(client.Actions) == 0 {
-			return nil, errors.New("internal clients require a unique ID, 32–512 byte token and allowed actions")
-		}
 
 		digest := sha256.Sum256([]byte(client.Token))
 		security.clients = append(security.clients, InternalClient{
@@ -90,10 +85,6 @@ func NewSecurity(cfg config.Config) (*Security, error) {
 			TokenHash: hex.EncodeToString(digest[:]),
 			Actions:   client.Actions,
 		})
-	}
-
-	if len(security.clients) == 0 {
-		return nil, errors.New("at least one internal client is required")
 	}
 
 	return security, nil
@@ -108,7 +99,7 @@ func (s *Security) Protect(next http.Handler) http.Handler {
 			allowedHost, ok := s.origins[r.Header.Get("Origin")]
 			if !ok {
 				logging.From(r.Context()).Warn("请求来源不符合配置", "event", "security.origin_rejected")
-				result.Fail(w, common.CodeOriginInvalid)
+				result.Fail(w, result.CodeOriginInvalid)
 				return
 			}
 			host = allowedHost

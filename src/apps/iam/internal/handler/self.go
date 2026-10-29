@@ -1,27 +1,28 @@
 package handler
 
 import (
-	"github.com/gin-gonic/gin"
-
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
-
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // Me 返回当前身份和组织能力，具体查询由业务用例负责。
-func (s *Server) Me(c *gin.Context, params router.MeParams) {
+func (s *Server) Me(c *gin.Context) {
+	var params model.OrganizationQuery
+	if err := c.ShouldBindQuery(&params); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
 	w := c.Writer
 	r := c.Request
-	orgID := ""
-	if params.OrgId != nil {
-		orgID = *params.OrgId
-	}
+	orgID := params.OrgID
 	response, err := s.Service.Identity(r.Context(), orgID)
 	if err != nil {
 		httpx.Reject(c, err)
@@ -32,13 +33,10 @@ func (s *Server) Me(c *gin.Context, params router.MeParams) {
 }
 
 // ChangePassword 绑定新旧密码，限流与用例校验后撤销旧会话。
-func (s *Server) ChangePassword(c *gin.Context, params router.ChangePasswordParams) {
+func (s *Server) ChangePassword(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
-	var input struct {
-		OldPassword string `json:"old_password"`
-		NewPassword string `json:"new_password"`
-	}
+	var input model.APIChangePasswordInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -67,12 +65,12 @@ func (s *Server) ChangePassword(c *gin.Context, params router.ChangePasswordPara
 }
 
 // Logout 结束当前浏览器会话。
-func (s *Server) Logout(c *gin.Context, params router.LogoutParams) {
+func (s *Server) Logout(c *gin.Context) {
 	s.endSessions(c, false)
 }
 
 // LogoutAll 结束当前用户的全部会话。
-func (s *Server) LogoutAll(c *gin.Context, params router.LogoutAllParams) {
+func (s *Server) LogoutAll(c *gin.Context) {
 	s.endSessions(c, true)
 }
 
@@ -114,7 +112,8 @@ func (s *Server) ListSessions(c *gin.Context) {
 }
 
 // RevokeSession 仅允许近期认证的当前用户撤销自己的会话。
-func (s *Server) RevokeSession(c *gin.Context, id string, params router.RevokeSessionParams) {
+func (s *Server) RevokeSession(c *gin.Context) {
+	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
 	p, err := s.Service.Sessions.Resolve(r.Context())

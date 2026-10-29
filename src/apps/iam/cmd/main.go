@@ -80,6 +80,11 @@ func newCommand() *cobra.Command {
 
 // execute 在命令参数和配置验证后创建用例实际需要的资源。
 func execute(ctx context.Context, command string, cfg config.Config, userID string) (outcome error) {
+	if command == "serve" {
+		if err := cfg.ValidateServe(); err != nil {
+			return err
+		}
+	}
 	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
 	if err != nil {
 		return err

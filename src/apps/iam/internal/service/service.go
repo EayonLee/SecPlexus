@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -17,7 +15,8 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // Service 协调 IAM 用例、会话校验和数据存储。
@@ -28,7 +27,7 @@ type Service struct {
 }
 
 // Authorize 在事务中验证当前会话并计算指定能力的授权范围。
-func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision contract.CapabilityDecision, err error) {
+func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision iamclient.CapabilityDecision, err error) {
 	ctx = logging.With(ctx, "operation", "iam.authorize", "action", action, "org_id", orgID)
 	started := time.Now()
 	defer func() {
@@ -53,80 +52,80 @@ func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision
 		if err != nil {
 			return err
 		}
-		decision = contract.CapabilityDecision{Allowed: true, DecisionID: uuid.NewString(), Principal: p, Scope: scope}
+		decision = iamclient.CapabilityDecision{Allowed: true, DecisionID: uuid.NewString(), Principal: p, Scope: scope}
 		return nil
 	})
 	if err != nil {
-		return contract.CapabilityDecision{}, err
+		return iamclient.CapabilityDecision{}, err
 	}
 	return decision, nil
 }
 
 // resolve 在当前事务内解析并复核逻辑会话。
-func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (contract.Principal, error) {
+func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (iamclient.Principal, error) {
 	id, err := uuid.Parse(s.Sessions.Manager.GetString(ctx, authentication.LogicalSessionKey))
 	if err != nil {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	return s.Sessions.ResolveTx(ctx, tx, id, s.Sessions.Manager.Token(ctx))
 }
 
 // authorizeTx 根据最新组织、成员和权限状态计算动作范围。
-func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p contract.Principal, action, orgID string) (contract.AuthorizedScope, error) {
+func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Principal, action, orgID string) (iamclient.AuthorizedScope, error) {
 	permission, err := repository.ReadPermission(ctx, tx, action)
 	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
-		return contract.AuthorizedScope{}, authorization.ErrDenied
+		return iamclient.AuthorizedScope{}, authorization.ErrDenied
 	}
 
 	if err != nil {
-		return contract.AuthorizedScope{}, err
+		return iamclient.AuthorizedScope{}, err
 	}
 
 	snapshot := authorization.Snapshot{Principal: p}
 	if permission.Scope == "organization" {
 		org, err := uuid.Parse(orgID)
 		if err != nil {
-			return contract.AuthorizedScope{}, authorization.ErrDenied
+			return iamclient.AuthorizedScope{}, authorization.ErrDenied
 		}
 
 		organization, err := repository.NewQueries(tx).GetOrganization(ctx, org)
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
-			return contract.AuthorizedScope{}, authorization.ErrDenied
+			return iamclient.AuthorizedScope{}, authorization.ErrDenied
 		}
 
 		if err != nil {
-			return contract.AuthorizedScope{}, err
+			return iamclient.AuthorizedScope{}, err
 		}
 
 		snapshot.OrganizationID = org.String()
 		snapshot.OrganizationActive = organization.Status == "active"
 		userID, err := uuid.Parse(p.UserID)
 		if err != nil {
-			return contract.AuthorizedScope{}, repository.ErrUnauthenticated
+			return iamclient.AuthorizedScope{}, repository.ErrUnauthenticated
 		}
 
 		if err = repository.ActiveMembership(ctx, tx, org, userID, &snapshot.MembershipActive); err != nil {
-			return contract.AuthorizedScope{}, err
+			return iamclient.AuthorizedScope{}, err
 		}
 
 		snapshot.Permissions, err = repository.NewQueries(tx).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: org,
 			UserID: userID})
 		if err != nil {
-			return contract.AuthorizedScope{}, err
+			return iamclient.AuthorizedScope{}, err
 		}
 	}
 
 	var now time.Time
 	if err = repository.DatabaseTime(ctx, tx, &now); err != nil {
-		return contract.AuthorizedScope{}, err
+		return iamclient.AuthorizedScope{}, err
 	}
 
 	return authorization.Evaluate(snapshot, permission, orgID, now, s.Config.Auth.ReauthWindow)
 }
 
 // Manage 串行执行低频管理变更，在同一事务内重新校验操作者并写入审计。
-func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetType string, targetID *uuid.UUID, change func(*gorm.DB, contract.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
+func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetType string, targetID *uuid.UUID, change func(*gorm.DB, iamclient.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
 	// 诊断只记录稳定动作和资源标识，不记录请求参数或审计扩展值。
 	ctx = logging.With(ctx, "operation", action, "org_id", orgID, "target_type", targetType, "target_id", targetID)
 	started := time.Now()

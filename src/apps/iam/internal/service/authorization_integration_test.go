@@ -87,7 +87,7 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal("default member unexpectedly has business grants")
 	}
 
-	managerRole, err := s.CreateRole(admin, org, RoleInput{Code: "role_manager", Name: "角色管理"}, uuid.NewString())
+	managerRole, err := s.CreateRole(admin, org, RoleCreateInput{Code: "role_manager", Name: "角色管理"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal(err)
 	}
 
-	readRole, err := s.CreateRole(admin, org, RoleInput{Code: "member_reader", Name: "成员读取"}, uuid.NewString())
+	readRole, err := s.CreateRole(admin, org, RoleCreateInput{Code: "member_reader", Name: "成员读取"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		}
 	}
 
-	target, err := s.CreateRole(admin, org, RoleInput{Code: "target_role", Name: "目标角色"}, uuid.NewString())
+	target, err := s.CreateRole(admin, org, RoleCreateInput{Code: "target_role", Name: "目标角色"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	role, err := s.CreateRole(admin, org, RoleInput{Code: "preview_reader", Name: "Preview reader"}, uuid.NewString())
+	role, err := s.CreateRole(admin, org, RoleCreateInput{Code: "preview_reader", Name: "Preview reader"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}

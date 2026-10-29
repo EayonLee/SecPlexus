@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 
+import { identityScope } from "../iam/query";
 import { errorMessageKey, useIdentity } from "../iam/session";
 
 export interface PageData<T> {
@@ -24,10 +25,9 @@ export function usePagedQuery<T>(
   fetchPage: (pagination: { limit: number; offset: number }, signal: AbortSignal) => Promise<PageData<T>>,
 ) {
   const auth = useIdentity();
-  const version = auth.organizations.find((org) => org.id === auth.org_id)?.authz_version;
   const [page, setPage] = useState(1);
   const query = useQuery({
-    queryKey: [...key, auth.principal?.session_id, auth.principal?.auth_version, auth.org_id, version, page],
+    queryKey: [...key, ...identityScope(auth), page],
     enabled: auth.status === "authenticated",
     queryFn: ({ signal }) => fetchPage({ limit: 20, offset: (page - 1) * 20 }, signal),
   });

@@ -1,6 +1,6 @@
 //go:build integration
 
-package handler
+package handler_test
 
 import (
 	"bytes"
@@ -21,17 +21,18 @@ import (
 	"testing"
 	"time"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
-
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
-	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
+	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 )
 
 // apiClient 为单个测试保存独立 Cookie 和 CSRF 状态。
@@ -136,7 +137,7 @@ func newAPIClient(t *testing.T, base, origin string) *apiClient {
 // httpFixture 持有本用例独占的服务、数据和调用凭证。
 type httpFixture struct {
 	redis                         *redis.Client
-	server                        *Server
+	server                        *handler.Server
 	public, internal              *httptest.Server
 	initial, password, credential string
 	admin, member                 string
@@ -231,7 +232,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(service, security, limiter, func(ctx context.Context) error {
+	server, err := handler.New(service, security, limiter, func(ctx context.Context) error {
 		if err := store.Pool.Ping(ctx); err != nil {
 			return err
 		}
@@ -242,10 +243,10 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		t.Fatal(err)
 	}
 
-	public.Config.Handler = server.PublicHandler()
+	public.Config.Handler = router.PublicHandler(server)
 	public.Start()
 	t.Cleanup(public.Close)
-	internal := httptest.NewTLSServer(server.InternalHandler())
+	internal := httptest.NewTLSServer(router.InternalHandler(server))
 	t.Cleanup(internal.Close)
 	return &httpFixture{redis: redisClient, admin: adminUsername, member: memberUsername,
 		server:     server,
@@ -383,4 +384,71 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	call(cookieHeader, "GET", 401)
 	admin.request("GET", "/api/v1/iam/me", nil, 401)
 	t.Log(fmt.Sprintf("identity, custom role, version conflicts, last administrator and internal authorization verified for org %s", org))
+}
+
+func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
+	f := newFixture(t, nil)
+	admin := newAPIClient(t, f.public.URL, f.public.URL)
+	admin.login(f.admin, f.initial)
+	admin.change(f.initial, f.password)
+	admin.login(f.admin, f.password)
+	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password}, 201)
+	userPath := "/api/v1/iam/users/" + user["id"].(string)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "1"}, 204)
+	if got := admin.request("GET", userPath, nil, 200)["email"]; got != "patch@example.com" {
+		t.Fatalf("omitted email changed stored value: %v", got)
+	}
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "2", "email": ""}, 204)
+	if got := admin.request("GET", userPath, nil, 200)["email"]; got != nil {
+		t.Fatalf("explicit empty email was not cleared: %v", got)
+	}
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "3", "email": nil}, 400)
+	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
+	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	role := admin.request("POST", "/api/v1/iam/orgs/"+org+"/roles", map[string]any{"code": "patch_role", "name": "Before", "description": "Preserve me"}, 201)
+	rolePath := "/api/v1/iam/orgs/" + org + "/roles/" + role["id"].(string)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "1"}, 204)
+	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "Preserve me" {
+		t.Fatalf("omitted description changed stored value: %v", got)
+	}
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "2", "description": ""}, 204)
+	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "" {
+		t.Fatalf("explicit empty description was not cleared: %v", got)
+	}
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "3", "description": nil}, 400)
+}
+
+func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
+	f := newFixture(t, nil)
+	admin := newAPIClient(t, f.public.URL, f.public.URL)
+	admin.login(f.admin, f.initial)
+	admin.change(f.initial, f.password)
+	admin.login(f.admin, f.password)
+	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
+	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	base := "/api/v1/iam/orgs/" + org
+	admin.request("POST", base+"/roles", map[string]any{"name": "Missing code"}, 400)
+	role := admin.request("POST", base+"/roles", map[string]any{"code": "review_role", "name": "Review"}, 201)["id"].(string)
+	admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Missing status"}, 400)
+	permissions := []string{"iam.audit.read", "iam.audit.read"}
+	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": role, "permissions": permissions, "version": "1"}, 400)
+	admin.request("PUT", base+"/roles/"+role+"/permissions", map[string]any{"permissions": permissions, "version": "1"}, 400)
+	roles := make([]string, 51)
+	for i := range roles {
+		roles[i] = uuid.NewString()
+	}
+	member := uuid.NewString()
+	admin.request("POST", base+"/permission-preview", map[string]any{"membership_id": member, "role_ids": roles, "authz_version": "1"}, 400)
+	admin.request("PUT", base+"/members/"+member+"/roles", map[string]any{"role_ids": roles, "authz_version": "1"}, 400)
+
+	for _, version := range []string{"0", "9223372036854775808", "invalid"} {
+		admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Review", "status": "active", "version": version}, 400)
+	}
+	admin.request("GET", base+"/roles?limit=0", nil, 400)
+	admin.request("GET", base+"/roles?offset=-1", nil, 400)
+	admin.request("GET", base+"/roles?limit=9223372036854775808", nil, 400)
+	admin.request("GET", base+"/roles/invalid", nil, 400)
+	if got := admin.request("GET", base+"/roles/"+role, nil, 200)["version"]; got != "1" {
+		t.Fatal("rejected input changed the role")
+	}
 }

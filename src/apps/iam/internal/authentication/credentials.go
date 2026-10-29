@@ -10,7 +10,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // attemptKey 认证请求上下文的类型化键。
@@ -18,9 +18,9 @@ type attemptKey struct{}
 
 // Attempt 保存单次请求的认证状态，不写入 Cookie 或共享缓存。
 type Attempt struct {
-	RequestID      string              // 本次请求的关联标识。
-	Reauthenticate bool                // 是否为当前账号的密码确认。
-	Principal      *contract.Principal // 已验证的身份投影。
+	RequestID      string               // 本次请求的关联标识。
+	Reauthenticate bool                 // 是否为当前账号的密码确认。
+	Principal      *iamclient.Principal // 已验证的身份投影。
 }
 
 // WithAttempt 将本次认证请求状态放入请求上下文。
@@ -68,54 +68,54 @@ func NewAuthenticator(sessions *Sessions, limiter *Limiter, slots chan struct{})
 }
 
 // Login 验证账号凭据并创建可撤销会话，不读取请求或输出响应。
-func (s *Authenticator) Login(ctx context.Context, credentials Credentials, metadata RequestMetadata) (contract.Principal, error) {
+func (s *Authenticator) Login(ctx context.Context, credentials Credentials, metadata RequestMetadata) (iamclient.Principal, error) {
 	return s.authenticate(ctx, credentials, metadata, false)
 }
 
 // Reauthenticate 只确认当前会话账号，保留原始绝对到期时间。
-func (s *Authenticator) Reauthenticate(ctx context.Context, password string, metadata RequestMetadata) (contract.Principal, error) {
+func (s *Authenticator) Reauthenticate(ctx context.Context, password string, metadata RequestMetadata) (iamclient.Principal, error) {
 	principal, err := s.sessions.Resolve(ctx)
 	if err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 	return s.authenticate(ctx, Credentials{Username: principal.Username, Password: password}, metadata, true)
 }
 
 // authenticate 共用密码比较与失败审计，成功提交仍检查最新账号及凭证版本。
-func (s *Authenticator) authenticate(ctx context.Context, credentials Credentials, metadata RequestMetadata, reauthenticate bool) (contract.Principal, error) {
+func (s *Authenticator) authenticate(ctx context.Context, credentials Credentials, metadata RequestMetadata, reauthenticate bool) (iamclient.Principal, error) {
 	normalized, err := identity.NormalizeUsername(credentials.Username)
 	if err != nil {
 		normalized = ""
 	}
 	if err := s.limiter.CheckAccount(ctx, normalized); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 	select {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()
 	default:
-		return contract.Principal{}, ErrRateLimited
+		return iamclient.Principal{}, ErrRateLimited
 	}
 	user, err := repository.NewQueries(s.sessions.Store.DB).GetLoginUser(ctx, normalized)
 	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
 		_ = (identity.PasswordHasher{}).CompareHashAndPassword(s.dummyHash, credentials.Password)
 		if err := s.failure(ctx, nil); err != nil {
-			return contract.Principal{}, err
+			return iamclient.Principal{}, err
 		}
-		return contract.Principal{}, ErrInvalidCredentials
+		return iamclient.Principal{}, ErrInvalidCredentials
 	}
 	if err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 	passwordErr := (identity.PasswordHasher{}).CompareHashAndPassword(user.PasswordHash, credentials.Password)
 	if passwordErr != nil || user.Status != "active" || (user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now())) {
 		if err := s.failure(ctx, &user); err != nil {
-			return contract.Principal{}, err
+			return iamclient.Principal{}, err
 		}
 		if reauthenticate {
-			return contract.Principal{}, identity.ErrPasswordMismatch
+			return iamclient.Principal{}, identity.ErrPasswordMismatch
 		}
-		return contract.Principal{}, ErrInvalidCredentials
+		return iamclient.Principal{}, ErrInvalidCredentials
 	}
 	return s.sessions.Create(ctx, user, metadata.RequestID, metadata.UserAgent, metadata.ClientIP, reauthenticate)
 }

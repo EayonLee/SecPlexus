@@ -1,6 +1,6 @@
 import { useTranslations } from "next-intl";
 
-import type { ApiRole } from "@/spx/api/iam/types.gen";
+import type { ApiRole } from "@/spx/api/iam/schemas";
 
 export function useRoleLabel() {
   const t = useTranslations("Management");

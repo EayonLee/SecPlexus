@@ -6,11 +6,10 @@ import { useTranslations } from "next-intl";
 
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { listUsersQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
-import { listUsers } from "@/spx/api/iam/sdk.gen";
+import { listUsers } from "@/spx/api/iam/management";
 
 import { identityScope } from "../iam/query";
-import { dataOf, useIdentity } from "../iam/session";
+import { useIdentity } from "../iam/session";
 
 export function UserPicker({
   name = "user_id",
@@ -35,8 +34,8 @@ export function UserPicker({
     return () => clearTimeout(timer);
   }, [query]);
   const results = useQuery({
-    queryKey: [...listUsersQueryKey({ query: { q: search, limit: 50 } }), ...identityScope(auth)],
-    queryFn: ({ signal }) => dataOf(listUsers({ query: { q: search, limit: 50 }, signal, throwOnError: true })),
+    queryKey: ["iam", "users", search, ...identityScope(auth)],
+    queryFn: ({ signal }) => listUsers({ q: search, limit: 50 }, signal),
   });
   const users = results.data?.items ?? [];
 

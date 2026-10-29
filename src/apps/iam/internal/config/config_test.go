@@ -110,7 +110,7 @@ func TestSharedDatabaseDefaultsAndExplicitModuleOverride(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(file)
-	replaced := strings.NewReplacer("host: \"127.0.0.1\"", "host: \"module-database\"").Replace(string(data))
+	replaced := strings.Replace(string(data), "db:\n  host: \"127.0.0.1\"", "db:\n  host: \"module-database\"", 1)
 	t.Setenv("SPX_IAM_POSTGRES_HOST", "module-database")
 	t.Setenv("SPX_IAM_POSTGRES_USER", "module_user")
 	if err = os.WriteFile(file, []byte(replaced), 0600); err != nil {
@@ -190,5 +190,31 @@ func TestInvalidRedisURLRejectedAtLoading(t *testing.T) {
 				t.Fatal("错误连接格式未在配置加载时拒绝")
 			}
 		})
+	}
+}
+
+func TestProvidedSecurityConfigurationIsValidatedDuringLoad(t *testing.T) {
+	for _, name := range []string{"SPX_IAM_CSRF_KEY", "SPX_CONSOLE_IAM_TOKEN"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "invalid")
+			if _, err := Load(configFile(t)); err == nil {
+				t.Fatal("invalid supplied security configuration accepted")
+			}
+		})
+	}
+}
+
+func TestInternalClientActionsMustExistInTheContract(t *testing.T) {
+	file := configFile(t)
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "iam.organizations.read", "iam.unknown.action", 1))
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(file); err == nil {
+		t.Fatal("unknown internal action accepted")
 	}
 }

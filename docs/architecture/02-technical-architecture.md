@@ -1,9 +1,9 @@
 # 02 · 技术架构
 
-> 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和共享契约；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
+> 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和真实共享包；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
 
 
-> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM已内嵌Authboss/SCS并接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM 使用原生 Gin、Argon2id/SCS/CSRF并接入真实PG会话与组织授权，Console已通过内部TLS接入鉴权。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
 
 
 > 用大白话说：9 个自研服务 + 4 个开源组件跑在 PostgreSQL 和 Redis 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。

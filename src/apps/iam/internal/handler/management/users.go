@@ -5,27 +5,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
-
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // ListUsers 按查询条件与分页读取平台用户。
-func (s *Handler) ListUsers(c *gin.Context, params router.ListUsersParams) {
+func (s *Handler) ListUsers(c *gin.Context) {
+	var params model.ListQuery
+	if err := c.ShouldBindQuery(&params); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
 	w := c.Writer
 	r := c.Request
-	query := ""
-	if params.Q != nil {
-		query = *params.Q
-	}
+	query := params.Q
 
-	limit, offset := pagination(params.Limit, params.Offset)
+	limit, offset := params.Limit, params.Offset
 
 	response, err := s.Service.ListUsers(r.Context(), limit, offset, query)
 	if err != nil {
@@ -37,7 +38,8 @@ func (s *Handler) ListUsers(c *gin.Context, params router.ListUsersParams) {
 }
 
 // GetUser 读取平台用户的公开字段。
-func (s *Handler) GetUser(c *gin.Context, id string) {
+func (s *Handler) GetUser(c *gin.Context) {
+	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
 	data, err := s.Service.User(r.Context(), id)
@@ -50,10 +52,10 @@ func (s *Handler) GetUser(c *gin.Context, id string) {
 }
 
 // CreateUser 限制密码计算并创建用户，凭据不会进入结果。
-func (s *Handler) CreateUser(c *gin.Context, params router.CreateUserParams) {
+func (s *Handler) CreateUser(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformUsersManage, ""); err != nil {
+	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformUsersManage, ""); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -82,7 +84,8 @@ func (s *Handler) CreateUser(c *gin.Context, params router.CreateUserParams) {
 }
 
 // UpdateUser 按身份版本更新用户资料和状态。
-func (s *Handler) UpdateUser(c *gin.Context, id string, params router.UpdateUserParams) {
+func (s *Handler) UpdateUser(c *gin.Context) {
+	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
 	var input service.UserUpdate
@@ -100,19 +103,17 @@ func (s *Handler) UpdateUser(c *gin.Context, id string, params router.UpdateUser
 }
 
 // SetSuperAdmin 处理需要近期认证的管理员身份变更。
-func (s *Handler) SetSuperAdmin(c *gin.Context, id string, params router.SetSuperAdminParams) {
+func (s *Handler) SetSuperAdmin(c *gin.Context) {
+	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input struct {
-		Enabled bool   `json:"enabled"`
-		Reason  string `json:"reason"`
-	}
+	var input model.APISetSuperAdminInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	if err := s.Service.SetSuperAdmin(r.Context(), id, input.Enabled, input.Reason, middleware.RequestID(r)); err != nil {
+	if err := s.Service.SetSuperAdmin(r.Context(), id, *input.Enabled, input.Reason, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -121,17 +122,16 @@ func (s *Handler) SetSuperAdmin(c *gin.Context, id string, params router.SetSupe
 }
 
 // ResetUserPassword 限制密码计算并通过用例重置密码。
-func (s *Handler) ResetUserPassword(c *gin.Context, id string, params router.ResetUserPasswordParams) {
+func (s *Handler) ResetUserPassword(c *gin.Context) {
+	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformUsersManage, ""); err != nil {
+	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformUsersManage, ""); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	var input struct {
-		Password string `json:"password"`
-	}
+	var input model.APIResetPasswordInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return

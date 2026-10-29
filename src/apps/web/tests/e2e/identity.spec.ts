@@ -1,6 +1,7 @@
 import { type APIRequestContext, expect, type Page, request, test } from "@playwright/test";
+import { z } from "zod";
 
-import type { ApiRole } from "../../src/spx/api/iam/types.gen";
+import type { ApiRole } from "../../src/spx/api/iam/schemas";
 import { randomBytes } from "node:crypto";
 
 declare global {
@@ -10,9 +11,18 @@ declare global {
   }
 }
 
-const baseURL = process.env.SPX_E2E_BASE_URL!;
-const initialPassword = process.env.SPX_E2E_INITIAL_PASSWORD!;
-const adminPassword = process.env.SPX_E2E_PASSWORD!;
+const environment = z
+  .object({
+    SPX_E2E_BASE_URL: z.url(),
+    SPX_E2E_INITIAL_PASSWORD: z.string().min(1),
+    SPX_E2E_USERNAME: z.string().min(1),
+    SPX_E2E_PASSWORD: z.string().min(1),
+  })
+  .parse(process.env);
+const baseURL = environment.SPX_E2E_BASE_URL;
+const initialPassword = environment.SPX_E2E_INITIAL_PASSWORD;
+const adminUsername = environment.SPX_E2E_USERNAME;
+const adminPassword = environment.SPX_E2E_PASSWORD;
 async function csrf(api: APIRequestContext) {
   const response = await api.get("/api/v1/iam/auth/context");
   expect(response.status()).toBe(200);
@@ -31,7 +41,7 @@ async function mutate(
 }
 async function adminClient() {
   const api = await request.newContext({ baseURL });
-  await mutate(api, "post", "/api/v1/iam/auth/login", { username: "admin", password: adminPassword }, 200);
+  await mutate(api, "post", "/api/v1/iam/auth/login", { username: adminUsername, password: adminPassword }, 200);
   return api;
 }
 async function browserLogin(page: Page, username: string, password: string) {
@@ -52,11 +62,11 @@ test.beforeEach(async ({ context }) => {
 test.beforeAll(async () => {
   const api = await request.newContext({ baseURL });
   const existing = await api.post("/api/v1/iam/auth/login", {
-    data: { username: "admin", password: adminPassword },
+    data: { username: adminUsername, password: adminPassword },
     headers: { Origin: baseURL, "X-CSRF-Token": await csrf(api) },
   });
   if (existing.status() === 401) {
-    await mutate(api, "post", "/api/v1/iam/auth/login", { username: "admin", password: initialPassword }, 200);
+    await mutate(api, "post", "/api/v1/iam/auth/login", { username: adminUsername, password: initialPassword }, 200);
     await mutate(api, "post", "/api/v1/iam/me/password", {
       old_password: initialPassword,
       new_password: adminPassword,
@@ -128,15 +138,23 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
 });
 
 test("管理中心保留应用外壳，自定义角色可创建、配置权限和查看影响", async ({ page }) => {
-  await browserLogin(page, "admin", adminPassword);
-  await expect(page.getByRole("button", { name: "管理中心", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "管理中心", exact: true }).click();
+  await browserLogin(page, adminUsername, adminPassword);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  const workspace = page.getByRole("navigation", { name: "主导航" });
+  for (const label of ["用户管理", "组织管理", "角色与权限", "组织成员", "账号安全"])
+    await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "个人账号", exact: true }).click();
   await page.getByRole("menuitem", { name: "管理中心", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
   await page.getByText("角色与权限", { exact: true }).click();
   await page.getByRole("button", { name: "创建角色", exact: true }).click();
   await page.getByPlaceholder("例如 security_auditor").fill(`audit_${randomBytes(4).toString("hex")}`);
   const roleName = `审计角色 ${randomBytes(3).toString("hex")}`;
-  await page.getByRole("dialog").getByLabel("角色名称", {exact:true}).fill(roleName);
+  await page.getByRole("dialog").getByLabel("角色名称", { exact: true }).fill(roleName);
   await page.getByRole("button", { name: "确定", exact: true }).click();
   const row = page.getByRole("row").filter({ hasText: roleName });
   await expect(row).toBeVisible();
@@ -149,14 +167,24 @@ test("管理中心保留应用外壳，自定义角色可创建、配置权限�
   await page.getByRole("button", { name: "保存权限", exact: true }).click();
   await expect(page.getByText("权限已保存，后续请求立即生效")).toBeVisible();
   await page.screenshot({ path: "test-results/management-role-editor.png", fullPage: true });
+  await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("link", { name: "返回工作台", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("link")).toHaveCount(1);
 });
 
 test("跨标签退出清除身份，浏览器不持久化认证材料", async ({ page, context }) => {
-  await browserLogin(page, "admin", adminPassword);
-  await expect(page.getByRole("button", { name: "管理中心", exact: true })).toBeVisible();
+  await browserLogin(page, adminUsername, adminPassword);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  const workspace = page.getByRole("navigation", { name: "主导航" });
+  for (const label of ["用户管理", "组织管理", "角色与权限", "组织成员", "账号安全"])
+    await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
   const other = await context.newPage();
   await other.goto("/dashboard");
-  await expect(other.getByRole("button", { name: "管理中心", exact: true })).toBeVisible();
+  await other.getByRole("button", { name: "个人账号", exact: true }).click();
+  await expect(other.getByRole("menuitem", { name: "管理中心", exact: true })).toBeVisible();
+  await other.keyboard.press("Escape");
   const stored = await page.evaluate(() =>
     Object.keys(localStorage).filter((key) => /token|session|userStatus|userRole/i.test(key)),
   );
@@ -247,13 +275,15 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
     await browserLogin(page, username, password);
     await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
     if (!scenario.visible.length) {
-      await expect(page.getByRole("button", { name: "管理中心", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "个人账号", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: "管理中心", exact: true })).toHaveCount(0);
+      await page.keyboard.press("Escape");
       await page.goto(`/management/orgs/${org}/audit`);
       await expect(page.getByText("当前账号没有访问该页面的权限。", { exact: true })).toBeVisible();
     } else {
-      await page.getByRole("button", { name: "管理中心", exact: true }).click();
+      await page.getByRole("button", { name: "个人账号", exact: true }).click();
       await page.getByRole("menuitem", { name: "管理中心", exact: true }).click();
-      const sidebar = page.getByRole("navigation", { name: "主导航" });
+      const sidebar = page.getByRole("navigation", { name: "管理导航" });
       for (const label of scenario.visible)
         await expect(sidebar.getByRole("link", { name: label, exact: true })).toBeVisible();
       for (const label of scenario.hidden)
@@ -325,15 +355,24 @@ test("组织创建选择已有管理员，两个标签各自保留组织上下�
   const initial = (await (await admin.get("/api/v1/iam/me")).json()).data.organizations[0];
   const suffix = randomBytes(4).toString("hex");
   const name = `浏览器组织 ${suffix}`;
-  await browserLogin(page, "admin", adminPassword);
-  await expect(page.getByRole("button", { name: "管理中心", exact: true })).toBeVisible();
+  await browserLogin(page, adminUsername, adminPassword);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  const workspace = page.getByRole("navigation", { name: "主导航" });
+  for (const label of ["用户管理", "组织管理", "角色与权限", "组织成员", "账号安全"])
+    await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "个人账号", exact: true }).click();
   await page.goto("/management/platform/organizations");
   await page.getByRole("button", { name: "创建组织", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("组织名称", { exact: true }).fill(name);
   await dialog.getByPlaceholder("例如 security-team").fill(`team-${suffix}`);
   await dialog.getByRole("combobox", { name: "初始组织管理员", exact: true }).click();
-  await page.getByRole("option").filter({ hasText: "(admin)" }).click();
+  await page
+    .getByRole("option")
+    .filter({ hasText: `(${adminUsername})` })
+    .click();
   await dialog.getByRole("button", { name: "确定", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: name })).toBeVisible();
   const created = (await (await admin.get("/api/v1/iam/me")).json()).data.organizations.find(
@@ -353,4 +392,20 @@ test("组织创建选择已有管理员，两个标签各自保留组织上下�
   await expect(other.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
   await other.close();
   await admin.dispose();
+});
+
+test("错误的二次认证密码在对话框中显示，并保持当前会话", async ({ page }) => {
+  await browserLogin(page, adminUsername, adminPassword);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto("/account/security");
+  await page.getByRole("button", { name: "确认密码", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("确认当前密码", { exact: true }).fill("wrong confirmation password");
+  await dialog.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("当前密码不正确，请重新输入。");
+  await expect(dialog.getByRole("button", { name: "确定", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/account\/security$/);
+  await dialog.getByLabel("确认当前密码", { exact: true }).fill(adminPassword);
+  await dialog.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
 });

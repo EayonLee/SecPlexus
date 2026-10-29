@@ -3,32 +3,22 @@ package management
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
-
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// pagination 只补充协议默认值；格式与范围由生成绑定器和OpenAPI负责。
-func pagination(limit, offset *int) (int, int) {
-	size, start := 50, 0
-	if limit != nil {
-		size = *limit
-	}
-	if offset != nil {
-		start = *offset
-	}
-	return size, start
-}
-
 // Permissions 返回当前组织可查看的权限目录。
-func (s *Handler) Permissions(c *gin.Context, params router.PermissionsParams) {
+func (s *Handler) Permissions(c *gin.Context) {
+	var params model.OrganizationQuery
+	if err := c.ShouldBindQuery(&params); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
 	w := c.Writer
 	r := c.Request
-	orgID := ""
-	if params.OrgId != nil {
-		orgID = *params.OrgId
-	}
+	orgID := params.OrgID
 	items, err := s.Service.PermissionCatalog(r.Context(), orgID)
 	if err != nil {
 		httpx.Reject(c, err)

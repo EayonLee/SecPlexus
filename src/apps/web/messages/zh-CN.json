@@ -51,6 +51,8 @@
     "currentOrganization": "当前组织",
     "chooseOrganization": "选择组织",
     "managementCenter": "管理中心",
+    "managementNavigation": "管理导航",
+    "backToWorkspace": "返回工作台",
     "accountMenu": "个人账号",
     "profile": "个人资料",
     "signOut": "退出登录",

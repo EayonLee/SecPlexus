@@ -11,12 +11,12 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 
 ## Project conventions
 
-- Brand `SecPlexus`, abbreviation `spx`, environment prefix `SPX_`. Apps: `src/apps`; real shared code: `src/packages`; authoritative contracts: `src/contracts`. No cross-module private access or manual edits to generated files.
-- APIs: `/api/v1/{module}/...` and authenticated, isolated `/internal/v1/{module}/...`. Register routes in `internal/router`; synchronize contracts and clients. Shared responses use `src/packages/go/result`, request binding uses `httpx`, and common middleware uses `httpx/middleware`; follow OpenAPI, including streaming/empty responses. Default same-origin; preserve server authorization and credentialed CORS restrictions.
-- Go HTTP uses Gin and generated OpenAPI handlers. Use native groups, errors/recovery, trusted proxies and streaming; keep IAM session commit protection narrow. Credential use cases accept typed values; do not add HTTP replay or a second authentication/session stack.
-- Generate Web SDK/Zod/Query from public contracts only. Use Query for server state, RHF with generated schemas for forms; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Do not hand-edit generated files.
+- Brand `SecPlexus`, abbreviation `spx`, environment prefix `SPX_`. Apps: `src/apps`; real shared code: `src/packages`; module-owned HTTP models and APIs. No cross-module private access or manual edits to generated files.
+- APIs: `/api/v1/{module}/...` and authenticated, isolated `/internal/v1/{module}/...`. Register routes in `internal/router`; synchronize module models and callers. Shared responses use `src/packages/go/result`, request binding uses `httpx`, and common middleware uses `httpx/middleware`; define HTTP behavior in native Go/Gin and module documentation, including streaming/empty responses. Default same-origin; preserve server authorization and credentialed CORS restrictions.
+- Go HTTP uses native Gin routes/handlers and authored module DTOs; generated documentation never owns runtime binding. Use native groups, errors/recovery, trusted proxies and streaming; keep IAM session commit protection narrow. Credential use cases accept typed values; do not add HTTP replay or a second authentication/session stack.
+- Use native Gin routes and module-owned Go DTOs. Web uses Axios, module API functions, Zod-inferred types, TanStack Query and RHF; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Only shared result-code and permission constants are generated from their owning business catalogs; do not hand-edit those exports.
 - Console owns security operations business and necessary operational query aggregation. It is not a mandatory gateway for other modules. IAM owns identity and authorization; route its APIs through the same-origin entry without duplicating handlers, DTOs or business rules in Console. See the Console README for ownership boundaries.
-- Modules own config, startup, and tables. Go uses plain structured `config.yaml` with Viper/mapstructure, explicit environment bindings and typed defaults; Web uses native environment configuration. Validate configuration at loading, derive endpoints, centralize typed cache keys, and allow module overrides of shared connections. See [configuration](docs/configuration.md).
+- Modules own config, startup, and tables. Go uses plain structured `config.yaml` with Viper/mapstructure, explicit environment bindings and defaults owned only by module YAML; Web uses native environment configuration. Validate configuration at loading, derive endpoints, centralize typed cache keys, and allow module overrides of shared connections. See [configuration](docs/configuration.md).
 - Read environment variables only during configuration loading. Assemble dependencies at startup and pass explicitly; context carries cancellation, deadlines, and request data, not dependencies. Extract shared code only for actual cross-app reuse.
 
 ## Style Guide
@@ -97,4 +97,4 @@ Use the following original prompt for requested UI work within the approved scop
 
 ## References
 
-[Code standard](.agents/skills/spx-code-standard/SKILL.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/architecture/README.md) · module READMEs.
+[Code standard](.agents/skills/spx-mode/SKILL.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/architecture/README.md) · module READMEs.

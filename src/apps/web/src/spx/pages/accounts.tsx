@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 
+import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 
 import { permissions } from "@/auth/permissions.gen";
@@ -8,23 +9,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { listUsersQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
-import { createUser, listUsers, resetUserPassword, setSuperAdmin, updateUser } from "@/spx/api/iam/sdk.gen";
-import type { ApiUser } from "@/spx/api/iam/types.gen";
-import { zCreateUserBody, zResetUserPasswordBody, zSetSuperAdminBody, zUpdateUserBody } from "@/spx/api/iam/zod.gen";
+import { createUser, listUsers, resetUserPassword, setSuperAdmin, updateUser } from "@/spx/api/iam/management";
+import type { ApiUser } from "@/spx/api/iam/schemas";
+import { zCreateUserBody, zResetUserPasswordBody, zSetSuperAdminBody, zUpdateUserBody } from "@/spx/api/iam/schemas";
 
 import { Can } from "../components/access";
 import { DataTable, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
-import { dataOf, mutationHeaders, refreshIdentity } from "../iam/session";
+import { managementChanged } from "../iam/management";
 
 type AccountAction = { action: "create" } | { action: "edit" | "reset" | "super"; user: ApiUser };
 export function AccountsPage() {
   const t = useTranslations("Management");
 
-  const state = usePagedQuery<ApiUser>(listUsersQueryKey({}), (query, signal) =>
-    dataOf(listUsers({ query, signal, throwOnError: true })),
-  );
+  const state = usePagedQuery<ApiUser>(["iam", "users"], listUsers);
   const [dialog, setDialog] = useState<AccountAction | null>(null);
   return (
     <div className="flex flex-col gap-4">
@@ -68,16 +66,7 @@ export function AccountsPage() {
           },
         ]}
       />
-      {dialog && (
-        <AccountDialog
-          dialog={dialog}
-          onClose={() => setDialog(null)}
-          onSaved={async () => {
-            state.reload();
-            await refreshIdentity();
-          }}
-        />
-      )}
+      {dialog && <AccountDialog dialog={dialog} onClose={() => setDialog(null)} onSaved={managementChanged} />}
     </div>
   );
 }
@@ -92,6 +81,11 @@ function AccountDialog({
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("Management");
+  const edit = useMutation({ mutationFn: updateUser, onSuccess: managementChanged });
+  const superAdmin = useMutation({
+    mutationFn: setSuperAdmin,
+    onSuccess: managementChanged,
+  });
   if (dialog.action === "create")
     return (
       <FormDialog
@@ -100,7 +94,7 @@ function AccountDialog({
         defaultValues={{ username: "", display_name: "", email: "", password: "" }}
         onClose={onClose}
         onSubmit={async (body) => {
-          await createUser({ body, headers: mutationHeaders, throwOnError: true });
+          await createUser(body);
           await onSaved();
         }}
       >
@@ -145,8 +139,7 @@ function AccountDialog({
         }}
         onClose={onClose}
         onSubmit={async (body) => {
-          await updateUser({ path: { id: dialog.user.id }, body, headers: mutationHeaders, throwOnError: true });
-          await onSaved();
+          await edit.mutateAsync({ id: dialog.user.id, body });
         }}
       >
         {(form) => (
@@ -181,7 +174,7 @@ function AccountDialog({
         defaultValues={{ password: "" }}
         onClose={onClose}
         onSubmit={async (body) => {
-          await resetUserPassword({ path: { id: dialog.user.id }, body, headers: mutationHeaders, throwOnError: true });
+          await resetUserPassword({ id: dialog.user.id, body });
           await onSaved();
         }}
       >
@@ -203,8 +196,7 @@ function AccountDialog({
       defaultValues={{ enabled: !dialog.user.is_super_admin, reason: "" }}
       onClose={onClose}
       onSubmit={async (body) => {
-        await setSuperAdmin({ path: { id: dialog.user.id }, body, headers: mutationHeaders, throwOnError: true });
-        await onSaved();
+        await superAdmin.mutateAsync({ id: dialog.user.id, body });
       }}
     >
       {(form) => (

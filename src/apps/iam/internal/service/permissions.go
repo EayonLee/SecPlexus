@@ -3,19 +3,20 @@ package service
 import (
 	"context"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // PermissionView 描述权限及当前操作者是否可以把它分配给别人。
 type PermissionView struct {
-	Permission  contract.Permission `json:"permission"`   // 权限目录中的定义。
-	CanDelegate bool                `json:"can_delegate"` // 当前操作者是否可以分配该权限。
+	Permission  authorization.Permission `json:"permission"`   // 权限目录中的定义。
+	CanDelegate bool                     `json:"can_delegate"` // 当前操作者是否可以分配该权限。
 }
 
 // PermissionCatalog 返回组织权限目录，并按当前用户的实际权限计算可委派范围。
 func (s *Service) PermissionCatalog(ctx context.Context, orgID string) ([]PermissionView, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMRolesRead, orgID); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead, orgID); err != nil {
 		return nil, err
 	}
 

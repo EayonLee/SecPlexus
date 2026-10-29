@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Controller } from "react-hook-form";
 import { z } from "zod";
@@ -8,8 +9,7 @@ import { z } from "zod";
 import { permissions } from "@/auth/permissions.gen";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
-import { listMembersQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
+import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import {
   createMember,
   deleteMember,
@@ -17,15 +17,17 @@ import {
   listRoles,
   setMemberRoles,
   updateMember,
-} from "@/spx/api/iam/sdk.gen";
-import type { ApiMember, ApiRole } from "@/spx/api/iam/types.gen";
-import { zCreateMemberBody, zSetMemberRolesBody, zUpdateMemberBody } from "@/spx/api/iam/zod.gen";
+} from "@/spx/api/iam/management";
+import type { ApiMember } from "@/spx/api/iam/schemas";
+import { zCreateMemberBody, zSetMemberRolesBody, zUpdateMemberBody } from "@/spx/api/iam/schemas";
 
 import { Can, useCan } from "../components/access";
 import { DataTable, useAction, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
 import { UserPicker } from "../components/user-picker";
-import { dataOf, mutationHeaders, refreshIdentity, useIdentity } from "../iam/session";
+import { managementChanged } from "../iam/management";
+import { identityScope } from "../iam/query";
+import { errorMessageKey, useIdentity } from "../iam/session";
 import { useRoleLabel } from "../iam/use-role-label";
 
 export function MembersPage() {
@@ -36,22 +38,30 @@ export function MembersPage() {
 
   const auth = useIdentity();
   const org = auth.org_id ?? "";
-  const state = usePagedQuery<ApiMember>(listMembersQueryKey({ path: { org_id: org } }), (query, signal) =>
-    dataOf(listMembers({ path: { org_id: org }, query, signal, throwOnError: true })),
-  );
+  const state = usePagedQuery<ApiMember>(["iam", "members", org], (query, signal) => listMembers(org, query, signal));
   const [creating, setCreating] = useState(false);
   const [existing, setExisting] = useState(false);
   const [assigning, setAssigning] = useState<ApiMember | undefined>(undefined);
   const [removing, setRemoving] = useState<ApiMember | undefined>(undefined);
-  const [roles, setRoles] = useState<ApiRole[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
   const canAssign = useCan(permissions.IAMRolesAssign);
   const canReadRoles = useCan(permissions.IAMRolesRead);
+  const errors = useTranslations("Errors");
+  const roleQuery = useQuery({
+    queryKey: ["iam", "roles", org, "assignment", ...identityScope(auth)],
+    queryFn: ({ signal }) => listRoles(org, { limit: 100 }, signal),
+    enabled: !!assigning && canReadRoles,
+  });
+  const roles = roleQuery.data?.items ?? [];
+  const addExisting = useMutation({
+    mutationFn: createMember,
+    onSuccess: managementChanged,
+  });
+  const edit = useMutation({ mutationFn: updateMember, onSuccess: managementChanged });
+  const remove = useMutation({ mutationFn: deleteMember, onSuccess: managementChanged });
+  const assign = useMutation({ mutationFn: setMemberRoles, onSuccess: managementChanged });
+  const [selected, setSelected] = useState<string[]>([]);
   const version = auth.organizations.find((entry) => entry.id === org)?.authz_version;
-  async function changed() {
-    await refreshIdentity(org);
-    state.reload();
-  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-2">
@@ -65,7 +75,7 @@ export function MembersPage() {
             {t("addMember")}
           </Button>
         </Can>
-        <Button variant="outline" onClick={() => void perform(changed)}>
+        <Button variant="outline" onClick={() => void perform(managementChanged)}>
           {t("refresh")}
         </Button>
       </div>
@@ -84,12 +94,7 @@ export function MembersPage() {
                     variant="ghost"
                     onClick={() =>
                       void perform(async () => {
-                        const data = await dataOf(
-                          listRoles({ throwOnError: true, path: { org_id: org }, query: { limit: 100 } }),
-                        );
-                        setRoles(data.items);
                         setSelected(member.role_ids ?? []);
-                        await refreshIdentity(org);
                         setAssigning(member);
                       })
                     }
@@ -100,18 +105,17 @@ export function MembersPage() {
                 <Can action={permissions.IAMMembersManage}>
                   <Button
                     variant="ghost"
+                    disabled={edit.isPending}
                     onClick={() =>
                       void perform(async () => {
-                        await updateMember({
-                          throwOnError: true,
-                          path: { org_id: org, id: member.id },
-                          headers: mutationHeaders,
+                        await edit.mutateAsync({
+                          orgId: org,
+                          id: member.id,
                           body: zUpdateMemberBody.parse({
                             status: member.status === "active" ? "disabled" : "active",
                             authz_version: version,
                           }),
                         });
-                        await changed();
                       })
                     }
                   >
@@ -126,107 +130,105 @@ export function MembersPage() {
           },
         ]}
       />
-      {creating && (
-        existing ? (
-            <FormDialog
-              key="existing"
-              title={t("addOrgMember")}
-              schema={zCreateMemberBody.pick({ user_id: true }).required()}
-              defaultValues={{ user_id: "" }}
-              onClose={() => setCreating(false)}
-              onSubmit={async (body) => {
-                await createMember({ path: { org_id: org }, body, headers: mutationHeaders, throwOnError: true });
-                await changed();
-              }}
-            >
-              {(form) => (
-                <>
-                  {auth.principal?.is_super_admin && (
-                    <Field orientation="horizontal">
-                      <Checkbox
-                        id="existing-member"
-                        checked={existing}
-                        onCheckedChange={(checked) => setExisting(checked === true)}
-                      />
-                      <FieldLabel htmlFor="existing-member">{t("addExistingAccount")}</FieldLabel>
-                    </Field>
-                  )}
-                  <Field>
-                    <FieldLabel>{t("existingAccount")}</FieldLabel>
-                    <Controller
-                      control={form.control}
-                      name="user_id"
-                      render={({ field }) => <UserPicker value={field.value} onValueChange={field.onChange} />}
+      {creating &&
+        (existing ? (
+          <FormDialog
+            key="existing"
+            title={t("addOrgMember")}
+            schema={zCreateMemberBody.pick({ user_id: true }).required()}
+            defaultValues={{ user_id: "" }}
+            onClose={() => setCreating(false)}
+            onSubmit={async (body) => {
+              await addExisting.mutateAsync({ orgId: org, body });
+            }}
+          >
+            {(form) => (
+              <>
+                {auth.principal?.is_super_admin && (
+                  <Field orientation="horizontal">
+                    <Checkbox
+                      id="existing-member"
+                      checked={existing}
+                      onCheckedChange={(checked) => setExisting(checked === true)}
                     />
-                    <FieldDescription>{t("existingAccountDescription")}</FieldDescription>
+                    <FieldLabel htmlFor="existing-member">{t("addExistingAccount")}</FieldLabel>
                   </Field>
-                </>
-              )}
-            </FormDialog>
-          ) : (
-            <FormDialog
-              key="new"
-              title={t("addOrgMember")}
-              schema={zCreateMemberBody.pick({ username: true, display_name: true, password: true }).required()}
-              defaultValues={{ username: "", display_name: "", password: "" }}
-              onClose={() => setCreating(false)}
-              onSubmit={async (body) => {
-                await createMember({ path: { org_id: org }, body, headers: mutationHeaders, throwOnError: true });
-                await changed();
-              }}
-            >
-              {(form) => (
-                <>
-                  {auth.principal?.is_super_admin && (
-                    <Field orientation="horizontal">
-                      <Checkbox
-                        id="existing-member"
-                        checked={existing}
-                        onCheckedChange={(checked) => setExisting(checked === true)}
-                      />
-                      <FieldLabel htmlFor="existing-member">{t("addExistingAccount")}</FieldLabel>
-                    </Field>
-                  )}
-                  <FormInput
-                    label={t("newUsername")}
-                    registration={form.register("username")}
-                    error={form.formState.errors.username}
+                )}
+                <Field>
+                  <FieldLabel>{t("existingAccount")}</FieldLabel>
+                  <Controller
+                    control={form.control}
+                    name="user_id"
+                    render={({ field }) => <UserPicker value={field.value} onValueChange={field.onChange} />}
                   />
-                  <FormInput
-                    label={t("displayName")}
-                    registration={form.register("display_name")}
-                    error={form.formState.errors.display_name}
-                  />
-                  <FormInput
-                    label={t("password")}
-                    type="password"
-                    registration={form.register("password")}
-                    error={form.formState.errors.password}
-                  />
-                </>
-              )}
-            </FormDialog>
-          )
-      )}
+                  <FieldDescription>{t("existingAccountDescription")}</FieldDescription>
+                </Field>
+              </>
+            )}
+          </FormDialog>
+        ) : (
+          <FormDialog
+            key="new"
+            title={t("addOrgMember")}
+            schema={zCreateMemberBody.pick({ username: true, display_name: true, password: true }).required()}
+            defaultValues={{ username: "", display_name: "", password: "" }}
+            onClose={() => setCreating(false)}
+            onSubmit={async (body) => {
+              await createMember({ orgId: org, body });
+              await managementChanged();
+            }}
+          >
+            {(form) => (
+              <>
+                {auth.principal?.is_super_admin && (
+                  <Field orientation="horizontal">
+                    <Checkbox
+                      id="existing-member"
+                      checked={existing}
+                      onCheckedChange={(checked) => setExisting(checked === true)}
+                    />
+                    <FieldLabel htmlFor="existing-member">{t("addExistingAccount")}</FieldLabel>
+                  </Field>
+                )}
+                <FormInput
+                  label={t("newUsername")}
+                  registration={form.register("username")}
+                  error={form.formState.errors.username}
+                />
+                <FormInput
+                  label={t("displayName")}
+                  registration={form.register("display_name")}
+                  error={form.formState.errors.display_name}
+                />
+                <FormInput
+                  label={t("password")}
+                  type="password"
+                  registration={form.register("password")}
+                  error={form.formState.errors.password}
+                />
+              </>
+            )}
+          </FormDialog>
+        ))}
       {assigning && (
         <FormDialog
           title={t("assignMemberRoles", { name: assigning.display_name })}
+          submitDisabled={!roleQuery.isSuccess}
           schema={z.object({})}
           defaultValues={{}}
           onClose={() => setAssigning(undefined)}
           onSubmit={async () => {
-            await setMemberRoles({
-              throwOnError: true,
-              path: { org_id: org, id: assigning.id },
-              headers: mutationHeaders,
+            await assign.mutateAsync({
+              orgId: org,
+              id: assigning.id,
               body: zSetMemberRolesBody.parse({ role_ids: selected, authz_version: version }),
             });
-            await changed();
           }}
         >
           {() => (
             <FieldSet>
               <FieldLegend>{t("memberRoles")}</FieldLegend>
+              {roleQuery.error && <FieldError>{errors(errorMessageKey(roleQuery.error))}</FieldError>}
               {roles.map((role) => (
                 <Field key={role.id} orientation="horizontal">
                   <Checkbox
@@ -254,13 +256,11 @@ export function MembersPage() {
           defaultValues={{}}
           onClose={() => setRemoving(undefined)}
           onSubmit={async () => {
-            await deleteMember({
-              throwOnError: true,
-              path: { org_id: org, id: removing.id },
-              query: { authz_version: version ?? "" },
-              headers: mutationHeaders,
+            await remove.mutateAsync({
+              orgId: org,
+              id: removing.id,
+              version: version ?? "",
             });
-            await changed();
           }}
         />
       )}

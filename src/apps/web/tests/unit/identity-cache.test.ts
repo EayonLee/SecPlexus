@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 
-import { client } from "../../src/spx/api/iam/client.gen";
-import { me } from "../../src/spx/api/iam/sdk.gen";
+import { http } from "../../src/spx/api/client";
+import { me } from "../../src/spx/api/iam/auth";
 import { queryClient } from "../../src/spx/iam/query";
-import { dataOf, signOut, useIdentity } from "../../src/spx/iam/session";
+import { signOut, useIdentity } from "../../src/spx/iam/session";
 import { createServer } from "node:http";
 
 let entered: () => void;
@@ -39,7 +39,7 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw Error("Missing isolated test listener");
   const origin = `http://127.0.0.1:${address.port}`;
-  client.setConfig({ baseUrl: origin });
+  http.defaults.baseURL = origin;
   vi.stubGlobal("window", { location: { origin, pathname: "/dashboard", search: "" } });
 });
 afterEach(() => {
@@ -52,13 +52,13 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
-test("logout cancels in-flight generated requests and removes the previous identity's cached data", async () => {
+test("logout cancels in-flight requests and removes the previous identity's cached data", async () => {
   useIdentity.setState({ status: "authenticated" });
   queryClient.setQueryData(["owned-private-query"], { value: "previous identity" });
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const outcome = dataOf(me({ throwOnError: true })).then(
+  const outcome = me().then(
     () => "unexpected success",
     (error: unknown) => error,
   );

@@ -50,7 +50,7 @@ spx:iam:ratelimit:account:<sha256>
 | SPX_WEB_CONSOLE_PROXY_TARGET | Web独立连接Console |
 | SPX_CONSOLE_IAM_BASE_URL | Console连接远程IAM，必须HTTPS |
 
-Compose使用服务名连接，Next.js公开API代理地址由同一组模块端口变量生成，不重复写固定后端地址。PG/Redis容器内部使用固定协议端口，根端口变量控制宿主机映射；不会根据连接是否为空自动部署组件。
+Compose 入口同样从公开 URL 推导 Web 映射端口，`SPX_COMPOSE_WEB_PORT` 仅为根脚本注入的内部替换值，不是额外配置项；不要直接手填。Compose使用服务名连接，Next.js公开API代理地址由同一组模块端口变量生成，不重复写固定后端地址。PG/Redis容器内部使用固定协议端口，根端口变量控制宿主机映射；不会根据连接是否为空自动部署组件。
 
 ## 环境变量与模块覆盖
 
@@ -63,7 +63,7 @@ db:
   password: secplexus
 ```
 
-根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**模块专用环境 > 共享环境 > YAML字面值 > Viper默认值**；显式空值保留，随后进行类型及业务配置校验。仅显式登记的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
+根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**模块专用环境 > 共享环境 > YAML字面值**；模块 YAML 是默认值的唯一来源，不维护另一份 Viper 默认表。显式空值保留，随后进行类型及业务配置校验。仅显式登记的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
 
 完整DSN字段`SPX_IAM_POSTGRES_URL`优先于`SPX_POSTGRES_URL`，`SPX_IAM_REDIS_URL`优先于`SPX_REDIS_URL`；配置了非空URL时不再组合分项字段。模块环境显式设空URL可恢复分项组合。`MODELESS`沿用当前环境变量命名，对应驱动的`sslmode`。
 
@@ -135,13 +135,15 @@ IAM 缓存分组为 `cache`，字段为 host、port、password、db、url；当�
 
 ## Next.js Web
 
-根入口使用 `SPX_WEB_HOST` / `SPX_WEB_PORT` 传递 Next CLI 的监听参数；模块独立运行保留上游默认端口 3000。`pnpm preview` 使用已构建的 `next start`，不是 Vite 静态预览，公共 origin 仍需与浏览器地址一致。`make build` 生成模块 `.next/`，容器保留 Node 运行时。
+根启动从 `SPX_PUBLIC_URL` 推导 Next 的唯一浏览器端口，`SPX_WEB_HOST` 只决定监听地址。无需 Caddy、内部 Web 端口或重复端口变量。`pnpm preview` 使用已构建的 `next start`；独立执行模块 `pnpm dev/start` 遵循 Next 原生 CLI，可显式传 `--hostname` 和 `--port`。
 
-新增 Route Handler 只代理 `/api/v1/iam/...` 与 `/api/v1/console/...`，服务端配置模块在加载时读取 `SPX_WEB_IAM_PROXY_TARGET` / `SPX_WEB_CONSOLE_PROXY_TARGET`；默认本机8081/8080，统一启动时按实际Go端口注入。它保留 Cookie、CSRF、Origin、状态码、Set-Cookie 与 SSE 流，不向浏览器开放内部接口或内部凭证。Web 环境不接收数据库、Redis、初始化密码或 Console 内部凭证。
+新增 Route Handler 只代理 `/api/v1/iam/...` 与 `/api/v1/console/...`，服务端配置模块在加载时读取 `SPX_WEB_IAM_PROXY_TARGET` / `SPX_WEB_CONSOLE_PROXY_TARGET`；默认本机8081/8080，统一启动时按实际Go端口注入。它保留 Cookie、CSRF、Origin、状态码、Allow、Retry-After、Set-Cookie 与 SSE 流，不向浏览器开放内部接口或内部凭证。Web 环境不接收数据库、Redis、初始化密码或 Console 内部凭证。
 
 `/` 进入工作空间，未认证时跳转 `/login`。`/dashboard` 是CRM V1安全智驾工作台，受真实IAM认证保护，当前保留示例数据；其余模板页面和演示身份已移除。前端依赖及测试配置由 `src/apps/web/` 维护，版本固定在模块 package.json，根 pnpm-lock.yaml 是唯一锁文件。发布、Git 钩子、外部站点统计和仓库星数配置已移除。
 
-本机开发默认监听 `127.0.0.1`。若保留旧的通配监听值，而 `SPX_PUBLIC_URL` 使用本机回环主机，根脚本会将开发监听对齐到该回环主机，满足 Next 原生 HMR 来源检查。预览/生产仍按配置监听；没有修改上游 allowedDevOrigins 或开放跨域凭证访问。
+本机 Next 默认监听 `127.0.0.1`，Go 的安全本机默认值只定义在各自 YAML。根脚本尊重模块显式 host 配置，不再无声改写。根环境仅提供环境差异，模块独立连接覆盖仍有效；不改写用户私有 `.env`。
+
+Next 窄代理不转发 X-Forwarded-For、X-Real-IP 或 Forwarded，Gin 默认不信任代理。来源限流当前计数的是代理连接来源，账号桶仍独立；多人公网真实 IP 隔离与可信多跳链属于部署前置条件，本轮没有实现或验收该能力。
 
 关键链路的日志覆盖、级别及 request_id 排查方式见 [运行日志与错误定位](observability.md)。
 
@@ -151,8 +153,8 @@ Web 的 `agentRules: false` 关闭框架重复生成模块级 Agent 指令，统
 
 | 变量 | 生效范围 |
 |---|---|
-| `SPX_WEB_HOST` / `SPX_WEB_PORT` | 根入口启动的 Next 开发/预览监听地址 |
-| `SPX_PUBLIC_URL` | IAM 的 Cookie/CSRF 来源，同时作为 Web 公开元信息地址的默认值 |
+| `SPX_WEB_HOST` | Next 绑定地址，默认本机回环 |
+| `SPX_PUBLIC_URL` | Next 端口的唯一来源、IAM 的 Cookie/CSRF 来源及 Web 元信息默认 origin |
 | `SPX_WEB_IAM_PROXY_TARGET` / `SPX_WEB_CONSOLE_PROXY_TARGET` | Next 服务端公开 API 的可选目标覆盖；省略时从 Go 实际监听配置推导 |
 | `NEXT_PUBLIC_APP_URL` | 可选公开元信息地址覆盖；省略时复用 `SPX_PUBLIC_URL` |
 
@@ -167,3 +169,8 @@ Web 的 `agentRules: false` 关闭框架重复生成模块级 Agent 指令，统
 Web 使用 next-intl，支持 `en`、`zh-CN`，默认英文。语言菜单通过 Server Action 写入独立的 `spx-locale` 偏好 Cookie，服务端请求配置校验后加载对应词典；无效值回退英文，不影响 IAM 会话或权限。语言不改变 URL，也不改变 API 路径。
 
 语言集合、默认值与显示时区集中在 `src/apps/web/src/i18n/config.ts`。界面日期统一按 UTC 展示，语言只改变表示方式；金额币种不随语言变化。文本词典在 Web 的 `messages/`，业务名称和标识不翻译。实现与新增消息约定见 [Web 国际化说明](../src/apps/web/README.md#internationalization)。
+
+
+## 加载校验与运行前置条件
+
+IAM 加载时校验 URL/连接配置、已提供的 CSRF 密钥、内部凭证和权限目录中的 action；Console 加载时校验内部 HTTPS origin 及已提供凭证。端点检查和维护命令不强求无关 serve 凭证，但不能接受已提供的非法值。serve 在打开日志、PG/Redis 或监听前要求完整安全配置；证书与 CA 文件的读取错误仍属于真实初始化错误。不要通过执行初始化再期待失败来验证纯配置。

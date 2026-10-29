@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-
 	"github.com/alexedwards/scs/pgxstore"
 	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
@@ -21,7 +19,8 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 const LogicalSessionKey = "iam_session_id"
@@ -65,32 +64,32 @@ func TokenHash(token string) string {
 }
 
 // Resolve 验证当前会话并返回用户身份。
-func (s *Sessions) Resolve(ctx context.Context) (contract.Principal, error) {
+func (s *Sessions) Resolve(ctx context.Context) (iamclient.Principal, error) {
 	id, err := uuid.Parse(s.Manager.GetString(ctx, LogicalSessionKey))
 	if err != nil {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	token := s.Manager.Token(ctx)
 	if token == "" {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err = tx.Error
 	if err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	defer tx.Rollback()
 
 	principal, err := s.ResolveTx(ctx, tx, id, token)
 	if err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if err = tx.Commit().Error; err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	return principal, nil
@@ -98,38 +97,38 @@ func (s *Sessions) Resolve(ctx context.Context) (contract.Principal, error) {
 
 // ResolveTx 在事务中先锁定用户再锁定会话。数据库在取得锁后判断过期时间，
 // 防止延迟请求重新激活已空闲过期的会话。
-func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, token string) (contract.Principal, error) {
+func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, token string) (iamclient.Principal, error) {
 	var userID uuid.UUID
 	if err := repository.SessionUser(ctx, tx, id, &userID); err != nil {
-		return contract.Principal{}, sessionError(err)
+		return iamclient.Principal{}, sessionError(err)
 	}
 
 	q := repository.NewQueries(tx)
 	user, err := q.LockUser(ctx, userID)
 	if err != nil {
-		return contract.Principal{}, sessionError(err)
+		return iamclient.Principal{}, sessionError(err)
 	}
 
 	if user.Status != "active" {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	session, err := q.LockSession(ctx, id)
 	if err != nil {
-		return contract.Principal{}, sessionError(err)
+		return iamclient.Principal{}, sessionError(err)
 	}
 
 	if session.UserID != user.ID || session.AuthVersion != user.AuthVersion || session.TokenHash != TokenHash(token) {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	var stored bool
 	if err = repository.HasStoredSession(ctx, tx, session.TokenHash, &stored); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if !stored {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	session, err = q.TouchSession(ctx, repository.TouchSessionParams{
@@ -139,10 +138,10 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		IdleTimeout: interval(s.Config.Auth.SessionIdleTimeout),
 	})
 	if err != nil {
-		return contract.Principal{}, sessionError(err)
+		return iamclient.Principal{}, sessionError(err)
 	}
 
-	p := contract.Principal{
+	p := iamclient.Principal{
 		UserID:          user.ID.String(),
 		SessionID:       session.ID.String(),
 		Username:        user.Username,
@@ -159,19 +158,19 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 }
 
 // Create 轮换会话令牌并将其绑定到会话记录。
-func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, requestID, userAgent, clientIP string, reauthenticate bool) (contract.Principal, error) {
+func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, requestID, userAgent, clientIP string, reauthenticate bool) (iamclient.Principal, error) {
 	oldID, _ := uuid.Parse(s.Manager.GetString(ctx, LogicalSessionKey))
 	oldToken := s.Manager.Token(ctx)
 	// 先生成新随机令牌，再把摘要绑定到数据库逻辑会话。
 	if err := s.Manager.RenewToken(ctx); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	token := s.Manager.Token(ctx)
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err := tx.Error
 	if err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	defer tx.Rollback()
@@ -183,36 +182,36 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		if lookup == nil {
 			userLocks = append(userLocks, previousUser)
 		} else if !errors.Is(lookup, pgx.ErrNoRows) {
-			return contract.Principal{}, lookup
+			return iamclient.Principal{}, lookup
 		}
 	}
 
 	if err = repository.LockUsers(ctx, tx, userLocks); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	q := repository.NewQueries(tx)
 	locked, err := q.LockUser(ctx, user.ID)
 	if err != nil {
-		return contract.Principal{}, sessionError(err)
+		return iamclient.Principal{}, sessionError(err)
 	}
 
 	if locked.Status != "active" || locked.AuthVersion != user.AuthVersion {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	var valid bool
 	if err = repository.VerifyLoginCredential(ctx, tx, user.ID, user.PasswordHash, &valid); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if !valid {
-		return contract.Principal{}, repository.ErrUnauthenticated
+		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
 	var now time.Time
 	if err = repository.DatabaseTime(ctx, tx, &now); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	authenticated, absolute := now, now.Add(s.Config.Auth.SessionAbsoluteTimeout)
@@ -220,7 +219,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	if reauthenticate {
 		previous, err := q.LockSession(ctx, oldID)
 		if err != nil || previous.State != "active" || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthVersion != locked.AuthVersion || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
-			return contract.Principal{}, repository.ErrUnauthenticated
+			return iamclient.Principal{}, repository.ErrUnauthenticated
 		}
 
 		authenticated, absolute = previous.AuthenticatedAt, previous.AbsoluteExpiresAt
@@ -229,7 +228,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 
 	if oldID != uuid.Nil {
 		if err = repository.RevokeRotatedSession(ctx, tx, oldID, TokenHash(oldToken)); err != nil {
-			return contract.Principal{}, err
+			return iamclient.Principal{}, err
 		}
 	}
 
@@ -249,11 +248,11 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	}
 
 	if err = repository.InsertSession(ctx, tx, newID, user.ID, TokenHash(token), user.AuthVersion, authenticated, reauthenticated, absolute, idle, now, ip, userAgent); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if err = repository.ResetLoginFailures(ctx, tx, user.ID); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if err = repository.AppendAudit(ctx, tx, repository.Audit{
@@ -264,15 +263,15 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		TargetID:   &newID,
 		RequestID:  requestID,
 	}); err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	if err = tx.Commit().Error; err != nil {
-		return contract.Principal{}, err
+		return iamclient.Principal{}, err
 	}
 
 	s.Manager.Put(ctx, LogicalSessionKey, newID.String())
-	return contract.Principal{
+	return iamclient.Principal{
 		UserID:            user.ID.String(),
 		SessionID:         newID.String(),
 		Username:          user.Username,
@@ -285,7 +284,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 }
 
 // Revoke 撤销指定会话或用户的全部会话。
-func (s *Sessions) Revoke(ctx context.Context, p contract.Principal, sessionID string, all bool, reason, requestID string) error {
+func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID string, all bool, reason, requestID string) error {
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err := tx.Error
 	if err != nil {

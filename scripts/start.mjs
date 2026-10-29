@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironment, moduleEnvironment, webEnvironment } from './environment.mjs';
-import { endpoint, consoleEndpoint, webEndpoints } from './endpoints.mjs';
+import { endpoint, consoleEndpoint, webEndpoints, webListener } from './endpoints.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const children = new Set();
@@ -28,19 +28,19 @@ function launch(command, args, env) {
   return child;
 }
 async function terminate(child) {
-  if (child.exitCode !== null || !child.pid) return;
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
   intentional.add(child.pid);
   function signal(name) { try { if (process.platform === 'win32') child.kill(name); else process.kill(-child.pid, name); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
   signal('SIGTERM');
   let timeout;
   await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => { timeout = setTimeout(resolve, 5000); })]);
   clearTimeout(timeout);
-  if (child.exitCode === null) signal('SIGKILL');
+  if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
 }
 async function ready(address, child) {
   const parsed = new URL(endpoint(address));
   const deadline = Date.now() + 30000;
-  while (!stopping && child.exitCode === null && Date.now() < deadline) {
+  while (!stopping && child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
     try { if ((await fetch(new URL('/health/ready', parsed), { signal: AbortSignal.timeout(1000) })).ok) return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
@@ -52,6 +52,7 @@ async function main() {
   const env = loadEnvironment(root);
   const configs = Object.fromEntries(['iam', 'console'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
   for (const file of Object.values(configs)) if (!existsSync(file)) throw new Error('Missing module config.yaml; restore the module configuration before starting.');
+  const web = webListener(env);
   if (command === 'dev') run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { ...webEnvironment(env), HUSKY: '0' });
   run('go', ['run', './src/apps/iam/cmd', 'migrate', '--config', configs.iam], moduleEnvironment(env, 'iam', true));
   const completion = new Promise((resolve) => { finish = resolve; });
@@ -82,7 +83,7 @@ async function main() {
           catch (error) { console.error(`${module}: ${error.message} The existing process is retained when compilation fails.`); }
           finally { rebuilding = false; if (pending) { pending = false; void rebuild(); } }
         }
-        for (const directory of [`src/apps/${module}`, 'src/packages/go', 'src/contracts']) {
+        for (const directory of [`src/apps/${module}`, 'src/packages/go']) {
           const watcher = watch(path.join(root, directory), { recursive: true }, (_, filename) => {
             if (!filename || !/\.(go|sql)$/.test(filename) || filename.endsWith('_test.go')) return;
             clearTimeout(timer); timer = setTimeout(() => void rebuild(), 200);
@@ -92,11 +93,7 @@ async function main() {
         watchers.push({ close: () => clearTimeout(timer) });
       }
     }
-    const browserHost = new URL(env.SPX_PUBLIC_URL || 'http://127.0.0.1:5173').hostname;
-    let webHost = env.SPX_WEB_HOST || '127.0.0.1';
-    // Next dev validates the HMR origin against its listener hostname.
-    if (command === 'dev' && ['0.0.0.0', '::'].includes(webHost) && ['localhost', '127.0.0.1', '[::1]'].includes(browserHost)) webHost = browserHost;
-    launch('pnpm', ['--dir', 'src/apps/web', command === 'preview' ? 'start' : 'dev', '--hostname', webHost, '--port', env.SPX_WEB_PORT || '5173'], { ...webEnvironment(env), ...webEndpoints(env, services) });
+    launch('pnpm', ['--dir', 'src/apps/web', command === 'preview' ? 'start' : 'dev', '--hostname', web.host, '--port', String(web.port)], { ...webEnvironment(env), ...webEndpoints(env, services) });
     console.log('SecPlexus applications started. Dependencies are accessed through configured endpoints.');
     process.exitCode = await completion;
   } finally {

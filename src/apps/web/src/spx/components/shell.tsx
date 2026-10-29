@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
-import { Command, LayoutDashboard, LogOut, Settings, Shield, User } from "lucide-react";
+import { ArrowLeft, Command, LayoutDashboard, LogOut, type LucideIcon, Settings, Shield } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -32,6 +32,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -53,67 +54,66 @@ export function Shell({ children }: { children: ReactNode }) {
   const variant = usePreferencesStore((state) => state.values.sidebar_variant);
   const collapsible = usePreferencesStore((state) => state.values.sidebar_collapsible);
   const pages = visibleManagementPages(auth);
+  const management = pathname === "/management" || pathname.startsWith("/management/");
+  const workspace = auth.org_id ? `/dashboard?org_id=${encodeURIComponent(auth.org_id)}` : "/dashboard";
   return (
     <SidebarProvider style={{ "--sidebar-width": "calc(var(--spacing) * 68)" } as CSSProperties}>
       <Sidebar variant={variant} collapsible={collapsible}>
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard">
-                  <Command />
-                  <span className="text-base font-semibold">SecPlexus</span>
-                </Link>
-              </SidebarMenuButton>
+              <SidebarLink href="/dashboard" icon={Command}>
+                <span className="text-base font-semibold">SecPlexus</span>
+              </SidebarLink>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
-        <SidebarContent role="navigation" aria-label={t("mainNavigation")}>
-          <SidebarGroup>
-            <SidebarGroupLabel>{t("dashboards")}</SidebarGroupLabel>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === "/dashboard"}>
-                  <Link href="/dashboard">
-                    <LayoutDashboard />
-                    <span>{t("dashboard")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroup>
-          {[...new Set(pages.map((page) => page.group))].map((group) => (
-            <SidebarGroup key={group}>
-              <SidebarGroupLabel>{t(group)}</SidebarGroupLabel>
+        <SidebarContent role="navigation" aria-label={t(management ? "managementNavigation" : "mainNavigation")}>
+          {!management && (
+            <SidebarGroup>
+              <SidebarGroupLabel>{t("dashboards")}</SidebarGroupLabel>
               <SidebarMenu>
-                {pages
-                  .filter((page) => page.group === group)
-                  .map((page) => (
-                    <SidebarMenuItem key={page.id}>
-                      <SidebarMenuButton asChild isActive={pathname === page.path(auth.org_id)}>
-                        <Link href={page.path(auth.org_id)}>
-                          <Shield />
-                          <span>{t(page.title)}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                <SidebarMenuItem>
+                  <SidebarLink href="/dashboard" icon={LayoutDashboard} isActive={pathname === "/dashboard"}>
+                    <span>{t("dashboard")}</span>
+                  </SidebarLink>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>
-          ))}
+          )}
+          {management &&
+            [...new Set(pages.map((page) => page.group))].map((group) => (
+              <SidebarGroup key={group}>
+                <SidebarGroupLabel>{t(group)}</SidebarGroupLabel>
+                <SidebarMenu>
+                  {pages
+                    .filter((page) => page.group === group)
+                    .map((page) => (
+                      <SidebarMenuItem key={page.id}>
+                        <SidebarLink
+                          href={page.path(auth.org_id)}
+                          icon={Shield}
+                          isActive={pathname === page.path(auth.org_id)}
+                        >
+                          <span>{t(page.title)}</span>
+                        </SidebarLink>
+                      </SidebarMenuItem>
+                    ))}
+                </SidebarMenu>
+              </SidebarGroup>
+            ))}
         </SidebarContent>
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname === "/account/security"}>
-                <Link href="/account/security">
-                  <User />
-                  <span>{t("accountSecurity")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        {management && (
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarLink href={workspace} icon={ArrowLeft}>
+                  <span>{t("backToWorkspace")}</span>
+                </SidebarLink>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        )}
       </Sidebar>
       <SidebarInset className="min-w-0 overflow-x-clip [--dashboard-header-height:--spacing(12)] [html[data-content-layout=centered]_&>*]:mx-auto [html[data-content-layout=centered]_&>*]:w-full [html[data-content-layout=centered]_&>*]:max-w-screen-2xl peer-data-[variant=inset]:border">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 [html[data-navbar-style=sticky]_&]:sticky [html[data-navbar-style=sticky]_&]:top-0 [html[data-navbar-style=sticky]_&]:z-50 [html[data-navbar-style=sticky]_&]:overflow-hidden [html[data-navbar-style=sticky]_&]:rounded-t-[inherit] [html[data-navbar-style=sticky]_&]:bg-background/50 [html[data-navbar-style=sticky]_&]:backdrop-blur-md">
@@ -146,22 +146,6 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {!!pages.length && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" aria-label={t("managementCenter")}>
-                      <Settings />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem onSelect={() => router.push(pages[0].path(auth.org_id))}>
-                        {t("managementCenter")}
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
               <LanguageSwitcher />
               <LayoutControls />
               <ThemeSwitcher />
@@ -180,6 +164,16 @@ export function Shell({ children }: { children: ReactNode }) {
                       {t("accountSecurity")}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
+                  {!!pages.length && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem asChild>
+                        <Link href={pages[0].path(auth.org_id)}>
+                          <Settings />
+                          {t("managementCenter")}
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuItem
@@ -202,5 +196,28 @@ export function Shell({ children }: { children: ReactNode }) {
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+/** SidebarLink 在原生导航完成时关闭移动抽屉，保持桌面侧栏状态。 */
+function SidebarLink({
+  href,
+  icon: Icon,
+  isActive,
+  children,
+}: {
+  href: string;
+  icon: LucideIcon;
+  isActive?: boolean;
+  children: ReactNode;
+}) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <SidebarMenuButton asChild isActive={isActive}>
+      <Link href={href} onNavigate={() => setOpenMobile(false)}>
+        <Icon />
+        {children}
+      </Link>
+    </SidebarMenuButton>
   );
 }

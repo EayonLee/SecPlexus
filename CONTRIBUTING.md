@@ -36,7 +36,6 @@ repository. PostgreSQL stores IAM data and sessions; Redis supports rate limitin
 | [`src/apps/iam/`](src/apps/iam/README.md) | Accounts, authentication, sessions, organizations, roles, authorization, and identity audit |
 | [`src/apps/console/`](src/apps/console/README.md) | Business-service entry point; currently organization context and authorized SSE connections |
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js, React, TypeScript, Tailwind CSS, and shadcn/ui; shared application shell and product pages |
-| [`src/contracts/`](src/contracts/README.md) | Authoritative API definitions, result codes, permission catalog, and generated protocol types |
 | [`src/packages/`](src/packages/README.md) | Implementations actually shared across applications |
 | `tests/` and `src/apps/web/tests/` | Integration-test runners and Web browser E2E tests |
 | `scripts/` and `deploy/` | Development, build, test, and deployment tooling |
@@ -147,22 +146,10 @@ versioned migrations in the owning module and preserve already applied scripts.
 Public APIs use `/api/v1/{module}/...`; internal APIs use
 `/internal/v1/{module}/...` and require authentication and isolation.
 
-1. Edit the authoritative definitions in `src/contracts/`: module
-   `openapi.source.json`, shared schemas and result codes, or the permission
-   catalog as appropriate.
-2. Update routes, handlers, and callers together. Use `httpx` for request binding,
-   shared HTTP middleware for common concerns, and `result` for ordinary JSON
-   responses. Preserve real HTTP status codes, empty responses, and streaming semantics.
-3. Regenerate protocol documents and Go/TypeScript types, then verify them:
-
-   ```sh
-   pnpm contracts:generate
-   pnpm contracts:check
-   ```
-
-Include generated changes with the source change; never edit `.gen.*` files or
-generated `openapi.json` documents by hand. See the
-[contract guide](src/contracts/README.md) for the authoritative file list.
+1. Edit the owning module's native Go DTOs, Gin routes in `internal/router`, and handlers. Update module documentation and actual callers together.
+2. Bind requests with `httpx`, use shared HTTP middleware, and return ordinary JSON through `result`. Preserve real status codes, empty bodies and streaming semantics.
+3. Web declares only consumed Zod models in `src/spx/api/iam/schemas.ts`; infer TypeScript types from them and call module APIs through Axios. Verify changes with real HTTP and browser tests.
+4. Only when changing shared result codes or permissions, run `pnpm catalogs:generate` and `pnpm catalogs:check`. Their sources live in Go `result` and IAM `authorization`; do not edit `.gen.*` exports manually.
 
 Server-side authorization remains authoritative. Preserve organization scope,
 CSRF protection, session revocation, and transaction and audit guarantees.
@@ -172,7 +159,7 @@ cross-origin credential access requires an explicit design.
 ### Code and documentation style
 
 Follow [AGENTS.md](AGENTS.md) and the
-[project code standard](.agents/skills/spx-code-standard/SKILL.md).
+[project code standard](.agents/skills/spx-mode/SKILL.md).
 
 - Keep changes scoped. Avoid unrelated formatting, dependency upgrades, and
   speculative abstractions. Validate unknown input at its owning boundary and
@@ -203,7 +190,7 @@ resource cleanup, and targeted test commands.
 Run relevant checks from the repository root:
 
 ```sh
-pnpm contracts:check
+pnpm catalogs:check
 gofmt -l src
 go vet ./src/...
 pnpm lint
@@ -295,6 +282,6 @@ reported test results.
 
 ### Framework integration
 
-Use native Gin handlers and middleware with the generated OpenAPI routes. IAM credential use cases take typed values; Argon2id, SCS, CSRF and the Redis limiter own their mechanisms. Use GORM projections/transactions and Goose migrations, and Viper/mapstructure with Cobra for configuration and commands. See the [actual role management walkthrough](docs/development/role-management.md); do not create another generic utility or routing layer for an existing framework capability.
+Use native Gin handlers and middleware with module-owned DTOs. IAM credential use cases take typed values; Argon2id, SCS, CSRF and the Redis limiter own their mechanisms. Use GORM projections/transactions and Goose migrations, and Viper/mapstructure with Cobra for configuration and commands. See the [actual role management walkthrough](docs/development/role-management.md); do not create another generic utility or routing layer for an existing framework capability.
 
-Generate public Web SDK/Zod/Query outputs through the root command. Query owns server state; RHF and generated schemas own forms. Sensitive password operations stay outside MutationCache. Preserve the template components/styles and next-intl catalogs. Run `make lint-go`, `make vuln-go` and the applicable checks in the [testing guide](docs/testing.md); these are local checks, not a deployment or CI workflow.
+Use Axios for module API calls and infer types from consumed Zod models. Query owns server state; RHF and Zod own forms. Sensitive password operations stay outside MutationCache. Preserve the template components/styles and next-intl catalogs. Run `make lint-go`, `make vuln-go` and the applicable checks in the [testing guide](docs/testing.md); these are local checks, not a deployment or CI workflow.

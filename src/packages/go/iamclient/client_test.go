@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // TestTransportFailureKeepsCauseAndSafeResult 保留真实 TLS 故障链，前端仍只得到依赖不可用。
@@ -31,7 +31,7 @@ func TestTransportFailureKeepsCauseAndSafeResult(t *testing.T) {
 	request.Header.Set("Cookie", "secret-cookie")
 	_, err = client.Authorize(logging.With(context.Background(), "request_id", "caller-one"), request, "iam.organizations.read", "", nil)
 	var failure *Error
-	if !errors.As(err, &failure) || failure.Code != common.CodeServiceUnavailable || failure.Cause == nil || failure.Reason != "transport" {
+	if !errors.As(err, &failure) || failure.Code != result.CodeServiceUnavailable || failure.Cause == nil || failure.Reason != "transport" {
 		t.Fatal("transport cause or public classification lost")
 	}
 	if strings.Contains(output.String(), "secret-") || !strings.Contains(output.String(), "caller-one") || !strings.Contains(output.String(), "transport") {
