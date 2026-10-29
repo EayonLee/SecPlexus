@@ -2,12 +2,10 @@ package authorization
 
 import (
 	"testing"
-
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
 )
 
 func TestDelegationRequiresBothOldAndNewGrantsWithinAuthority(t *testing.T) {
-	catalog := []contract.Permission{{Key: "read", Scope: "organization", Status: "active", Delegable: true}, {Key: "write", Scope: "organization", Status: "active", Delegable: true}, {Key: "platform", Scope: "platform", Status: "active"}, {Key: "legacy", Scope: "organization", Status: "deprecated", Delegable: true}}
+	catalog := []Permission{{Key: "read", Scope: "organization", Status: "active", Delegable: true}, {Key: "write", Scope: "organization", Status: "active", Delegable: true}, {Key: "platform", Scope: "platform", Status: "active"}, {Key: "legacy", Scope: "organization", Status: "deprecated", Delegable: true}}
 	for _, tc := range []struct {
 		name      string
 		old, next []string

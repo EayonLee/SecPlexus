@@ -1,6 +1,6 @@
 import type { PermissionKey } from "@/auth/permissions.gen";
 import { permissions } from "@/auth/permissions.gen";
-import type { ApiMe } from "@/spx/api/iam/types.gen";
+import type { ApiMe } from "@/spx/api/iam/schemas";
 
 import type messages from "../../../messages/en.json";
 

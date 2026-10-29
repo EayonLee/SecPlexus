@@ -2,27 +2,27 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler"
-	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
+	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 )
 
 // Serve 初始化 IAM 运行依赖，并负责 HTTP 服务的启动与关闭。
 func Serve(ctx context.Context, cfg config.Config) (outcome error) {
-	if len(cfg.Internal.Clients) == 0 || cfg.Internal.TLSCertFile == "" || cfg.Internal.TLSKeyFile == "" {
-		return errors.New("internal client configuration and TLS certificate/key are required")
+	if err := cfg.ValidateServe(); err != nil {
+		return err
 	}
 
 	startup, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
@@ -85,7 +85,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	public := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           server.PublicHandler(),
+		Handler:           router.PublicHandler(server),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		WriteTimeout:      20 * time.Second,
@@ -94,44 +94,23 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}
 	internal := &http.Server{
 		Addr:              cfg.Internal.Addr(),
-		Handler:           server.InternalHandler(),
+		Handler:           router.InternalHandler(server),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		WriteTimeout:      20 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
-	group, serving := errgroup.WithContext(ctx)
-	public.BaseContext = func(net.Listener) context.Context { return serving }
-	internal.BaseContext = func(net.Listener) context.Context { return serving }
-	group.Go(func() error {
-		err := public.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
+	certificate, err := tls.LoadX509KeyPair(cfg.Internal.TLSCertFile, cfg.Internal.TLSKeyFile)
+	if err != nil {
 		return err
-	})
-	group.Go(func() error {
-		err := internal.ListenAndServeTLS(cfg.Internal.TLSCertFile, cfg.Internal.TLSKeyFile)
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	})
-	group.Go(func() error {
-		<-serving.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		err := errors.Join(public.Shutdown(shutdown), internal.Shutdown(shutdown))
-		if err != nil {
-			err = errors.Join(err, public.Close(), internal.Close())
-		}
-		return err
-	})
+	}
+	internal.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}}
+
 	slog.Info("HTTP 监听启动中", "event", "service.starting", "public_addr", cfg.App.Addr(), "internal_addr", cfg.Internal.Addr())
-	if err := group.Wait(); err != nil {
+	if err := httpx.Serve(ctx, public, internal); err != nil {
 		logging.From(ctx).Error("HTTP 服务关闭失败", "event", "service.listener_failed", "error", logging.Error(err))
-		return errors.New("IAM HTTP listener failed")
+		return err
 	}
 	return nil
 }

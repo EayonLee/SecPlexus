@@ -6,66 +6,65 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 var roleCode = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
 
-// RoleInput 是创建或修改角色的请求参数。
-type RoleInput = contract.APIRoleInput
+// RoleInput 是修改角色的请求参数。
+type RoleInput = model.APIRoleInput
+
+// RoleCreateInput 是创建角色的请求参数。
+type RoleCreateInput = model.APIRoleCreate
 
 // GrantsInput 是角色权限变更的请求参数。
-type GrantsInput = contract.APIGrantsInput
+type GrantsInput = model.APIGrantsInput
 
 // MemberRolesInput 是成员角色变更的请求参数。
-type MemberRolesInput = contract.APIMemberRolesInput
+type MemberRolesInput = model.APIMemberRolesInput
 
-// validName 限制非空显示名称的字符数。
+// validName 拒绝只有空白的业务名称；字段长度由入口绑定约束。
 func validName(name string) bool {
-	return strings.TrimSpace(name) != "" && utf8.RuneCountInString(name) <= 100
-}
-
-// validRole 校验角色资料的业务约束，不改变系统角色保护。
-func validRole(input RoleInput) bool {
-	return validName(input.Name) && utf8.RuneCountInString(input.Description) <= 1000 && (input.Status == "active" || input.Status == "disabled")
+	return strings.TrimSpace(name) != ""
 }
 
 // CreateRole 创建组织自定义角色。
-func (s *Service) CreateRole(ctx context.Context, orgID string, input RoleInput, requestID string) (string, error) {
+func (s *Service) CreateRole(ctx context.Context, orgID string, input RoleCreateInput, requestID string) (string, error) {
 	if input.Status == "" {
 		input.Status = "active"
 	}
 
-	if !roleCode.MatchString(input.Code) || slices.Contains([]string{"org_admin", "member", "super_admin"}, input.Code) || !validRole(input) {
+	if !roleCode.MatchString(input.Code) || slices.Contains([]string{"org_admin", "member", "super_admin"}, input.Code) || !validName(input.Name) {
 		return "", repository.ErrInvalid
 	}
 
+	description := input.Description.GetOrZero()
 	id := uuid.New()
 	err := s.Manage(
 		ctx,
-		contract.PermissionIAMRolesManage,
+		iamclient.PermissionIAMRolesManage,
 		orgID,
 		requestID,
 		"role",
 		&id,
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			metadata["code"] = input.Code
 			metadata["name"] = input.Name
-			return repository.CreateRole(ctx, tx, id, orgID, input.Code, input.Name, input.Description, input.Status, p.UserID)
+			return repository.CreateRole(ctx, tx, id, orgID, input.Code, input.Name, description, input.Status, p.UserID)
 		},
 	)
 	return id.String(), err
 }
 
 // delegation 校验操作者现有权限能否覆盖变更前后的授权。
-func (s *Service) delegation(ctx context.Context, tx *gorm.DB, p contract.Principal, orgID string, old, next []string) error {
+func (s *Service) delegation(ctx context.Context, tx *gorm.DB, p iamclient.Principal, orgID string, old, next []string) error {
 	org, err := uuid.Parse(orgID)
 	if err != nil {
 		return repository.ErrInvalid
@@ -100,18 +99,18 @@ func (s *Service) delegation(ctx context.Context, tx *gorm.DB, p contract.Princi
 
 // UpdateRole 更新角色信息并检查版本。
 func (s *Service) UpdateRole(ctx context.Context, orgID, roleID string, input RoleInput, requestID string) error {
-	if !validRole(input) || input.Version < 1 || input.Code != "" {
+	if !validName(input.Name) {
 		return repository.ErrInvalid
 	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMRolesManage,
+		iamclient.PermissionIAMRolesManage,
 		orgID,
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, orgID, roleID)
 			if err != nil {
 				return err
@@ -132,25 +131,23 @@ func (s *Service) UpdateRole(ctx context.Context, orgID, roleID string, input Ro
 			metadata["previous_version"] = strconv.FormatInt(role.Version, 10)
 			metadata["name"] = input.Name
 			metadata["status"] = input.Status
-			return repository.UpdateRole(ctx, tx, orgID, roleID, input.Name, input.Description, input.Status)
+			description := input.Description.GetOr(role.Description)
+			return repository.UpdateRole(ctx, tx, orgID, roleID, input.Name, description, input.Status)
 		},
 	)
 }
 
 // ReplaceGrants 替换角色权限并检查可委派范围。
 func (s *Service) ReplaceGrants(ctx context.Context, orgID, roleID string, input GrantsInput, requestID string) error {
-	if input.Permissions == nil || input.Version < 1 || len(input.Permissions) > 200 {
-		return repository.ErrInvalid
-	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMRolesManage,
+		iamclient.PermissionIAMRolesManage,
 		orgID,
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, orgID, roleID)
 			if err != nil {
 				return err
@@ -171,15 +168,6 @@ func (s *Service) ReplaceGrants(ctx context.Context, orgID, roleID string, input
 			metadata["before_permissions"] = role.Permissions
 			metadata["after_permissions"] = input.Permissions
 			metadata["previous_version"] = strconv.FormatInt(role.Version, 10)
-			seen := map[string]bool{}
-			for _, key := range input.Permissions {
-				if seen[key] {
-					return repository.ErrInvalid
-				}
-
-				seen[key] = true
-			}
-
 			return repository.ReplaceGrants(ctx, tx, orgID, roleID, input.Permissions)
 		},
 	)
@@ -189,12 +177,12 @@ func (s *Service) ReplaceGrants(ctx context.Context, orgID, roleID string, input
 func (s *Service) DeleteRole(ctx context.Context, orgID, roleID string, version int64, requestID string) error {
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMRolesManage,
+		iamclient.PermissionIAMRolesManage,
 		orgID,
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, orgID, roleID)
 			if err != nil {
 				return err
@@ -219,18 +207,15 @@ func (s *Service) DeleteRole(ctx context.Context, orgID, roleID string, version 
 
 // ReplaceMemberRoles 替换成员角色并检查可委派范围。
 func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID string, input MemberRolesInput, requestID string) error {
-	if input.RoleIDs == nil || input.AuthzVersion < 1 || len(input.RoleIDs) > 50 {
-		return repository.ErrInvalid
-	}
 
 	return s.Manage(
 		ctx,
-		contract.PermissionIAMRolesAssign,
+		iamclient.PermissionIAMRolesAssign,
 		orgID,
 		requestID,
 		"membership",
 		uuidPointer(membershipID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			// 先锁定组织并核对版本，防止覆盖其他管理员刚提交的变更。
 			version, err := repository.OrganizationVersion(ctx, tx, orgID)
 			if err != nil {
@@ -254,16 +239,6 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 			previous, err := repository.MemberRoleIDs(ctx, tx, orgID, membershipID)
 			if err != nil {
 				return err
-			}
-
-			// 拒绝重复角色，旧、新集合都参与后续委派校验。
-			seen := map[string]bool{}
-			for _, id := range input.RoleIDs {
-				if seen[id] {
-					return repository.ErrInvalid
-				}
-
-				seen[id] = true
 			}
 
 			// 普通组织管理员不能调整管理员身份，也不能撤销自己无权管理的授权。

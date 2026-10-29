@@ -14,8 +14,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
 )
 
 const ManagementLock int64 = 0x73707869616d
@@ -123,7 +123,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		return err
 	}
 
-	for _, p := range contract.Catalog() {
+	for _, p := range authorization.Catalog() {
 		var compatible bool
 		if err = tx.WithContext(ctx).Raw(
 			`SELECT NOT EXISTS(SELECT 1 FROM iam.permissions WHERE key=$1 AND (module<>$2 OR resource_type<>$3 OR action<>$4 OR scope<>$5))`,

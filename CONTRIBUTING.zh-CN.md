@@ -26,7 +26,6 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 | [`src/apps/iam/`](src/apps/iam/README.md) | 账号、认证、会话、组织、角色、授权与身份审计 |
 | [`src/apps/console/`](src/apps/console/README.md) | 业务服务入口；当前提供组织上下文与带授权检查的 SSE 连接 |
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js、React、TypeScript、Tailwind CSS、shadcn/ui；统一应用框架与产品页面 |
-| [`src/contracts/`](src/contracts/README.md) | 权威 API 定义、结果码、权限目录及生成的协议类型 |
 | [`src/packages/`](src/packages/README.md) | 应用之间实际复用的实现 |
 | `tests/` 和 `src/apps/web/tests/` | 集成测试运行器与 Web 浏览器 E2E 测试 |
 | `scripts/` 和 `deploy/` | 开发、构建、测试与部署工具 |
@@ -113,22 +112,16 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 公开 API 使用 `/api/v1/{module}/...`；内部 API 使用
 `/internal/v1/{module}/...`，并保持认证与隔离。
 
-1. 修改 `src/contracts/` 中的权威定义：按需更新模块 `openapi.source.json`、公共 schema 与结果码，或权限目录。
-2. 同步修改路由、处理函数与调用方。请求绑定使用 `httpx`，公共能力使用共享 HTTP 中间件，普通 JSON 响应使用 `result`；保留真实 HTTP 状态、空响应和流式协议的语义。
-3. 生成协议文档和 Go/TypeScript 类型，再执行校验：
-
-   ```sh
-   pnpm contracts:generate
-   pnpm contracts:check
-   ```
-
-派生产物与源定义一起交付，不手改 `.gen.*` 文件或生成的 `openapi.json`。权威文件清单见[契约指南](src/contracts/README.md)。
+1. 修改所属模块的原生 Go DTO、`internal/router` Gin 路由及 Handler，同时更新模块说明和真实调用方。
+2. 请求绑定使用 `httpx`，公共能力使用共享 HTTP 中间件，普通 JSON 使用 `result`；保留真实状态、空响应和流式语义。
+3. Web 在 `src/spx/api/iam/schemas.ts` 维护实际消费的 Zod 模型，类型由模型推导，模块 API 使用 Axios。字段同步通过真实 HTTP 和浏览器测试验证。
+4. 仅在修改跨语言结果码或权限目录时执行 `pnpm catalogs:generate`、`pnpm catalogs:check`。业务源归 Go `result` 和 IAM `authorization`；不手改 `.gen.*` 导出。
 
 服务端授权始终是最终依据。保留组织范围、CSRF 防护、会话撤销，以及事务和审计保证；页面或按钮可见不代表 API 已授权。默认保持同源访问，跨域凭证访问需要明确设计。
 
 ### 代码与文档风格
 
-遵循 [AGENTS.md](AGENTS.md) 和[项目代码规范](.agents/skills/spx-code-standard/SKILL.md)。
+遵循 [AGENTS.md](AGENTS.md) 和[项目代码规范](.agents/skills/spx-mode/SKILL.md)。
 
 - 保持变更聚焦，不混入无关格式化、依赖升级或推测性抽象。在所属边界校验未知输入，向内传递类型化值；保留授权与当前状态检查。
 - 修改的 Go 文件运行 `gofmt`，使用 `goimports` 整理导入。导出声明使用以名称开头的中文注释，数据库列采用 `snake_case`。
@@ -143,7 +136,7 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 在仓库根目录执行与变更相关的检查：
 
 ```sh
-pnpm contracts:check
+pnpm catalogs:check
 gofmt -l src
 go vet ./src/...
 pnpm lint
@@ -210,6 +203,6 @@ PR 描述说明问题、变更后的行为、审查所需的设计决策和实�
 
 ### 框架接入
 
-使用Gin原生Handler/中间件与OpenAPI生成路由。IAM凭证用例接收类型化值，Argon2id、SCS、CSRF和Redis limiter分别负责机制；数据使用GORM投影/事务与Goose迁移，配置/命令使用Viper、mapstructure和Cobra。参照[实际角色管理链路](docs/development/role-management.md)，已有框架能力不要再套一层通用工具或影子路由。
+使用Gin原生Handler/中间件与模块自有DTO。IAM凭证用例接收类型化值，Argon2id、SCS、CSRF和Redis limiter分别负责机制；数据使用GORM投影/事务与Goose迁移，配置/命令使用Viper、mapstructure和Cobra。参照[实际角色管理链路](docs/development/role-management.md)，已有框架能力不要再套一层通用工具或影子路由。
 
-从根命令生成公开Web SDK/Zod/Query。Query管理服务端状态，RHF和生成schema管理表单；密码操作不进入MutationCache。保留模板组件/样式及next-intl词典。执行`make lint-go`、`make vuln-go`和[测试指南](docs/testing.md)中的相关检查；均为本地检查，不是部署或CI流程。
+Web使用Axios模块API和Zod推导类型。Query管理服务端状态，RHF和Zod管理表单；密码操作不进入MutationCache。保留模板组件/样式及next-intl词典。执行`make lint-go`、`make vuln-go`和[测试指南](docs/testing.md)中的相关检查；均为本地检查，不是部署或CI流程。

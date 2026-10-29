@@ -51,6 +51,8 @@
     "currentOrganization": "Current organization",
     "chooseOrganization": "Select an organization",
     "managementCenter": "Administration",
+    "managementNavigation": "Management navigation",
+    "backToWorkspace": "Back to workspace",
     "accountMenu": "Account menu",
     "profile": "Profile",
     "signOut": "Sign out",

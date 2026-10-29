@@ -69,7 +69,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 		command.Stdin = bytes.NewReader(input)
 		data, err := command.Output()
 		if err != nil {
-			t.Fatalf("isolated %s failed; PostgreSQL client tools are required", tool)
+			t.Fatalf("isolated %s failed; use PostgreSQL client tools matching the server major version", tool)
 		}
 
 		return data

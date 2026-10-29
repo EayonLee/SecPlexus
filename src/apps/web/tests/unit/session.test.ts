@@ -1,12 +1,11 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 
-import { client } from "../../src/spx/api/iam/client.gen";
-import { changePassword } from "../../src/spx/api/iam/sdk.gen";
-import { APIError, mutationHeaders, useIdentity } from "../../src/spx/iam/session";
+import { APIError, http } from "../../src/spx/api/client";
+import { changePassword } from "../../src/spx/api/iam/auth";
+import { useIdentity } from "../../src/spx/iam/session";
 import { initialAuth } from "../../src/spx/iam/types";
 import { createServer } from "node:http";
 
-const nativeFetch = globalThis.fetch;
 const server = createServer((_request, response) => {
   response.writeHead(503, { "Content-Type": "application/json" });
   response.end(
@@ -21,8 +20,8 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${address.port}`;
 });
 beforeEach(() => {
-  // Node测试用自己的HTTP监听器解析浏览器相对URL，响应仍通过真实fetch传输。
-  client.setConfig({ baseUrl: origin, fetch: nativeFetch });
+  // Node 测试使用自有 HTTP 监听器，仍由 Axios 真实传输。
+  http.defaults.baseURL = origin;
   useIdentity.setState(
     {
       ...initialAuth,
@@ -40,9 +39,6 @@ beforeEach(() => {
     true,
   );
 });
-afterEach(() => {
-  globalThis.fetch = nativeFetch;
-});
 afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
@@ -50,9 +46,8 @@ afterAll(async () => {
 test("CSRF bootstrap failure pauses authenticated actions without logging the user out", async () => {
   await expect(
     changePassword({
-      headers: mutationHeaders,
-      body: { old_password: "old password", new_password: "new password" },
-      throwOnError: true,
+      old_password: "old password",
+      new_password: "new password",
     }),
   ).rejects.toBeInstanceOf(APIError);
   expect(useIdentity.getState().status).toBe("unavailable");

@@ -1,6 +1,6 @@
 //go:build integration
 
-package handler
+package handler_test
 
 import (
 	"context"
@@ -93,7 +93,7 @@ func TestPanicBeforeSessionCommitCompensatesLogicalSession(t *testing.T) {
 	f := newFixture(t, nil)
 	client := newAPIClient(t, f.public.URL, f.public.URL)
 	client.context()
-	f.server.readyCheck = func(ctx context.Context) error {
+	f.server.ReadyCheck = func(ctx context.Context) error {
 		principal, err := f.server.Auth.Login(ctx, authentication.Credentials{Username: f.admin, Password: f.initial}, authentication.RequestMetadata{RequestID: "panic-compensation", ClientIP: "127.0.0.1"})
 		if err != nil {
 			return err

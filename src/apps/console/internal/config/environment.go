@@ -2,21 +2,8 @@ package config
 
 import "github.com/spf13/viper"
 
-// bindEnvironment 显式登记模块字段、默认值及环境优先级。
+// bindEnvironment 显式登记模块字段及环境优先级；默认值仅在 config.yaml 定义。
 func bindEnvironment(v *viper.Viper) {
-	v.SetDefault("app.name", "console")
-	v.SetDefault("app.host", "0.0.0.0")
-	v.SetDefault("app.port", 8080)
-	v.SetDefault("iam.base_url", "https://127.0.0.1:9081")
-	v.SetDefault("iam.token", "")
-	v.SetDefault("iam.ca_file", "certs/iam.crt")
-	v.SetDefault("logging.level", "info")
-	v.SetDefault("logging.stdout", true)
-	v.SetDefault("logging.file", "logs/console.log")
-	v.SetDefault("logging.max_size_mb", 50)
-	v.SetDefault("logging.max_backups", 5)
-	v.SetDefault("logging.max_age_days", 14)
-	v.SetDefault("logging.compress", true)
 
 	_ = v.BindEnv("app.name", "SPX_CONSOLE_NAME")
 	_ = v.BindEnv("app.host", "SPX_CONSOLE_HOST")

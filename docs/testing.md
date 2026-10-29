@@ -30,7 +30,7 @@
 
 ```sh
 pnpm test:unit
-pnpm contracts:check
+pnpm catalogs:check
 pnpm typecheck
 make build
 pnpm test:integration --docker --race
@@ -39,8 +39,8 @@ pnpm test:e2e --docker
 ```
 
 集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。
-外部Redis连接必须指向专用测试库；集成用例会清理该测试库的IAM限流键，不得提供开发/生产Redis库。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
-备份恢复用例使用隔离PG容器内的pg_dump/pg_restore；外部PG运行该项时需要提供受控容器。
+外部Redis优先专用测试库；当前用户明确允许远程 DB0，测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
+备份恢复用例使用与服务端兼容的 pg_dump/pg_restore；外部PG无需构建应用容器，测试仍创建独立随机数据库。
 
 `--docker`明确授权测试脚本创建独立的临时PG/Redis容器、随机端口和临时凭据，结束后清理自有资源。
 浏览器套件构建真实服务，启动两个IAM及两个Console实例，并通过根启动脚本启动第一个实例及Web。
@@ -56,7 +56,7 @@ Playwright使用单worker、有界条件等待和零重试。禁用trace与视�
 GOTOOLCHAIN=go1.27.3 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
 ```
 
-CI执行相同的分层检查，并检查生成物一致性。CI文件存在不代表远端流水线已经运行；实际验收证据记录在Plan。
+当前执行本地分层检查和业务目录产物一致性检查；不开展部署或远程 CI，实际验收证据记录在 Plan。
 
 ## 环境和稳定性
 
@@ -83,8 +83,8 @@ E2E优先语义定位（role/label等）和用户可见结果，避免内部CSS�
 ## 本地框架检查与人工浏览器验收
 
 ```sh
-pnpm contracts:generate
-pnpm contracts:check
+pnpm catalogs:generate
+pnpm catalogs:check
 pnpm test:unit
 pnpm typecheck
 pnpm lint
@@ -100,3 +100,10 @@ pnpm test:e2e --docker --manual
 `lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.3工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。
 
 manual模式创建相同的独立双副本栈，在权限0600的临时文件中提供仅本次测试的URL/账号，保持运行等待标准输入结束，再精确清理本次资源。不要把此文件、凭据、截图或trace提交到仓库。浏览器操作按AGENTS.md委派到专用代理；桌面/窄屏、双语切换及刷新、主题各选项和CRM V1基准、核心管理流程及console/network都需实际检查，不能以自动化成功代替视觉验收。
+
+
+## 可信入口与生命周期回归
+
+全栈 E2E 直接启动 Next/IAM/Console。可以显式提供 `SPX_TEST_POSTGRES_URL`（允许创建临时库的管理连接）和 `SPX_TEST_REDIS_URL`，或显式 `--docker` 创建测试组件。远程 PG 只创建/删除本次随机临时库；Redis 只删除该库唯一账号/会话的精确键，不执行 FLUSH 或全平台前缀清理，也不删除共享来源桶。共用 DB 时来源桶仍共享计数并按原 TTL 到期，测试账号必须唯一。使用共享组件前需明确确认环境。备份恢复集成另需兼容版本的 pg_dump/pg_restore。
+
+共享 HTTP 生命周期的真实监听测试覆盖后一个绑定失败释放前者、多个监听并行停止接收、默认及自定义 BaseContext 的活跃事件流观察退出取消，并保留自定义上下文值及无强杀退出；执行 `go test -race ./src/packages/go/httpx`。服务自身的资源仍由各 bootstrap 拥有，测试不停止已有进程。定向 Axios 边界测试使用真实本机 HTTP 响应覆盖迟到 401、错误密码及无效写入确认，不以手写 mock 实现代替网络/Axios 行为。

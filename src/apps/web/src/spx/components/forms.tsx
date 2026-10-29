@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
-import { useAction } from "./data";
+import { errorMessageKey } from "../iam/session";
 
 /** FormDialog 只组合对话框与 RHF 生命周期；字段和生成协议类型由业务页面声明。 */
 export function FormDialog<TInput extends FieldValues, TOutput extends FieldValues>({
@@ -38,17 +38,19 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
   children,
   onClose,
   onSubmit,
+  submitDisabled = false,
 }: {
   title: string;
   description?: string;
   schema: z.ZodType<TOutput, TInput>;
   defaultValues: DefaultValues<TInput>;
   children?: (form: UseFormReturn<TInput, unknown, TOutput>) => ReactNode;
+  submitDisabled?: boolean;
   onClose: () => void;
   onSubmit: (values: TOutput) => Promise<unknown>;
 }) {
   const t = useTranslations("Common");
-  const perform = useAction();
+  const errors = useTranslations("Errors");
   const form = useForm<TInput, unknown, TOutput>({ resolver: zodResolver(schema), defaultValues });
   const busy = form.formState.isSubmitting;
   return (
@@ -69,15 +71,20 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
         <form
           noValidate
           onSubmit={form.handleSubmit(async (values) => {
-            const saved = await perform(() => onSubmit(values));
-            if (saved) {
+            form.clearErrors("root");
+            try {
+              await onSubmit(values);
               form.reset();
               onClose();
+            } catch (error) {
+              if (!(error instanceof DOMException && error.name === "AbortError"))
+                form.setError("root", { message: errors(errorMessageKey(error)) });
             }
           })}
         >
           <fieldset disabled={busy} className="flex flex-col gap-5">
             <FieldGroup>{children?.(form)}</FieldGroup>
+            {form.formState.errors.root && <FieldError>{form.formState.errors.root.message}</FieldError>}
             <DialogFooter>
               <Button
                 type="button"
@@ -90,7 +97,7 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
               >
                 {t("cancel")}
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy || submitDisabled}>
                 {busy && <Spinner data-icon="inline-start" />}
                 {t("confirm")}
               </Button>

@@ -1,7 +1,7 @@
 # 应用监听。host为绑定IP，port为整数；公共URL用于Cookie与CSRF来源校验。
 app:
   name: "iam"
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8081
   public_url: "http://127.0.0.1:5173"
   # 只信任明确配置的反向代理网段；多个网段用逗号分隔。
@@ -31,7 +31,7 @@ cache:
 
 # 内部鉴权监听与TLS；相对路径以进程工作目录为准，环境变量可传绝对路径。
 internal:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 9081
   tls_cert_file: "certs/iam.crt"
   tls_key_file: "certs/iam.key"

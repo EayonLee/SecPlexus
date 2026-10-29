@@ -15,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { zLoginBody } from "@/spx/api/iam/zod.gen";
+import { zLoginBody } from "@/spx/api/iam/schemas";
 
 import { LanguageSwitcher } from "../components/language-switcher";
 import { errorMessageKey, initializeSession, signIn, useIdentity } from "../iam/session";

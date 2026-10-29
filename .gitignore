@@ -19,6 +19,7 @@ logs/
 /secrets/
 certs/
 /backups/
+.desloppify/
 *.pid
 *.pid.lock
 *.log

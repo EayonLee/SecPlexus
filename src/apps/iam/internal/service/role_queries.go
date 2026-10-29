@@ -7,12 +7,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // Roles 返回角色和当前用户可执行的操作；实际写入时仍须在 Manage 中重新鉴权。
-func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset int) ([]contract.APIRole, int64, error) {
+func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset int) ([]model.APIRole, int64, error) {
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err := tx.Error
 	if err != nil {
@@ -26,12 +27,12 @@ func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset
 		return nil, 0, err
 	}
 
-	if _, err = s.authorizeTx(ctx, tx, p, contract.PermissionIAMRolesRead, orgID); err != nil {
+	if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesRead, orgID); err != nil {
 		return nil, 0, err
 	}
 
 	canManage := true
-	if _, err = s.authorizeTx(ctx, tx, p, contract.PermissionIAMRolesManage, orgID); err != nil {
+	if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesManage, orgID); err != nil {
 		if errors.Is(err, authorization.ErrDenied) {
 			canManage = false
 		} else {
@@ -85,9 +86,9 @@ func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset
 
 	for i := range items {
 		role := &items[i]
-		role.AllowedActions = []string{contract.PermissionIAMRolesRead}
+		role.AllowedActions = []string{iamclient.PermissionIAMRolesRead}
 		if canManage && role.Kind == "custom" && authorization.CheckDelegation(effective, role.Permissions, role.Permissions, catalog) == nil {
-			role.AllowedActions = append(role.AllowedActions, contract.PermissionIAMRolesManage)
+			role.AllowedActions = append(role.AllowedActions, iamclient.PermissionIAMRolesManage)
 		}
 	}
 

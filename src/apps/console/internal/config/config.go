@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -54,5 +55,13 @@ func Load(filename string) (Config, error) {
 		return c, errors.New("invalid console service name")
 	}
 
+	if err := iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, false); err != nil {
+		return c, err
+	}
 	return c, c.Logging.Validate()
+}
+
+// ValidateServe 校验运行服务的完整凭证，必须在日志与客户端初始化之前调用。
+func (c Config) ValidateServe() error {
+	return iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, true)
 }

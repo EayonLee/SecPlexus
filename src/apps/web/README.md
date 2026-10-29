@@ -30,7 +30,7 @@ pnpm preview
 make stop
 ```
 
-Root startup reads the root `.env`, derives backend addresses, and supplies `SPX_WEB_IAM_PROXY_TARGET` and `SPX_WEB_CONSOLE_PROXY_TARGET` only to the Next server. `SPX_WEB_HOST` and `SPX_WEB_PORT` control the CLI listener. `make dev` applies IAM migrations against configured development infrastructure; it never starts Docker.
+Root startup reads the root `.env`, derives backend addresses, and supplies `SPX_WEB_IAM_PROXY_TARGET` and `SPX_WEB_CONSOLE_PROXY_TARGET` only to the Next server. `SPX_WEB_HOST` controls the bind address; the browser port comes from `SPX_PUBLIC_URL`. `make dev` applies IAM migrations against configured development infrastructure; it never starts Docker.
 
 Root builds also load the root `.env` when present and pass filtered Web configuration. `SPX_PUBLIC_URL` supplies the default public metadata origin, with an optional `NEXT_PUBLIC_APP_URL` override. Process values take precedence. Public values are fixed by the production build, so rebuild after changing them; runtime listener or proxy changes require a restart. A build can run without creating a development `.env`.
 
@@ -40,9 +40,9 @@ Production uses `next build` followed by `next start`, including server componen
 
 ## Contracts and skills
 
-Run `pnpm contracts:generate` from the root after editing authoritative contracts. Generated clients remain in `src/auth/`; they are not part of the upstream template.
+Shared permission/result constants are exported into `src/auth/` by `pnpm catalogs:generate`; `pnpm catalogs:check` verifies them. API calls and Zod consumption models are authored under `src/spx/api/`.
 
-Follow the repository [AGENTS.md](../../../AGENTS.md), project [shadcn Skill](../../../.agents/skills/shadcn/SKILL.md), and [project code standard](../../../.agents/skills/spx-code-standard/SKILL.md). Use shared components and semantic theme tokens; keep UI rules in one place.
+Follow the repository [AGENTS.md](../../../AGENTS.md), project [shadcn Skill](../../../.agents/skills/shadcn/SKILL.md), and [project code standard](../../../.agents/skills/spx-mode/SKILL.md). Use shared components and semantic theme tokens; keep UI rules in one place.
 
 ## Module-owned tooling
 
@@ -81,8 +81,17 @@ Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboar
 
 ## Typed API, query and form boundaries
 
-`openapi-ts.config.ts` generates the public Fetch SDK, Zod validators and TanStack Query options under `src/spx/api/`. Do not edit that folder; the root manifest checks new, changed and removed outputs. `pnpm contracts:check` verifies generation without modifying the workspace. Internal IAM authorization never enters this SDK.
+`src/spx/api/client.ts` uses Axios interceptors for platform results, bounded requests, cancellation and safe errors. `api/iam/` owns native API functions and consumed Zod models; TypeScript types are inferred from those models. Routes and models are synchronized with Go through real HTTP and browser tests. There is no API code-generation prerequisite. Internal IAM authorization remains server-only.
 
-`spx/iam/session.ts` configures the generated clients before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session, identity and organization authorization versions. Logout/organization changes cancel and clear caches. Password login, confirmation, change and reset call the SDK directly and never enter MutationCache or persistent storage.
+`spx/iam/session.ts` configures Axios identity/CSRF behavior before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session, identity and organization authorization versions. Logout/organization changes cancel and clear caches. Password login, confirmation, change and reset call module API functions directly and never enter MutationCache or persistent storage.
 
 IAM lists use Query and the existing TanStack Table with controlled server pagination. RHF uses generated Zod schemas and existing shadcn Field/FieldError controls; business pages declare fields explicitly. There is no string-map form DSL or effect/revision list fetcher. See the [role implementation walkthrough](../../../docs/development/role-management.md).
+
+
+## 可信入口与协议边界
+
+直接使用根 `pnpm dev` / `pnpm preview`。根 `.env` 控制公开 origin 和监听地址，后端地址由实际 Go 配置推导；不需要安装独立入口或配置内部 Web 端口。详见[配置说明](../../../docs/configuration.md#nextjs-web)。
+
+本机链路为浏览器 → Next → IAM/Console。Next 不透传客户端来源头；当前来源限流按代理连接来源计数，多人公网真实来源隔离尚未实现。Cookie/CSRF、Allow/Retry-After、多 Set-Cookie 与 SSE 保留各自协议，IAM API 不绕行 Console。
+
+Axios 负责传输、JSON、超时和取消，平台拦截器按模块 API 声明核对成功状态和 Zod 消费模型；204 校验空正文；HTML 或未声明成功状态不能触发 Mutation 成功。身份范围由会话/授权版本和能力决定，变更时统一取消请求并清缓存，二次认证开始及成功切换均隔离旧请求，错误密码保留有效身份。

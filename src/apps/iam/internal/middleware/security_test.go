@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/csrf"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
-	"github.com/EayonLee/SecPlexus/src/contracts/common"
+	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // TestOriginAndCSRFBoundary 用真实 CSRF Cookie 和令牌验证来源边界，不跳过令牌校验。
@@ -65,7 +65,7 @@ func TestOriginAndCSRFBoundary(t *testing.T) {
 			if response.Code != tc.status {
 				t.Fatalf("预期 %d，实际 %d", tc.status, response.Code)
 			}
-			if tc.status == http.StatusForbidden && !strings.Contains(response.Body.String(), string(common.CodeOriginInvalid)) {
+			if tc.status == http.StatusForbidden && !strings.Contains(response.Body.String(), string(result.CodeOriginInvalid)) {
 				t.Fatal("不允许的来源应返回统一的来源错误码")
 			}
 
@@ -76,7 +76,7 @@ func TestOriginAndCSRFBoundary(t *testing.T) {
 			if withoutToken.Code != http.StatusForbidden {
 				t.Fatal("来源兼容不能绕过 CSRF 令牌校验")
 			}
-			if tc.status == http.StatusNoContent && !strings.Contains(withoutToken.Body.String(), string(common.CodeCSRFInvalid)) {
+			if tc.status == http.StatusNoContent && !strings.Contains(withoutToken.Body.String(), string(result.CodeCSRFInvalid)) {
 				t.Fatal("允许来源缺少令牌时应返回统一的 CSRF 错误码")
 			}
 		})

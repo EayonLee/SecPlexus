@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 var (
@@ -16,16 +16,16 @@ var (
 
 // Snapshot 包含计算授权结果所需的身份与组织状态。
 type Snapshot struct {
-	Principal          contract.Principal // 已验证的身份投影。
-	OrganizationID     string             // 本次计算的组织范围。
-	OrganizationActive bool               // 组织是否有效。
-	MembershipActive   bool               // 当前用户的组织成员关系是否有效。
-	Permissions        []string           // 有效权限键集合。
+	Principal          iamclient.Principal // 已验证的身份投影。
+	OrganizationID     string              // 本次计算的组织范围。
+	OrganizationActive bool                // 组织是否有效。
+	MembershipActive   bool                // 当前用户的组织成员关系是否有效。
+	Permissions        []string            // 有效权限键集合。
 }
 
 // Evaluate 只返回能力授权范围；业务服务仍需校验实际资源所属组织、状态和审批要求。
-func Evaluate(s Snapshot, p contract.Permission, orgID string, now time.Time, recentWindow time.Duration) (contract.AuthorizedScope, error) {
-	denied := contract.AuthorizedScope{}
+func Evaluate(s Snapshot, p Permission, orgID string, now time.Time, recentWindow time.Duration) (iamclient.AuthorizedScope, error) {
+	denied := iamclient.AuthorizedScope{}
 
 	if p.Status != "active" && p.Status != "deprecated" {
 		return denied, ErrDenied
@@ -47,7 +47,7 @@ func Evaluate(s Snapshot, p contract.Permission, orgID string, now time.Time, re
 		if orgID != "" || !s.Principal.IsSuperAdmin {
 			return denied, ErrDenied
 		}
-		return contract.AuthorizedScope{Kind: "platform"}, nil
+		return iamclient.AuthorizedScope{Kind: "platform"}, nil
 	case "organization":
 		if orgID == "" || orgID != s.OrganizationID || !s.OrganizationActive {
 			return denied, ErrDenied
@@ -55,7 +55,7 @@ func Evaluate(s Snapshot, p contract.Permission, orgID string, now time.Time, re
 		if !s.Principal.IsSuperAdmin && (!s.MembershipActive || !slices.Contains(s.Permissions, p.Key)) {
 			return denied, ErrDenied
 		}
-		return contract.AuthorizedScope{Kind: "organization",
+		return iamclient.AuthorizedScope{Kind: "organization",
 			OrgID: orgID}, nil
 	default:
 		return denied, ErrDenied
@@ -63,7 +63,7 @@ func Evaluate(s Snapshot, p contract.Permission, orgID string, now time.Time, re
 }
 
 // CheckDelegation 同时校验原有和拟设置的权限，防止低权限操作者修改高权限角色。
-func CheckDelegation(effective []string, existing, candidate []string, catalog []contract.Permission) error {
+func CheckDelegation(effective []string, existing, candidate []string, catalog []Permission) error {
 	availableExisting, availableNew := map[string]bool{}, map[string]bool{}
 	for _, p := range catalog {
 		if p.Scope != "organization" || !p.Delegable || !slices.Contains(effective, p.Key) {

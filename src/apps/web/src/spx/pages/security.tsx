@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useFormatter, useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -15,13 +15,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { listSessionsQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
-import { listSessions, revokeSession } from "@/spx/api/iam/sdk.gen";
-import { zChangePasswordBody, zReauthenticateBody } from "@/spx/api/iam/zod.gen";
+import { listSessions, revokeSession } from "@/spx/api/iam/auth";
+import { zChangePasswordBody, zReauthenticateBody } from "@/spx/api/iam/schemas";
 
 import { useAction } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
-import { changePassword, dataOf, mutationHeaders, reauthenticate, signOut, useIdentity } from "../iam/session";
+import { identityScope, queryClient } from "../iam/query";
+import { changePassword, reauthenticate, signOut, useIdentity } from "../iam/session";
 
 export function SecurityPage() {
   const perform = useAction();
@@ -45,8 +45,12 @@ export function SecurityPage() {
   const busy = passwordForm.formState.isSubmitting;
   const [confirming, setConfirming] = useState(false);
   const devices = useQuery({
-    queryKey: [...listSessionsQueryKey(), auth.principal?.session_id, auth.principal?.auth_version],
-    queryFn: ({ signal }) => dataOf(listSessions({ signal, throwOnError: true })),
+    queryKey: ["iam", "sessions", ...identityScope(auth)],
+    queryFn: ({ signal }) => listSessions(signal),
+  });
+  const revoke = useMutation({
+    mutationFn: revokeSession,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["iam", "sessions"] }),
   });
   const sessions = devices.data?.items ?? [];
   return (
@@ -177,14 +181,10 @@ export function SecurityPage() {
                       variant="ghost"
                       onClick={() =>
                         void perform(async () => {
-                          await revokeSession({
-                            throwOnError: true,
-                            path: { id: session.id },
-                            headers: mutationHeaders,
-                          });
+                          await revoke.mutateAsync(session.id);
                           if (session.current) {
                             window.location.assign("/login");
-                          } else void devices.refetch();
+                          }
                         })
                       }
                     >

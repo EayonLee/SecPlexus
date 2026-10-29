@@ -50,10 +50,10 @@ PG是身份、角色、授权、Session真源；Redis只存分布式限流等短
 | IAM审计 | iam.audit.read | 读取本组织审计 |
 | Console案件 | console.cases.read / update / respond / export | 读、编辑、响应处置、导出独立授权，写不隐含读或导出 |
 
-这是命名示例，不声称尚未实现的Console能力已可授予。只有真实落地的模块动作进入有效目录。权限目录包含模块、资源类型、动作、说明、风险、是否允许组织内委派、近期认证要求；权限key不包含API版本、角色名或菜单ID。当前15个动作见`src/contracts/iam/permissions.json`，其中7个平台动作、8个组织动作。
+这是命名示例，不声称尚未实现的Console能力已可授予。只有真实落地的模块动作进入有效目录。权限目录包含模块、资源类型、动作、说明、风险、是否允许组织内委派、近期认证要求；权限key不包含API版本、角色名或菜单ID。当前15个动作见`src/apps/iam/internal/authorization/permissions.json`，其中7个平台动作、8个组织动作。
 
 - **模块开发者定义能做什么，组织管理员决定谁能做。** 用户可创建/改名/组合角色，不能凭空创建后端不存在的权限key。
-- 权限目录在`src/contracts/`中以版本化清单维护，迁移同步到IAM目录表；存储表是运行时投影，禁止管理API修改目录语义。每个业务路由引用生成/校验的action常量，CI检查引用和目录一致；不是每个服务各写一张ROLE_PERMISSIONS表。
+- 权限目录在 IAM `internal/authorization/` 中以版本化清单维护，迁移同步到IAM目录表；存储表是运行时投影，禁止管理API修改目录语义。每个业务路由引用生成/校验的action常量，本地业务目录检查及访问测试核对引用和目录；不是每个服务各写一张ROLE_PERMISSIONS表。
 - 自定义角色授权关系只有PG一份。普通成员的决策仅从当前有效绑定/有效角色/精确permission key读取，不存在静态兜底、按角色名称特判或从Cookie取权限。
 - org_admin持有本版全部已实现且有效的organization权限，完整key清单由目录种子显式写入系统角色grants；它可以包含后续新增组织管理能力，但仅在版本升级中显式更新。自定义角色默认不获得新增权限。没有用户可写的`*`通配授权。
 - 平台超级管理员标识与“能否授予org_admin”是受保护管理行为，不把这些能力开放为可勾选的自定义组织权限。用户创建一个叫“超级管理员”的角色也不能改变此规则；保留系统角色code不能复用。
@@ -101,11 +101,11 @@ flowchart TD
 
 ### 3.1 复用库，但不扩成身份产品
 
-Gin承接全部公开和内部HTTP入口，公开路由由OpenAPI生成；内部authorize使用生成的strict server。中间件按请求标识/受控Recovery → IAM会话提交屏障 → 统一错误 → CSRF/Origin → 来源限流 → OpenAPI验证 → 生成绑定器/Handler排序。内部监听只挂内部契约，要求TLS、服务凭证和action白名单，不暴露给Web代理。
+Gin承接全部公开和内部HTTP入口，路由在 internal/router 原生注册。中间件负责请求标识、受控Recovery、IAM会话提交屏障、统一错误、CSRF/Origin、限流及输入边界；Handler单次绑定模块DTO。内部监听只挂内部契约，要求TLS、服务凭证和action白名单，不暴露给Web代理。
 
 登录和二次认证使用`authentication.Authenticator`的类型化用例。Argon2id负责密码哈希与比较，SCS负责Token、编码、Cookie及PG store；gorilla/csrf负责CSRF机制。IAM保留失败锁定/审计、逻辑会话注册表、身份版本和撤销规则。ulule/limiter的Redis Store负责双桶原子计数及TTL，项目只维护摘要键与策略；故障503并拒绝放行，计数操作禁用自动重试。
 
-Gin使用原生路由、代理IP、错误收集及Recovery，不再保留Chi或Authboss适配栈。HTTP Handler只绑定已由OpenAPI验证的值，再调用业务用例；不重新构造登录JSON请求。SCS的LoadAndSave不能直接保证提交失败后正文不继续写出，因此仅IAM非流式响应保留提交屏障：缓存失败或panic时不发送认证Cookie/成功正文，并补偿撤销新逻辑会话。Console SSE不经过此屏障。
+Gin使用原生路由、代理IP、错误收集及Recovery，不再保留Chi或Authboss适配栈。HTTP Handler通过Gin Binding/validator绑定并校验结构，再调用业务用例；不重新构造登录JSON请求。SCS的LoadAndSave不能直接保证提交失败后正文不继续写出，因此仅IAM非流式响应保留提交屏障：缓存失败或panic时不发送认证Cookie/成功正文，并补偿撤销新逻辑会话。Console SSE不经过此屏障。
 
 版本以根`go.mod/go.sum`和[框架能力记录](../../../docs/plans/gin-service-refactor/framework-capabilities.md)为准。GORM的泛型投影、回调事务、批量关联与错误翻译和现有pgx池共用连接；Goose Provider执行显式迁移。`serve`和`status`先只读确认版本表已初始化，不因状态查询隐式建表。密码保存含参数的PHC格式，比较前限制输入及哈希参数资源。
 
@@ -238,7 +238,7 @@ flowchart TD
 
 ## 6. API与Web接入
 
-最终以OpenAPI为唯一契约。公开API以/api/v1/iam为下表根，内部路径另列；普通响应统一为 `{code,message,data,request_id}`，失败 data 为 null。身份失效401、授权拒绝403、冲突409、限流429、依赖故障503；限流含Retry-After。登录API不接受返回地址字段；前端只使用自身固定落点。
+HTTP 行为以原生 Go DTO、Gin 路由和用例为准，由真实 HTTP 测试核对消费者。公开API以/api/v1/iam为下表根，内部路径另列；普通响应统一为 `{code,message,data,request_id}`，失败 data 为 null。身份失效401、授权拒绝403、冲突409、限流429、依赖故障503；限流含Retry-After。登录API不接受返回地址字段；前端只使用自身固定落点。
 
 | 路径/动作 | 边界 |
 |---|---|
@@ -355,10 +355,10 @@ src/apps/iam/
     testutil/                 # 集成标签下的隔离测试数据库
 ```
 
-[协议源](../../contracts/iam/openapi.source.json)定义公开/内部 HTTP 契约，权限清单同目录；
-`pnpm contracts:generate` 生成独立 OpenAPI 文档、Go/TS 类型、权限及结果码常量。公共 Result 和错误码只在 `src/contracts/common/` 维护。
+[模块 DTO](internal/model/http.go)与原生 Gin 路由/处理器定义 HTTP 行为；权限业务目录归 `internal/authorization`。公共 Result 和错误码归 `src/packages/go/result`；真实共用的内部授权类型归 `src/packages/go/iamclient`。
+`pnpm catalogs:generate` 仅导出跨语言权限/结果码常量，`pnpm catalogs:check` 只读检查产物一致性。Web 使用 Axios 与实际消费的 Zod 模型，字段变化通过 HTTP/边界/E2E 测试同步。
 Console复用[窄客户端](../../packages/go/iamclient/client.go)，不共享IAM仓储或密码实现。
-Python调用方以后按同一契约生成客户端，当前没有空SDK。
+尚无实际 Python 调用方，不预建客户端。
 
 核心设计模式及目的：协议边界与类型化认证用例分离；Application Service集中事务/管理员不变量；中央Policy Decision与路由执行点分离；关系模型组合权限而不是角色继承；Repository 使用 GORM、必要的参数化 SQL、org_id 和真实 FK；乐观锁防编辑覆盖。未来换求值实现不改每个接口，但不提前引入Casbin/OpenFGA等第二策略真源。
 
@@ -398,7 +398,7 @@ go run ./src/apps/iam/cmd revoke-after-restore --config src/apps/iam/config.yaml
 
 ## 统一响应与资源归属
 
-普通 JSON API 使用 `{code, message, data, request_id}`，HTTP 状态仍表示真实成功/失败。通过 `result.Success`、`result.Created`、`result.NoContent`、`result.Fail` 写入，业务代码不拼状态/消息；仅需特定公开提示时使用 `FailWithMessage`。Result 和稳定结果码由公共契约生成；204、SSE 等按各自协议处理。
+普通 JSON API 使用 `{code, message, data, request_id}`，HTTP 状态仍表示真实成功/失败。通过 `result.Success`、`result.Created`、`result.NoContent`、`result.Fail` 写入，业务代码不拼状态/消息；仅需特定公开提示时使用 `FailWithMessage`。Result 由公共 Go 类型定义，稳定结果码从公共目录派生；204、SSE 等按各自协议处理。
 
 config 只处理文件、环境占位、类型和校验。bootstrap 创建并释放数据库、缓存和 HTTP 服务；repository.NewStore 的 database/sql 适配复用 pgxpool，Store 关闭适配，启动装配关闭池。SCS 使用同一个池但独立提交，业务修改与审计在同一 GORM 事务内；会话提交失败不发送成功 Cookie，失败登录会撤销逻辑会话。普通 API 缓冲位于 IAM 中间件内，Console SSE 不经过该缓冲。
 
@@ -413,5 +413,5 @@ Web采用Next.js/shadcn，统一组件与样式基准。真实登录及管理页
 ## 框架重构后的开发入口
 
 - [Cobra命令](cmd/main.go)：`serve`、`migrate`、`status`、`maintain`、`revoke-after-restore`、`reset-password`。`--print-endpoints`只加载配置，不访问数据库/Redis。
-- [Gin公开入口](internal/handler/server.go)与[路由注册](internal/router/routes.go)：路由来自契约，业务错误统一进入Gin错误链；生成文件不能手改。
-- [角色开发贯通示例](../../../docs/development/role-management.md)：从协议、事务、仓储到生成SDK、Query/RHF和验收。
+- [Gin公开入口](internal/handler/server.go)与[路由注册](internal/router/routes.go)：路由显式注册，业务错误统一进入 Gin 错误链；处理器注释派生文档。
+- [角色开发贯通示例](../../../docs/development/role-management.md)：从协议、事务、仓储到Axios/Zod、Query/RHF和验收。

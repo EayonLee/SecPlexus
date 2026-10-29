@@ -8,12 +8,12 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 )
 
 // OrganizationJSON 读取组织的公开字段投影。
 func OrganizationJSON(ctx context.Context, db *gorm.DB, org string, data *[]byte) error {
-	var item contract.APIOrganization
+	var item model.APIOrganization
 	if err := db.WithContext(ctx).Table("iam.organizations").Where("id = ?", org).Take(&item).Error; err != nil {
 		return err
 	}
@@ -25,7 +25,7 @@ func OrganizationJSON(ctx context.Context, db *gorm.DB, org string, data *[]byte
 
 // UserJSON 读取用户的公开字段投影。
 func UserJSON(ctx context.Context, db *gorm.DB, id string, data *[]byte) error {
-	var item contract.APIUser
+	var item model.APIUser
 	if err := db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Take(&item).Error; err != nil {
 		return err
 	}

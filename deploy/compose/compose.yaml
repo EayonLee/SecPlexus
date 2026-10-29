@@ -122,7 +122,7 @@ services:
     environment:
       SPX_WEB_IAM_PROXY_TARGET: http://iam:${SPX_IAM_PORT:-8081}
       SPX_WEB_CONSOLE_PROXY_TARGET: http://console:${SPX_CONSOLE_PORT:-8080}
-    ports: ["127.0.0.1:${SPX_WEB_PORT:-5173}:8080"]
+    ports: ["127.0.0.1:${SPX_COMPOSE_WEB_PORT:?Start through pnpm compose:up}:8080"]
     depends_on: { iam: { condition: service_healthy }, console: { condition: service_started } }
     mem_limit: 768m
     logging: *logging

@@ -13,7 +13,7 @@ Console 是安全运营业务后端，承载自身业务及有实际需要的跨
 | 三队列工作台、运营查询和必要的跨域只读汇总 | Console；通过公开契约或明确的数据投影取得其他模块信息，不查询私表 |
 | 数据接入、归一化、关联计算与 AI 执行 | 对应处理模块；Console 只在自身业务需要时调用其能力 |
 | 长期工作流、审批状态机与高危执行 | SOAR；Console 展示、提交操作，不复制最终状态和执行规则 |
-| 同源路由与通用反向代理 | HTTP 入口；当前由 Next 服务端提供，不以 Console 作为所有模块的强制中转站 |
+| 同源路由与通用反向代理 | HTTP 入口；本机 Next 直接提供页面和服务端窄转发；不接收客户端任意来源头，不以 Console 作为所有模块的强制中转站 |
 
 新增 Console 接口必须实现本域资源的业务行为，或完成一个实际需要的运营查询汇总。其他模块已有接口不因页面归属而在 Console 重写 DTO、校验、CRUD 和权限规则。单纯转发按模块前缀统一路由；真正的聚合接口形成独立的运营视图。跨域修改仍交给资源所属模块做最终校验和事务提交，不在 Console 维护第二份状态。
 
@@ -39,7 +39,7 @@ sequenceDiagram
 - `internal/config`：独立YAML配置及环境变量覆盖。
 - `internal/handler`：声明路由所需action、解析组织并检查结构化scope；不使用浏览器的身份或角色头。
 - [`iamclient`](../../packages/go/iamclient/client.go)：复用的IAM客户端，固定内部API路径、TLS证书校验、有界请求、错误契约；不接受浏览器指定所需action。
-- [`Console OpenAPI`](../../contracts/console/openapi.json)及[内部IAM契约](../../contracts/iam/openapi.json)：生成的Go/TS类型随契约更新。
+- [原生路由](internal/router/routes.go)、[响应模型](internal/handler/models.go)及[内部 IAM 客户端](../../packages/go/iamclient/client.go)定义实际边界；内部授权不进入 Web。
 
 ## API
 
@@ -67,7 +67,7 @@ go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 
 ### 启动与路由代码
 
-`cmd/main.go` 读取配置，`internal/bootstrap/serve.go` 初始化 IAM 客户端和 HTTP 服务，并负责服务关闭。Gin接口统一在 `internal/router/routes.go` 注册，普通路由来自生成契约，SSE使用原生SSEvent/Writer.Flush，处理函数通过显式依赖访问 IAM；配置加载器负责环境变量解析。
+`cmd/main.go` 读取配置，`internal/bootstrap/serve.go` 初始化 IAM 客户端和 HTTP 服务，并负责服务关闭。Gin接口统一在 `internal/router/routes.go` 注册，普通路由显式注册，SSE使用原生SSEvent/Writer.Flush，处理函数通过显式依赖访问 IAM；配置加载器负责环境变量解析。
 
 
 普通接口通过 `src/packages/go/result` 返回统一 Result，SSE 直接使用流协议。公共请求标识、日志和异常恢复在共享 HTTP middleware；组织访问由 IAM 内部客户端校验，不读取 IAM 私表。config 只解析/校验文件，bootstrap 按配置创建客户端并负责关闭空闲连接。Console 没有实际 DB/cache 依赖，不增加占位配置。

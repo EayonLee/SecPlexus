@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 )
 
 // LockManagement 取得低频管理写入的事务锁，避免管理员和授权竞态。
@@ -32,8 +32,8 @@ func MemberPreviewState(ctx context.Context, db *gorm.DB, orgID string, membersh
 }
 
 // ReadPermission 读取权限定义和近期认证约束。
-func ReadPermission(ctx context.Context, db *gorm.DB, action string) (contract.Permission, error) {
-	var permission contract.Permission
+func ReadPermission(ctx context.Context, db *gorm.DB, action string) (authorization.Permission, error) {
+	var permission authorization.Permission
 	err := db.WithContext(ctx).Table("iam.permissions").Where("key = ?", action).Take(&permission).Error
 	return permission, err
 }

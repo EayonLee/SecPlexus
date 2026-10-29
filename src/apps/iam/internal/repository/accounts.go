@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/aarondl/opt/omit"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -28,14 +29,18 @@ func InsertPassword(ctx context.Context, db *gorm.DB, id uuid.UUID, hash string)
 }
 
 // UpdateUser 更新资料和状态，同时增加身份版本。
-func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName string, email string, status string) error {
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
+func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName string, email omit.Val[string], status string) error {
+	updates := map[string]any{
 		"display_name": displayName,
-		"email":        gorm.Expr("NULLIF(?, '')", email),
 		"status":       status,
 		"auth_version": gorm.Expr("auth_version+1"),
 		"updated_at":   gorm.Expr("now()"),
-	}).Error
+	}
+	if email.IsValue() {
+		updates["email"] = gorm.Expr("NULLIF(?, '')", email.MustGet())
+	}
+
+	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(updates).Error
 }
 
 // SetSuperAdmin 更新管理员标记和身份版本。

@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 )
 
 // listJSON 复用模块内固定查询的分页与总数计算，所有外部值均使用绑定参数。
@@ -55,7 +55,7 @@ func ListUsers(ctx context.Context, db *gorm.DB, limit, offset int, query string
 		return nil, err
 	}
 
-	items, err := gorm.G[contract.APIUser](db).Table("iam.users").Select("id,username,display_name,email,status,is_super_admin,auth_version").Where("? = '' OR username_normalized LIKE lower(?)||'%' OR display_name ILIKE '%'||?||'%'", query, query, query).Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	items, err := gorm.G[model.APIUser](db).Table("iam.users").Select("id,username,display_name,email,status,is_super_admin,auth_version").Where("? = '' OR username_normalized LIKE lower(?)||'%' OR display_name ILIKE '%'||?||'%'", query, query, query).Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func ListOrganizations(ctx context.Context, db *gorm.DB, limit, offset int) (map
 		return nil, err
 	}
 
-	items, err := gorm.G[contract.APIOrganization](db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	items, err := gorm.G[model.APIOrganization](db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
 	if err != nil {
 		return nil, err
 	}

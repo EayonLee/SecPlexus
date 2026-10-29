@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // ListUsers 校验当前身份的范围后读取业务列表。
 func (s *Service) ListUsers(ctx context.Context, limit, offset int, query string) (map[string]any, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMPlatformUsersRead, ""); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMPlatformUsersRead, ""); err != nil {
 		return nil, err
 	}
 
@@ -18,7 +18,7 @@ func (s *Service) ListUsers(ctx context.Context, limit, offset int, query string
 
 // ListOrganizations 校验当前身份的范围后读取业务列表。
 func (s *Service) ListOrganizations(ctx context.Context, limit, offset int) (map[string]any, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMPlatformOrganizationsRead, ""); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMPlatformOrganizationsRead, ""); err != nil {
 		return nil, err
 	}
 
@@ -27,7 +27,7 @@ func (s *Service) ListOrganizations(ctx context.Context, limit, offset int) (map
 
 // ListMembers 校验当前身份的范围后读取业务列表。
 func (s *Service) ListMembers(ctx context.Context, limit, offset int, orgID string) (map[string]any, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMMembersRead, orgID); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMMembersRead, orgID); err != nil {
 		return nil, err
 	}
 
@@ -36,11 +36,11 @@ func (s *Service) ListMembers(ctx context.Context, limit, offset int, orgID stri
 
 // ListRoleMembers 校验当前身份的范围后读取业务列表。
 func (s *Service) ListRoleMembers(ctx context.Context, limit, offset int, orgID, roleID string) (map[string]any, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMMembersRead, orgID); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMMembersRead, orgID); err != nil {
 		return nil, err
 	}
 
-	if _, err := s.Authorize(ctx, contract.PermissionIAMRolesRead, orgID); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead, orgID); err != nil {
 		return nil, err
 	}
 
@@ -49,10 +49,10 @@ func (s *Service) ListRoleMembers(ctx context.Context, limit, offset int, orgID,
 
 // ListAuditEvents 区分平台审计能力与组织审计能力，组织参数不替代授权。
 func (s *Service) ListAuditEvents(ctx context.Context, orgID string, platform bool, limit, offset int) (map[string]any, error) {
-	action := contract.PermissionIAMAuditRead
+	action := iamclient.PermissionIAMAuditRead
 	scope := orgID
 	if platform {
-		action = contract.PermissionIAMPlatformAuditRead
+		action = iamclient.PermissionIAMPlatformAuditRead
 		scope = ""
 	}
 
@@ -65,7 +65,7 @@ func (s *Service) ListAuditEvents(ctx context.Context, orgID string, platform bo
 
 // User 查询前校验平台用户读取权限。
 func (s *Service) User(ctx context.Context, id string) ([]byte, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMPlatformUsersRead, ""); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMPlatformUsersRead, ""); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +76,7 @@ func (s *Service) User(ctx context.Context, id string) ([]byte, error) {
 
 // Organization 查询前校验目标组织读取权限。
 func (s *Service) Organization(ctx context.Context, orgID string) ([]byte, error) {
-	if _, err := s.Authorize(ctx, contract.PermissionIAMOrganizationsRead, orgID); err != nil {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMOrganizationsRead, orgID); err != nil {
 		return nil, err
 	}
 

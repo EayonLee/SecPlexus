@@ -9,7 +9,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
@@ -24,12 +24,12 @@ func (s *Service) CreateOrganization(ctx context.Context, input OrganizationInpu
 	id := uuid.New()
 	err = s.Manage(
 		ctx,
-		contract.PermissionIAMPlatformOrganizationsManage,
+		iamclient.PermissionIAMPlatformOrganizationsManage,
 		"",
 		requestID,
 		"organization",
 		&id,
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			user, err := repository.NewQueries(tx).LockUser(ctx, admin)
 			if err != nil {
 				return err
@@ -53,16 +53,13 @@ func (s *Service) CreateOrganization(ctx context.Context, input OrganizationInpu
 
 // UpdateOrganization 更新组织信息。
 func (s *Service) UpdateOrganization(ctx context.Context, orgID string, input OrganizationUpdate, platform bool, requestID string) error {
-	if !validName(input.Name) || input.AuthzVersion < 1 {
+	if !validName(input.Name) {
 		return repository.ErrInvalid
 	}
 
-	action, targetOrg := contract.PermissionIAMOrganizationsManage, orgID
+	action, targetOrg := iamclient.PermissionIAMOrganizationsManage, orgID
 	if platform {
-		action, targetOrg = contract.PermissionIAMPlatformOrganizationsManage, ""
-		if input.Status != "active" && input.Status != "suspended" {
-			return repository.ErrInvalid
-		}
+		action, targetOrg = iamclient.PermissionIAMPlatformOrganizationsManage, ""
 	} else if input.Status != "" {
 		return authorization.ErrDenied
 	}
@@ -74,7 +71,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, orgID string, input Or
 		requestID,
 		"organization",
 		uuidPointer(orgID),
-		func(tx *gorm.DB, p contract.Principal, metadata map[string]any) error {
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			var version int64
 			if err := repository.LockOrganizationVersion(ctx, tx, orgID, &version); err != nil {
 				return err

@@ -47,6 +47,7 @@ async function proxy(request: Request) {
       "cache-control",
       "vary",
       "retry-after",
+      "allow",
       "x-request-id",
       "content-disposition",
     ]) {

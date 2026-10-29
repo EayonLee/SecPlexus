@@ -3,26 +3,34 @@ package management
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
-
-	contract "github.com/EayonLee/SecPlexus/src/contracts/iam"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // ListOrganizationAuditEvents 读取当前组织的审计列表。
-func (s *Handler) ListOrganizationAuditEvents(c *gin.Context, orgId string, params router.ListOrganizationAuditEventsParams) {
-	limit, offset := pagination(params.Limit, params.Offset)
+func (s *Handler) ListOrganizationAuditEvents(c *gin.Context) {
+	orgId := c.Param("org_id")
+	var params model.ListQuery
+	if err := c.ShouldBindQuery(&params); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
+	limit, offset := params.Limit, params.Offset
 	s.auditEvents(c, orgId, false, limit, offset)
 }
 
 // ListAuditEvents 读取平台管理员可见的审计范围。
-func (s *Handler) ListAuditEvents(c *gin.Context, params router.ListAuditEventsParams) {
-	orgID := ""
-	if params.OrgId != nil {
-		orgID = *params.OrgId
+func (s *Handler) ListAuditEvents(c *gin.Context) {
+	var params model.ListQuery
+	if err := c.ShouldBindQuery(&params); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
 	}
-	limit, offset := pagination(params.Limit, params.Offset)
+	orgID := params.OrgID
+	limit, offset := params.Limit, params.Offset
 	s.auditEvents(c, orgID, true, limit, offset)
 }
 
@@ -44,7 +52,7 @@ func (s *Handler) auditEvents(c *gin.Context, orgID string, platform bool, limit
 func (s *Handler) SecurityOverview(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), contract.PermissionIAMPlatformSecurityRead, ""); err != nil {
+	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformSecurityRead, ""); err != nil {
 		httpx.Reject(c, err)
 		return
 	}

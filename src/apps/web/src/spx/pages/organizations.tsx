@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 
+import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Controller } from "react-hook-form";
 
@@ -9,23 +10,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { listOrganizationsQueryKey } from "@/spx/api/iam/@tanstack/react-query.gen";
-import { createOrganization, listOrganizations, updateOrganization } from "@/spx/api/iam/sdk.gen";
-import type { ApiOrganization } from "@/spx/api/iam/types.gen";
-import { zCreateOrganizationBody, zUpdateOrganizationBody } from "@/spx/api/iam/zod.gen";
+import { createOrganization, listOrganizations, updateOrganization } from "@/spx/api/iam/management";
+import type { ApiOrganization } from "@/spx/api/iam/schemas";
+import { zCreateOrganizationBody, zUpdateOrganizationBody } from "@/spx/api/iam/schemas";
 
 import { Can } from "../components/access";
 import { DataTable, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
 import { UserPicker } from "../components/user-picker";
-import { dataOf, mutationHeaders, refreshIdentity } from "../iam/session";
+import { managementChanged } from "../iam/management";
 
 export function OrganizationsPage() {
   const t = useTranslations("Management");
 
-  const state = usePagedQuery<ApiOrganization>(listOrganizationsQueryKey({}), (query, signal) =>
-    dataOf(listOrganizations({ query, signal, throwOnError: true })),
-  );
+  const state = usePagedQuery<ApiOrganization>(["iam", "organizations"], listOrganizations);
+  const create = useMutation({
+    mutationFn: createOrganization,
+    onSuccess: managementChanged,
+  });
+  const edit = useMutation({
+    mutationFn: updateOrganization,
+    onSuccess: managementChanged,
+  });
   const [dialog, setDialog] = useState<"create" | ApiOrganization>();
 
   return (
@@ -67,9 +73,7 @@ export function OrganizationsPage() {
           defaultValues={{ name: "", slug: "", admin_user_id: "" }}
           onClose={() => setDialog(undefined)}
           onSubmit={async (body) => {
-            await createOrganization({ body, headers: mutationHeaders, throwOnError: true });
-            state.reload();
-            await refreshIdentity();
+            await create.mutateAsync(body);
           }}
         >
           {(form) => (
@@ -104,9 +108,7 @@ export function OrganizationsPage() {
           defaultValues={{ name: dialog.name, status: dialog.status, authz_version: dialog.authz_version }}
           onClose={() => setDialog(undefined)}
           onSubmit={async (body) => {
-            await updateOrganization({ path: { id: dialog.id }, body, headers: mutationHeaders, throwOnError: true });
-            state.reload();
-            await refreshIdentity();
+            await edit.mutateAsync({ id: dialog.id, body });
           }}
         >
           {(form) => (

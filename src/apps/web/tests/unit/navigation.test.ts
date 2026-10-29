@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import type { ApiMe } from "../../src/spx/api/iam/schemas";
 import { organizationFromPath, visibleManagementPages } from "../../src/spx/iam/navigation";
-import type { ApiMe } from "../../src/spx/api/iam/types.gen";
 
 const identity: ApiMe = {
   principal: {

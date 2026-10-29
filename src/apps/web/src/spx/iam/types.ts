@@ -1,4 +1,4 @@
-import type { ApiMe } from "@/spx/api/iam/types.gen";
+import type { ApiMe } from "@/spx/api/iam/schemas";
 
 export type AuthStatus = "unknown" | "anonymous" | "authenticated" | "unavailable";
 export interface AuthState extends Omit<ApiMe, "principal"> {
