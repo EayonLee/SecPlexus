@@ -27,6 +27,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (

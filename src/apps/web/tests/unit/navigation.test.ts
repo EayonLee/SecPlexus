@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { ApiMe } from "../../src/spx/api/iam/schemas";
-import { organizationFromPath, visibleManagementPages } from "../../src/spx/iam/navigation";
+import { organizationFromPath, visibleManagementPages, visibleManagementSections } from "../../src/spx/iam/navigation";
 
 const identity: ApiMe = {
   principal: {
@@ -23,7 +23,7 @@ describe("organization and management navigation", () => {
   test("an explicit organization in the URL owns the tab context", () => {
     expect(organizationFromPath("/management/orgs/two/members", "?org_id=one")).toBe("two");
     expect(organizationFromPath("/dashboard", "?org_id=one")).toBe("one");
-    expect(organizationFromPath("/account/security", "")).toBeUndefined();
+    expect(organizationFromPath("/settings/account", "")).toBeUndefined();
   });
   test("organization actions do not grant platform navigation", () => {
     expect(visibleManagementPages(identity).map((page) => page.id)).toEqual(["members"]);
@@ -34,4 +34,21 @@ describe("organization and management navigation", () => {
       ),
     ).toEqual(["users"]);
   });
+});
+
+test("management consolidates tasks without granting inaccessible tabs", () => {
+  const admin = {
+    ...identity,
+    capabilities: ["iam.members.read", "iam.roles.read", "iam.organizations.read", "iam.audit.read"],
+    platform_capabilities: [
+      "iam.platform.users.read",
+      "iam.platform.organizations.read",
+      "iam.platform.audit.read",
+      "iam.platform.security.read",
+    ],
+  };
+  expect(visibleManagementSections(admin).map((section) => section.id)).toEqual(["people", "organization", "activity"]);
+  expect(visibleManagementPages(admin).map((page) => page.id)).not.toContain("security");
+  expect(visibleManagementSections(identity).map((section) => section.id)).toEqual(["people"]);
+  expect(visibleManagementSections({ ...identity, org_id: undefined })).toEqual([]);
 });

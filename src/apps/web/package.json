@@ -3,9 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "config:check": "node scripts/serve.mjs check-config",
+    "dev": "node scripts/serve.mjs dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/serve.mjs start",
     "lint": "biome lint",
     "format": "biome format --write",
     "check": "biome check",
@@ -18,6 +19,7 @@
   "dependencies": {
     "@base-ui/react": "1.9.0",
     "@hookform/resolvers": "6.0.2",
+    "@next/env": "16.4.3",
     "@shadcn/react": "0.3.1",
     "@tanstack/react-query": "5.105.0",
     "@tanstack/react-table": "9.3.1",

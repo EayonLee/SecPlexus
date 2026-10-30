@@ -7,7 +7,8 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "dev": "node scripts/start.mjs",
+    "config:check": "node scripts/start.mjs check-config",
+    "dev": "node scripts/start.mjs dev",
     "build": "node scripts/build.mjs",
     "typecheck": "pnpm --dir src/apps/web typecheck",
     "lint": "pnpm --dir src/apps/web lint",
@@ -16,7 +17,6 @@
     "test:unit": "node --test scripts/*.test.mjs && go test ./src/... && pnpm --dir src/apps/web test:unit",
     "test:integration": "node tests/integration/run.mjs",
     "test:e2e": "pnpm --dir src/apps/web test:e2e",
-    "certs:generate": "node scripts/generate-certs.mjs",
     "catalogs:generate": "node scripts/generate-catalogs.mjs",
     "catalogs:check": "node scripts/generate-catalogs.mjs --check"
   }

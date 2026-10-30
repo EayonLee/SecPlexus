@@ -86,7 +86,7 @@ func ListMembers(ctx context.Context, db *gorm.DB, limit, offset int, orgID stri
 		db,
 		limit,
 		offset,
-		`SELECT jsonb_build_object('id',m.id,'user_id',u.id,'username',u.username,'display_name',u.display_name,'status',m.status,'role_ids',COALESCE((SELECT jsonb_agg(mr.role_id ORDER BY mr.role_id) FROM iam.membership_roles mr WHERE mr.org_id=m.org_id AND mr.membership_id=m.id),'[]'::jsonb)),count(*) OVER() FROM iam.memberships m JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 ORDER BY m.created_at,m.id`,
+		`SELECT jsonb_build_object('id',m.id,'user_id',u.id,'is_super_admin',u.is_super_admin,'username',u.username,'display_name',u.display_name,'status',m.status,'role_ids',COALESCE((SELECT jsonb_agg(mr.role_id ORDER BY mr.role_id) FROM iam.membership_roles mr WHERE mr.org_id=m.org_id AND mr.membership_id=m.id),'[]'::jsonb)),count(*) OVER() FROM iam.memberships m JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 ORDER BY m.created_at,m.id`,
 		orgID,
 	)
 }
@@ -98,7 +98,7 @@ func ListRoleMembers(ctx context.Context, db *gorm.DB, limit, offset int, orgID,
 		db,
 		limit,
 		offset,
-		`SELECT jsonb_build_object('id',m.id,'user_id',u.id,'username',u.username,'display_name',u.display_name,'status',m.status),count(*) OVER() FROM iam.memberships m JOIN iam.users u ON u.id=m.user_id JOIN iam.membership_roles mr ON mr.org_id=m.org_id AND mr.membership_id=m.id WHERE m.org_id=$1 AND mr.role_id=$2 ORDER BY m.created_at,m.id`,
+		`SELECT jsonb_build_object('id',m.id,'user_id',u.id,'is_super_admin',u.is_super_admin,'username',u.username,'display_name',u.display_name,'status',m.status),count(*) OVER() FROM iam.memberships m JOIN iam.users u ON u.id=m.user_id JOIN iam.membership_roles mr ON mr.org_id=m.org_id AND mr.membership_id=m.id WHERE m.org_id=$1 AND mr.role_id=$2 ORDER BY m.created_at,m.id`,
 		orgID,
 		roleID,
 	)

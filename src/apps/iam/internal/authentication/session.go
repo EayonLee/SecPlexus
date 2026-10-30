@@ -41,7 +41,7 @@ func NewSessions(store *repository.Store, cfg config.Config) *Sessions {
 	manager.Lifetime = cfg.Auth.SessionAbsoluteTimeout
 	manager.IdleTimeout = 0
 	manager.Cookie.Name = "spx_session"
-	manager.Cookie.Secure = strings.HasPrefix(cfg.App.PublicURL, "https://")
+	manager.Cookie.Secure = strings.HasPrefix(cfg.Auth.WebOrigin, "https://")
 	if manager.Cookie.Secure {
 		manager.Cookie.Name = "__Host-spx_session"
 	}
@@ -283,8 +283,8 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	}, nil
 }
 
-// Revoke 撤销指定会话或用户的全部会话。
-func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID string, all bool, reason, requestID string) error {
+// Revoke 撤销本人当前会话。
+func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID string, reason, requestID string) error {
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err := tx.Error
 	if err != nil {
@@ -316,28 +316,18 @@ func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID 
 		return repository.ErrUnauthenticated
 	}
 
-	if all {
-		err = repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: userID,
-			RevokeReason: nullableText(reason)})
-	} else {
-		id, err := uuid.Parse(sessionID)
-		if err != nil {
-			return repository.ErrInvalid
-		}
-
-		response := tx.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason=$3 WHERE id=$1 AND user_id=$2 AND state='active'`, id, userID, reason)
-		err = response.Error
-		if err != nil {
-			return err
-		}
-
-		if response.RowsAffected == 0 {
-			return repository.ErrNotFound
-		}
+	id, err := uuid.Parse(sessionID)
+	if err != nil {
+		return repository.ErrInvalid
 	}
 
-	if err != nil {
+	response := tx.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason=$3 WHERE id=$1 AND user_id=$2 AND state='active'`, id, userID, reason)
+	if err = response.Error; err != nil {
 		return err
+	}
+
+	if response.RowsAffected == 0 {
+		return repository.ErrNotFound
 	}
 
 	if err = repository.AppendAudit(ctx, tx, repository.Audit{
@@ -353,7 +343,7 @@ func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID 
 	if err = tx.Commit().Error; err != nil {
 		return err
 	}
-	logging.From(ctx).Info("逻辑会话撤销已提交", "event", "session.revoked", "user_id", p.UserID, "session_id", sessionID, "all", all, "reason", reason)
+	logging.From(ctx).Info("逻辑会话撤销已提交", "event", "session.revoked", "user_id", p.UserID, "session_id", sessionID, "reason", reason)
 	return nil
 }
 

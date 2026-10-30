@@ -46,8 +46,17 @@ func newCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if cmd.Name() == "check-config" {
+			if err := cfg.ValidateServe(); err != nil {
+				return err
+			}
+			if !printEndpoints {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "IAM configuration valid")
+				return err
+			}
+		}
 		if printEndpoints {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"public_addr": cfg.App.Addr(), "internal_addr": cfg.Internal.Addr()})
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"public_addr": cfg.App.Addr()})
 		}
 		name := cmd.Name()
 		if name == "iam" {
@@ -58,7 +67,7 @@ func newCommand() *cobra.Command {
 	root := &cobra.Command{Use: "iam", Short: "SecPlexus identity service", Args: cobra.NoArgs, RunE: run, SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&filename, "config", "", "IAM YAML configuration file")
 	root.PersistentFlags().BoolVar(&printEndpoints, "print-endpoints", false, "print effective endpoints without connecting dependencies")
-	for _, name := range []string{"serve", "migrate", "status", "maintain", "revoke-after-restore", "reset-password"} {
+	for _, name := range []string{"check-config", "serve", "migrate", "status", "maintain", "revoke-after-restore", "reset-password"} {
 		command := &cobra.Command{Use: name, Args: cobra.NoArgs, RunE: run}
 		if name == "reset-password" {
 			command.Flags().StringVar(&userID, "user-id", "", "existing account UUID")
@@ -85,7 +94,12 @@ func execute(ctx context.Context, command string, cfg config.Config, userID stri
 			return err
 		}
 	}
-	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
+	if command == "migrate" {
+		if err := cfg.ValidateAdministrator(); err != nil {
+			return err
+		}
+	}
+	logger, closeLog, err := logging.Open(cfg.Logging, "iam")
 	if err != nil {
 		return err
 	}

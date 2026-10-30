@@ -13,27 +13,26 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
-// App 描述 IAM 的公开服务和反向代理配置。
+// App 描述 IAM 的统一监听和反向代理配置。
 type App struct {
-	Name              string   `yaml:"name"`                                     // 服务名称。
-	Host              string   `yaml:"host" validate:"required,ip|eq=localhost"` // 公开接口监听地址。
-	Port              int      `yaml:"port" validate:"gte=1,lte=65535"`          // 公开接口监听端口。
-	PublicURL         string   `yaml:"public_url"`                               // 浏览器访问的公开地址，用于 Cookie 和 CSRF 校验。
+	Host              string   `yaml:"host" validate:"required,ip|eq=localhost"` // HTTP 接口监听地址。
+	Port              int      `yaml:"port" validate:"gte=1,lte=65535"`          // HTTP 接口监听端口。
 	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs" validate:"dive,cidr"` // 允许转发客户端地址的代理网段。
 }
 
-// Addr 返回公开 HTTP 服务的监听地址。
+// Addr 返回统一 HTTP 服务的监听地址。
 func (a App) Addr() string { return net.JoinHostPort(a.Host, strconv.Itoa(a.Port)) }
 
 // Database 描述 PostgreSQL 连接；URL 非空时优先使用 URL。
 type Database struct {
+	Name     string `yaml:"name"`                            // 数据库名称。
 	Host     string `yaml:"host" validate:"required"`        // 监听或连接地址。
 	Port     int    `yaml:"port" validate:"gte=1,lte=65535"` // 监听或连接端口。
-	Name     string `yaml:"name"`                            // 数据库名称。
 	User     string `yaml:"user"`                            // 数据库用户名。
 	Password string `yaml:"password"`                        // 数据库连接密码。
 	SSLMode  string `yaml:"sslmode"`                         // PostgreSQL TLS 模式。
@@ -63,26 +62,15 @@ type Cache struct {
 	URL      string `yaml:"url"`                             // 可选的完整连接地址。
 }
 
-// InternalClient 描述允许调用内部接口的服务及其权限。
-type InternalClient struct {
-	Token   string   `yaml:"token"`   // 内部调用凭证。
+// ServiceClient 描述允许请求鉴权的服务及其权限。
+type ServiceClient struct {
+	Token   string   `yaml:"token"`   // 服务调用凭证。
 	Actions []string `yaml:"actions"` // 允许调用的权限列表。
 }
 
-// Internal 描述服务间通信使用的监听、TLS 和客户端配置。
-type Internal struct {
-	Host        string                    `yaml:"host" validate:"required,ip|eq=localhost"` // 监听或连接地址。
-	Port        int                       `yaml:"port" validate:"gte=1,lte=65535"`          // 监听或连接端口。
-	TLSCertFile string                    `yaml:"tls_cert_file"`                            // 服务端 TLS 证书路径。
-	TLSKeyFile  string                    `yaml:"tls_key_file"`                             // 服务端 TLS 私钥路径。
-	Clients     map[string]InternalClient `yaml:"clients"`                                  // 允许访问内部接口的服务列表。
-}
-
-// Addr 返回内部 HTTP 服务的监听地址。
-func (i Internal) Addr() string { return net.JoinHostPort(i.Host, strconv.Itoa(i.Port)) }
-
 // Auth 描述会话、二次认证和登录限制。
 type Auth struct {
+	WebOrigin              string        `yaml:"web_origin"`               // 浏览器可信来源；与后端监听位置不同。
 	CSRFKey                string        `yaml:"csrf_key"`                 // CSRF 令牌签名密钥。
 	SessionIdleTimeout     time.Duration `yaml:"session_idle_timeout"`     // 会话空闲超时时间。
 	SessionAbsoluteTimeout time.Duration `yaml:"session_absolute_timeout"` // 会话最长有效时间。
@@ -93,15 +81,15 @@ type Auth struct {
 
 // Config 包含 IAM 启动、基础组件和身份管理所需的配置。
 type Config struct {
-	App       App      `yaml:"app"`      // 公开服务配置。
-	DB        Database `yaml:"db"`       // PostgreSQL 连接配置。
-	Cache     Cache    `yaml:"cache"`    // Redis 连接配置。
-	Internal  Internal `yaml:"internal"` // 内部服务配置。
-	Auth      Auth     `yaml:"auth"`     // 认证策略配置。
-	Bootstrap struct {
-		Username string `yaml:"username"` // 初始化管理员用户名。
-		Password string `yaml:"password"` // 初始管理员密码。
-	} `yaml:"bootstrap"` // 首次初始化管理员配置。
+	App            App                      `yaml:"app"`             // 公开服务配置。
+	DB             Database                 `yaml:"db"`              // PostgreSQL 连接配置。
+	Cache          Cache                    `yaml:"cache"`           // Redis 连接配置。
+	ServiceClients map[string]ServiceClient `yaml:"service_clients"` // 服务调用方及允许的操作。
+	Auth           Auth                     `yaml:"auth"`            // 认证策略配置。
+	Bootstrap      struct {
+		Username string `yaml:"username"` // 配置托管的唯一超级管理员用户名。
+		Password string `yaml:"password"` // 仅配置可修改的管理员密码。
+	} `yaml:"bootstrap"` // 唯一超级管理员身份与凭据的权威来源。
 	Retention struct {
 		AuditDays   int `yaml:"audit_days"`   // 审计记录保留天数。
 		SessionDays int `yaml:"session_days"` // 已结束会话保留天数。
@@ -120,7 +108,6 @@ func Load(filename string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	bindEnvironment(settings)
 	if err := configuration.Decode(settings, &c); err != nil {
 		return c, err
 	}
@@ -151,30 +138,49 @@ func (c Config) Validate() error {
 		return err
 	}
 
-	if c.App.Name == "" || len(c.App.Name) > 64 {
-		return errors.New("app.name is required and limited to 64 characters")
-	}
-
-	origin, err := url.Parse(c.App.PublicURL)
+	origin, err := url.Parse(c.Auth.WebOrigin)
 	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
-		return errors.New("app.public_url must be an HTTP(S) origin without credentials")
+		return errors.New("auth.web_origin must be an HTTP(S) origin without credentials")
 	}
 
 	a := c.Auth
-	if a.SessionIdleTimeout <= 0 || a.SessionAbsoluteTimeout < a.SessionIdleTimeout || a.SessionAbsoluteTimeout > 7*24*time.Hour || a.ReauthWindow <= 0 || a.LoginMaxFailures < 1 || a.LoginMaxFailures > 100 || a.LoginLockDuration <= 0 || c.Retention.AuditDays < 1 || c.Retention.AuditDays > 36500 || c.Retention.SessionDays < 1 || c.Retention.SessionDays > 36500 {
-		return errors.New("invalid IAM timeouts or limits")
+	if a.SessionIdleTimeout <= 0 {
+		return errors.New("auth.session_idle_timeout must be greater than 0")
 	}
-
-	if c.DB.Name == "" || c.DB.User == "" || c.Cache.DB < 0 {
-		return errors.New("invalid database or Redis configuration")
+	if a.SessionAbsoluteTimeout < a.SessionIdleTimeout || a.SessionAbsoluteTimeout > 7*24*time.Hour {
+		return errors.New("auth.session_absolute_timeout must be at least session_idle_timeout and at most 168h")
+	}
+	if a.ReauthWindow <= 0 {
+		return errors.New("auth.reauth_window must be greater than 0")
+	}
+	if a.LoginMaxFailures < 1 || a.LoginMaxFailures > 100 {
+		return errors.New("auth.login_max_failures must be between 1 and 100")
+	}
+	if a.LoginLockDuration <= 0 {
+		return errors.New("auth.login_lock_duration must be greater than 0")
+	}
+	if c.Retention.AuditDays < 1 || c.Retention.AuditDays > 36500 {
+		return errors.New("retention.audit_days must be between 1 and 36500")
+	}
+	if c.Retention.SessionDays < 1 || c.Retention.SessionDays > 36500 {
+		return errors.New("retention.session_days must be between 1 and 36500")
+	}
+	if c.DB.Name == "" {
+		return errors.New("db.name must not be empty")
+	}
+	if c.DB.User == "" {
+		return errors.New("db.user must not be empty")
+	}
+	if c.Cache.DB < 0 {
+		return errors.New("cache.db must be nonnegative")
 	}
 
 	if _, err := redis.ParseURL(c.Cache.URL); err != nil {
-		return errors.New("invalid cache connection configuration")
+		return errors.New("cache.url must be a valid Redis connection URL; check cache fields")
 	}
 
 	if _, err := pgx.ParseConfig(c.DB.URL); err != nil {
-		return errors.New("invalid database connection configuration")
+		return errors.New("db.url must be a valid PostgreSQL connection string; check db fields")
 	}
 	if err := c.ValidateSecurity(false); err != nil {
 		return err
@@ -185,19 +191,19 @@ func (c Config) Validate() error {
 // ValidateSecurity 校验已提供的安全值；required 仅在运行认证服务时要求完整配置。
 func (c Config) ValidateSecurity(required bool) error {
 	if (required || c.Auth.CSRFKey != "") && len(c.Auth.CSRFKey) != 32 {
-		return errors.New("CSRF signing key must contain exactly 32 bytes")
+		return errors.New("auth.csrf_key (SPX_IAM_CSRF_KEY) must contain exactly 32 bytes")
 	}
-	if required && len(c.Internal.Clients) == 0 {
-		return errors.New("at least one internal client is required")
+	if required && len(c.ServiceClients) == 0 {
+		return errors.New("service_clients must contain at least one client")
 	}
 	catalog := authorization.Catalog()
-	for id, client := range c.Internal.Clients {
+	for id, client := range c.ServiceClients {
 		if id == "" || len(client.Actions) == 0 || ((required || client.Token != "") && (len(client.Token) < 32 || len(client.Token) > 512)) {
-			return errors.New("internal clients require an ID, 32–512 byte token and allowed actions")
+			return errors.New("service_clients requires a nonempty ID, a 32–512 byte token (SPX_CONSOLE_IAM_TOKEN for Console) and allowed actions")
 		}
 		for _, action := range client.Actions {
 			if !slices.ContainsFunc(catalog, func(permission authorization.Permission) bool { return permission.Key == action }) {
-				return errors.New("internal client action is not registered in the contract")
+				return errors.New("service_clients.actions must use registered IAM permission keys")
 			}
 		}
 	}
@@ -209,11 +215,22 @@ func (c Config) ValidateServe() error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	if err := c.ValidateAdministrator(); err != nil {
+		return err
+	}
 	if err := c.ValidateSecurity(true); err != nil {
 		return err
 	}
-	if c.Internal.TLSCertFile == "" || c.Internal.TLSKeyFile == "" {
-		return errors.New("internal TLS certificate/key are required")
+	return nil
+}
+
+// ValidateAdministrator 校验配置托管账号，错误不包含配置的凭据值。
+func (c Config) ValidateAdministrator() error {
+	if _, err := identity.NormalizeUsername(c.Bootstrap.Username); err != nil {
+		return errors.New("bootstrap.username must identify the configured administrator")
+	}
+	if err := identity.ValidatePassword(c.Bootstrap.Password); err != nil {
+		return errors.New("bootstrap.password must contain a valid 8–128 character administrator password")
 	}
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
+	"strings"
 	"sync"
 	"testing"
 
@@ -106,7 +108,7 @@ func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 重复初始化不覆盖用户已有密码，配置变化也不能暗中改凭据。
+	// 配置是唯一管理员凭据的权威来源；升级后应用配置并保留账号 ID。
 	if err = store.Seed(ctx, "admin", "another configured password"); err != nil {
 		t.Fatal(err)
 	}
@@ -116,11 +118,11 @@ func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if after.ID != before.ID || after.PasswordHash != before.PasswordHash || !after.IsSuperAdmin {
-		t.Fatal("升级或重复初始化改变了现有管理员")
+	if after.ID != before.ID || after.PasswordHash == before.PasswordHash || !after.IsSuperAdmin {
+		t.Fatal("配置同步未保留管理员身份或未更新凭据")
 	}
 
-	if err = (identity.PasswordHasher{}).CompareHashAndPassword(after.PasswordHash, "secplexus"); err != nil {
+	if err = (identity.PasswordHasher{}).CompareHashAndPassword(after.PasswordHash, "another configured password"); err != nil {
 		t.Fatal("默认管理员凭据无法验证")
 	}
 
@@ -199,6 +201,12 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	if err := repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.VerifySchema(ctx); err == nil {
+		t.Fatal("configuration-owned administrator was not initialized after migration")
+	}
+	if err := store.Seed(ctx, "status-admin", "isolated migration status password"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.VerifySchema(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -207,5 +215,50 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	}
 	if err := store.VerifySchema(ctx); err == nil {
 		t.Fatal("future schema accepted by older application")
+	}
+}
+
+func TestOrganizationUpgradeRejectsInvalidExistingDataWithoutRewriting(t *testing.T) {
+	store := testutil.UnmigratedDatabase(t)
+	ctx := context.Background()
+	db := stdlib.OpenDBFromPool(store.Pool)
+	defer db.Close()
+	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = provider.UpTo(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.Repeat("a", 31)
+	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,$2,'Legacy','active')`, uuid.NewString(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err == nil {
+		t.Fatal("invalid existing identifier did not stop migration")
+	}
+	var slug string
+	if err = store.Pool.QueryRow(ctx, `SELECT slug FROM iam.organizations`).Scan(&slug); err != nil || slug != legacy {
+		t.Fatal("migration modified existing organization")
+	}
+	if _, err = store.Pool.Exec(ctx, `DELETE FROM iam.organizations WHERE slug=$1`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,'soc_team-01',$2,'active')`, uuid.NewString(), strings.Repeat("😀", 30)); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []struct{ slug, name string }{
+		{"boundary-org", strings.Repeat("中", 31)}, {"boundary-org", "Ops\nTeam"}, {"boundary-org", "Ops\u0085Team"}, {legacy, "Ops"}, {"soc_", "Ops"}, {"1soc", "Ops"},
+	} {
+		if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,$2,$3,'active')`, uuid.NewString(), input.slug, input.name); err == nil {
+			t.Fatalf("invalid organization accepted: %q", input.slug)
+		}
 	}
 }

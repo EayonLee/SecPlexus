@@ -32,6 +32,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-info: var(--status-info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -299,4 +302,16 @@ html:has([data-landing-page]) {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
+}
+
+/* Shared status semantics stay legible across the template presets. */
+:root {
+  --status-success: oklch(0.45 0.12 155);
+  --status-warning: oklch(0.47 0.11 65);
+  --status-info: oklch(0.46 0.16 255);
+}
+.dark {
+  --status-success: oklch(0.8 0.14 155);
+  --status-warning: oklch(0.82 0.13 80);
+  --status-info: oklch(0.79 0.12 255);
 }

@@ -1,21 +1,20 @@
 # Console只配置实际使用的能力，没有数据库/Redis占位项。
 app:
-  name: "console"
-  host: "127.0.0.1"
-  port: 8080
+  host: "${SPX_CONSOLE_BIND_HOST-0.0.0.0}"
+  port: "${SPX_CONSOLE_BIND_PORT-${SPX_CONSOLE_PORT-8080}}"
 
-# IAM内部地址及每服务凭证；不读取IAM数据库。
+# IAM 地址及每服务凭证；不读取IAM数据库。
 iam:
-  base_url: "https://127.0.0.1:9081"
-  token: ""
-  ca_file: "certs/iam.crt"
+  host: "${SPX_CONSOLE_IAM_HOST-${SPX_IAM_HOST-127.0.0.1}}"
+  port: "${SPX_CONSOLE_IAM_PORT-${SPX_IAM_PORT-8081}}"
+  token: "${SPX_CONSOLE_IAM_TOKEN-}"
 
 # 多个进程不能写同一个轮转文件；容器默认stdout，由运行时轮转。
 logging:
-  level: "info"
-  stdout: true
-  file: "logs/console.log"
-  max_size_mb: 50
-  max_backups: 5
-  max_age_days: 14
-  compress: true
+  level: "${SPX_CONSOLE_LOG_LEVEL-info}"
+  stdout: "${SPX_CONSOLE_LOG_STDOUT-true}"
+  file: "${SPX_CONSOLE_LOG_FILE-logs/console.log}"
+  max_size_mb: "${SPX_CONSOLE_LOG_MAX_SIZE_MB-50}"
+  max_backups: "${SPX_CONSOLE_LOG_MAX_BACKUPS-5}"
+  max_age_days: "${SPX_CONSOLE_LOG_MAX_AGE_DAYS-14}"
+  compress: "${SPX_CONSOLE_LOG_COMPRESS-true}"

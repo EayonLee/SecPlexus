@@ -35,16 +35,18 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 
 ## 准备开发环境
 
-工具版本以 `go.mod`、`package.json` 和 CI 工作流为依据：
+工具版本以 `go.mod` 和 `package.json`为依据：
 
 | 工具 | 版本或要求 |
 | --- | --- |
 | Go | 1.27.3 |
-| Node.js | 22.12 及以上；建议使用 CI 采用的 24 |
+| Node.js | 22.12 及以上；建议使用 24 |
 | pnpm | 10.32.1 |
-| Make 与 OpenSSL | 根目录开发命令与本地 TLS 证书生成 |
+| Make | 根目录开发命令 |
 | PostgreSQL 与 Redis | 可访问的开发实例；仓库 Compose 使用 PostgreSQL 16 与 Redis 7 |
 | Docker 与 Compose | 选择容器依赖或容器测试时需要 |
+
+模板字体使用 `next/font/google`，首次 Web 构建需要访问 Google Fonts 的样式与字体地址。已有缓存的构建不能证明这项网络条件满足；下载失败时参照[构建排障](docs/configuration.md#首次构建与网络排障)，不要通过更换模板字体掩盖网络问题。
 
 先将仓库 Fork 到自己的 GitHub 账号，再克隆 Fork，并将项目仓库添加为 `upstream`。将 `YOUR_USERNAME` 替换为你的 GitHub 用户名：
 
@@ -59,10 +61,10 @@ git remote add upstream https://github.com/EayonLee/SecPlexus.git
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
 test -e .env || cp .env.example .env
-pnpm certs:generate
+chmod 600 .env
 ```
 
-在 `.env` 中填写开发数据库连接、初始管理员密码、CSRF 密钥和内部服务凭证，字段要求与 TLS 配置见[配置指南](docs/configuration.md)。不要将 `.env`、证书、私钥和日志纳入版本控制。
+在 `.env` 中填写开发数据库连接、配置托管管理员密码、CSRF 密钥和服务调用凭证，字段要求与反向代理访问配置见[配置指南](docs/configuration.md)。不要将 `.env`、凭据和日志纳入版本控制。
 
 可以连接已有的开发 PostgreSQL 与 Redis，也可以显式创建仓库提供的依赖：
 
@@ -73,10 +75,11 @@ pnpm compose:up postgres redis
 随后启动应用：
 
 ```sh
+pnpm config:check
 make dev
 ```
 
-`make dev` 安装前端依赖、执行 IAM 迁移，并启动支持热更新的 IAM、Console 和 Web。它按配置连接基础设施，不启动 Docker，请使用开发数据库。空账号库会初始化管理员 `admin`，密码使用配置中的初始密码，默认为 `secplexus`；登录后可在账号设置中主动修改。
+`pnpm config:check` 离线校验选中模块，不连接数据库、不迁移、不创建业务日志。`make dev` 安装前端依赖，先校验全部选中模块配置，再执行 IAM 迁移并启动支持热更新的 IAM、Console 和 Web。它按配置连接基础设施，不启动 Docker，请使用开发数据库。唯一超级管理员默认 `admin/secplexus`，身份与密码始终由配置管理；修改 `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` 后重启全部 IAM 副本生效，不能通过页面或密码重置命令修改。普通账号支持自助改密。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -93,7 +96,7 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 
 ### 服务边界
 
-各模块拥有自己的配置、启动流程和数据库表。模块之间通过公开契约通信，不导入其他应用的私有包，也不读取其他模块的表。Console 通过经过认证的 IAM 内部 API 获取身份和授权。
+各模块拥有自己的配置、启动流程和数据库表。模块之间通过公开契约通信，不导入其他应用的私有包，也不读取其他模块的表。Console 通过经过认证的 IAM API 获取身份和授权。
 
 | Go 代码位置 | 职责 |
 | --- | --- |
@@ -109,8 +112,7 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 
 ### API 契约与授权
 
-公开 API 使用 `/api/v1/{module}/...`；内部 API 使用
-`/internal/v1/{module}/...`，并保持认证与隔离。
+全部 API 使用 `/api/v1/{module}/...`，每个服务使用一个监听。路由明确声明公开访问、用户会话或服务凭证认证；服务鉴权还需验证原用户会话及权限。应用服务使用 HTTP，外部 HTTPS 由反向代理处理。
 
 1. 修改所属模块的原生 Go DTO、`internal/router` Gin 路由及 Handler，同时更新模块说明和真实调用方。
 2. 请求绑定使用 `httpx`，公共能力使用共享 HTTP 中间件，普通 JSON 使用 `result`；保留真实状态、空响应和流式语义。
@@ -146,7 +148,7 @@ make build
 ```
 
 `gofmt -l src` 应无路径输出。修改契约时，还需重新生成并确认产物与源定义一致。
-[CI 工作流](.github/workflows/verify.yml) 包含具体的一致性检查和依赖漏洞扫描命令。
+目录一致性使用 `pnpm catalogs:check`，Go 依赖漏洞扫描使用 `make vuln-go`；这些是本地检查，不要求远程 CI。
 
 涉及持久化、服务集成、认证、授权或核心浏览器流程时，运行适用的测试套件：
 

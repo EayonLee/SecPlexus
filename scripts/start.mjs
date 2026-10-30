@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, renameSync, rmSync, watch } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync, watch } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironment, moduleEnvironment, webEnvironment } from './environment.mjs';
-import { endpoint, consoleEndpoint, webEndpoints, webListener } from './endpoints.mjs';
+import { endpoint, serviceConnection, webEndpoints, webListener, webOrigin } from './endpoints.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const children = new Set();
@@ -37,42 +37,55 @@ async function terminate(child) {
   clearTimeout(timeout);
   if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
 }
-async function ready(address, child) {
-  const parsed = new URL(endpoint(address));
+async function ready(service, child) {
+  const target = new URL('/health/ready', endpoint(service.public_addr));
   const deadline = Date.now() + 30000;
   while (!stopping && child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
-    try { if ((await fetch(new URL('/health/ready', parsed), { signal: AbortSignal.timeout(1000) })).ok) return; } catch {}
+    try { if ((await fetch(target, {signal: AbortSignal.timeout(1000)})).ok) return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error('A project backend did not become ready; check its configuration and diagnostics.');
 }
 async function main() {
   const command = process.argv[2] ?? 'dev';
-  if (!['dev', 'preview'].includes(command)) throw new Error('Supported application commands: dev, preview.');
+  if (!['dev', 'preview', 'check-config'].includes(command)) throw new Error('Supported application commands: dev, preview, check-config.');
+  const selected = process.argv.slice(3);
+  const modules = selected.length ? selected : ['iam','console','web'];
+  if (new Set(modules).size !== modules.length || modules.some(module => !['iam','console','web'].includes(module))) throw new Error('Select web, iam or console once each.');
   const env = loadEnvironment(root);
   const configs = Object.fromEntries(['iam', 'console'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
-  for (const file of Object.values(configs)) if (!existsSync(file)) throw new Error('Missing module config.yaml; restore the module configuration before starting.');
-  const web = webListener(env);
-  if (command === 'dev') run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { ...webEnvironment(env), HUSKY: '0' });
-  run('go', ['run', './src/apps/iam/cmd', 'migrate', '--config', configs.iam], moduleEnvironment(env, 'iam', true));
+  for (const module of modules.filter(module => module !== 'web')) if (!existsSync(configs[module])) throw new Error(`Missing module config.yaml (src/apps/${module}/config.yaml); restore the module configuration before starting.`);
+  if (modules.includes('iam')) env.SPX_WEB_ORIGIN = webOrigin(env);
+  if (modules.includes('web')) webListener(env);
+  if (command === 'dev' && modules.includes('web')) run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { ...webEnvironment(env), HUSKY: '0' });
   const completion = new Promise((resolve) => { finish = resolve; });
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { stopping = true; finish(0); });
   const services = {};
   const buildDirectory = mkdtempSync(path.join(tmpdir(), 'spx-dev-'));
   try {
-    for (const module of ['iam', 'console']) {
+    const prepared = {};
+    for (const module of ['iam', 'console'].filter(module => modules.includes(module))) {
       const output = path.join(buildDirectory, module);
-      mkdirSync(path.dirname(output), { recursive: true });
-      function build() { run('go', ['build', '-o', `${output}.next`, `./src/apps/${module}/cmd`]); }
-      build(); renameSync(`${output}.next`, output);
-      const args = [...(module === 'iam' ? ['serve'] : []), '--config', configs[module]];
-      const moduleEnv = moduleEnvironment(env, module);
-      if (module === 'console') moduleEnv.SPX_CONSOLE_IAM_BASE_URL = consoleEndpoint(env, services.iam);
-      const inspected = spawnSync(output, ['--config', configs[module], '--print-endpoints'], { cwd: root, env: moduleEnv, encoding: 'utf8' });
-      if (inspected.status !== 0) throw new Error(`Invalid ${module} config.yaml; check its fields and environment variables.`);
+      run('go', ['build', '-o', output, `./src/apps/${module}/cmd`]);
+      const moduleEnv = moduleEnvironment(module === 'console' && services.iam ? {...env,...serviceConnection(env,'iam',services.iam)} : env, module);
+      const inspected = spawnSync(output, ['check-config', '--config', configs[module], '--print-endpoints'], { cwd: root, env: moduleEnv, encoding: 'utf8' });
+      if (inspected.error || inspected.status !== 0) {
+        if (inspected.stderr) process.stderr.write(`${module}: ${inspected.stderr}`);
+        throw new Error(`${module} configuration check failed; no migrations or services were started.`);
+      }
       services[module] = JSON.parse(inspected.stdout);
+      prepared[module] = { output, moduleEnv };
+    }
+    const webEnv = modules.includes('web') ? { ...webEnvironment(env), ...webEndpoints(env, services) } : undefined;
+    if (webEnv) run(process.execPath, ['src/apps/web/scripts/serve.mjs', 'check-config', ...(command === 'dev' ? ['--development'] : [])], webEnv);
+    if (command === 'check-config') { console.log(`SecPlexus ${modules.join(', ')} configuration valid (offline).`); return; }
+    if (prepared.iam) run(prepared.iam.output, ['migrate', '--config', configs.iam], prepared.iam.moduleEnv);
+    for (const module of ['iam', 'console'].filter(module => modules.includes(module))) {
+      const { output, moduleEnv } = prepared[module];
+      const args = ['serve', '--config', configs[module]];
+      function build() { run('go', ['build', '-o', `${output}.next`, `./src/apps/${module}/cmd`]); }
       let current = launch(output, args, moduleEnv);
-      await ready(services[module].public_addr, current);
+      await ready(services[module], current);
       if (command === 'dev') {
         let timer; let rebuilding = false; let pending = false;
         async function rebuild() {
@@ -93,8 +106,8 @@ async function main() {
         watchers.push({ close: () => clearTimeout(timer) });
       }
     }
-    launch('pnpm', ['--dir', 'src/apps/web', command === 'preview' ? 'start' : 'dev', '--hostname', web.host, '--port', String(web.port)], { ...webEnvironment(env), ...webEndpoints(env, services) });
-    console.log('SecPlexus applications started. Dependencies are accessed through configured endpoints.');
+    if (modules.includes('web')) launch('pnpm', ['--dir', 'src/apps/web', command === 'preview' ? 'start' : 'dev'], webEnv);
+    console.log(`SecPlexus ${modules.join(', ')} started. Dependencies use configured endpoints.`);
     process.exitCode = await completion;
   } finally {
     stopping = true;

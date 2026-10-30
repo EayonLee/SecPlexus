@@ -27,8 +27,8 @@ func EffectiveRoleGrants(ctx context.Context, db *gorm.DB, orgID string, userID 
 }
 
 // MemberPreviewState 读取预览所需的用户、组织版本和成员有效状态。
-func MemberPreviewState(ctx context.Context, db *gorm.DB, orgID string, membershipID string, userID *uuid.UUID, version *int64, memberActive *bool) error {
-	return db.WithContext(ctx).Raw(`SELECT m.user_id,o.authz_version,m.status='active' AND u.status='active' AND o.status='active' FROM iam.memberships m JOIN iam.organizations o ON o.id=m.org_id JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.id=$2`, orgID, membershipID).Row().Scan(userID, version, memberActive)
+func MemberPreviewState(ctx context.Context, db *gorm.DB, orgID string, membershipID string, userID *uuid.UUID, version *int64, memberActive *bool, systemAdmin *bool) error {
+	return db.WithContext(ctx).Raw(`SELECT m.user_id,o.authz_version,m.status='active' AND u.status='active' AND o.status='active',u.is_super_admin FROM iam.memberships m JOIN iam.organizations o ON o.id=m.org_id JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.id=$2`, orgID, membershipID).Row().Scan(userID, version, memberActive, systemAdmin)
 }
 
 // ReadPermission 读取权限定义和近期认证约束。

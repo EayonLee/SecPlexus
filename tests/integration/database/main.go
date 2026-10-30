@@ -1,4 +1,4 @@
-// Command database 仅为全栈测试创建和删除本次拥有的临时数据库。
+// Command database 管理全栈测试拥有的临时数据库及认证期限 fixture。
 package main
 
 import (
@@ -45,6 +45,22 @@ func run(ctx context.Context, args []string) error {
 			return errors.New("cannot create owned test database")
 		}
 		fmt.Print(name)
+		return nil
+	case "expire-auth":
+		if len(args) != 3 || !strings.HasPrefix(args[1], "spx_e2e_") || len(args[1]) != 40 {
+			return errors.New("invalid owned database fixture")
+		}
+		config := connection.Config().Copy()
+		config.Database = args[1]
+		owned, openErr := pgx.ConnectConfig(ctx, config)
+		if openErr != nil {
+			return errors.New("cannot open owned authentication fixture")
+		}
+		defer func() { _ = owned.Close(ctx) }()
+		updated, updateErr := owned.Exec(ctx, `UPDATE iam.user_sessions SET authenticated_at=clock_timestamp()-interval '31 minutes',reauthenticated_at=NULL WHERE id=$1 AND state='active'`, args[2])
+		if updateErr != nil || updated.RowsAffected() == 0 {
+			return errors.New("cannot expire owned authentication fixture")
+		}
 		return nil
 	case "drop":
 		if len(args) != 2 || !strings.HasPrefix(args[1], "spx_e2e_") || len(args[1]) != 40 {

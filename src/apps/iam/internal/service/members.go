@@ -114,6 +114,10 @@ func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, inpu
 				return err
 			}
 
+			if _, err := repository.NewQueries(tx).LockMutableUser(ctx, userID); err != nil {
+				return err
+			}
+
 			if admin && !p.IsSuperAdmin {
 				return authorization.ErrDenied
 			}

@@ -49,16 +49,21 @@ UI demonstration pages must not be presented as completed product capabilities.
 
 ## Set up a development environment
 
-Tool versions follow `go.mod`, `package.json`, and the CI workflow:
+Tool versions follow `go.mod` and `package.json`:
 
 | Tool | Version or requirement |
 | --- | --- |
 | Go | 1.27.3 |
-| Node.js | 22.12 or later; 24 recommended and used in CI |
+| Node.js | 22.12 or later; 24 recommended |
 | pnpm | 10.32.1 |
-| Make and OpenSSL | Root development commands and local TLS certificate generation |
+| Make | Root development commands |
 | PostgreSQL and Redis | Reachable development instances; the supplied Compose stack uses PostgreSQL 16 and Redis 7 |
 | Docker with Compose | Needed when you choose container-based dependencies or tests |
+
+The template font registry uses `next/font/google`: a cold Web build needs access
+to Google Fonts stylesheet and font endpoints. A cached build does not verify that
+network requirement. See [build troubleshooting](docs/configuration.md#首次构建与网络排障)
+if font downloads fail; do not change the template fonts to hide a network failure.
 
 Fork the repository to your GitHub account, then clone your fork and add the
 project repository as `upstream`. Replace `YOUR_USERNAME` with your GitHub username:
@@ -76,13 +81,13 @@ repository root; keep `.env` if it already exists:
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
 test -e .env || cp .env.example .env
-pnpm certs:generate
+chmod 600 .env
 ```
 
-Fill in `.env` with your development database connection, bootstrap administrator
-password, CSRF key, and internal service credential. Follow the
-[configuration guide](docs/configuration.md) for field requirements and TLS.
-Keep `.env`, certificates, private keys, and logs out of version control.
+Fill in `.env` with your development database connection, configuration-managed administrator
+password, CSRF key, and service credential. Follow the
+[configuration guide](docs/configuration.md) for field requirements and reverse proxy access.
+Keep `.env`, credentials, and logs out of version control.
 
 Connect to existing development PostgreSQL and Redis instances, or explicitly
 create the supplied dependencies:
@@ -94,14 +99,19 @@ pnpm compose:up postgres redis
 Then start the applications:
 
 ```sh
+pnpm config:check
 make dev
 ```
 
-`make dev` installs frontend dependencies, applies IAM migrations, and starts
-IAM, Console, and Web with hot reload. It connects to configured infrastructure
-and does not start Docker. Use a development database. An empty account database
-is initialized with `admin` and the configured bootstrap password (default:
-`secplexus`). You can change the password from account settings after signing in.
+`pnpm config:check` validates all selected modules offline, without database connections,
+migrations or application logs. `make dev` installs frontend dependencies, validates
+all selected configurations, applies IAM migrations, and starts IAM, Console and Web
+with hot reload. It connects to configured infrastructure and does not start Docker.
+Use a development database. The unique system administrator defaults to
+`admin/secplexus`; its identity and password remain authoritative in configuration.
+Change `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` and restart all
+IAM replicas to update this account. Application pages and password-reset commands
+cannot modify it. Ordinary accounts can change their passwords.
 
 | Command | Purpose |
 | --- | --- |
@@ -124,7 +134,7 @@ Small fixes do not need a separate plan.
 Each module owns its configuration, startup, and database tables. Communicate
 through public contracts; do not import another application's private packages
 or read its tables. Console obtains identity and authorization through IAM's
-authenticated internal API.
+authenticated API.
 
 | Go location | Responsibility |
 | --- | --- |
@@ -143,8 +153,7 @@ versioned migrations in the owning module and preserve already applied scripts.
 
 ### API contracts and authorization
 
-Public APIs use `/api/v1/{module}/...`; internal APIs use
-`/internal/v1/{module}/...` and require authentication and isolation.
+All APIs use `/api/v1/{module}/...` on one listener per service. Routes explicitly require a user session, a service credential, or allow public access. Service authorization also validates the original user session and permissions. Application services use HTTP; external HTTPS is terminated by a reverse proxy.
 
 1. Edit the owning module's native Go DTOs, Gin routes in `internal/router`, and handlers. Update module documentation and actual callers together.
 2. Bind requests with `httpx`, use shared HTTP middleware, and return ordinary JSON through `result`. Preserve real status codes, empty bodies and streaming semantics.
@@ -200,9 +209,8 @@ make build
 ```
 
 `gofmt -l src` must produce no paths. For contract changes, also regenerate and
-check that generated artifacts are consistent with their sources. The
-[CI workflow](.github/workflows/verify.yml) lists the exact consistency check
-and dependency vulnerability scan.
+check that generated artifacts are consistent with their sources. Use `pnpm catalogs:check` for catalog consistency and `make vuln-go` for Go
+dependency vulnerability scanning. These are local checks; no remote CI is required.
 
 For changes affecting persistence, service integration, authentication,
 authorization, or core browser flows, run the applicable suites:

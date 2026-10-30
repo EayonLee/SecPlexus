@@ -43,15 +43,6 @@ func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName stri
 	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(updates).Error
 }
 
-// SetSuperAdmin 更新管理员标记和身份版本。
-func SetSuperAdmin(ctx context.Context, db *gorm.DB, id uuid.UUID, enabled bool) error {
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
-		"is_super_admin": enabled,
-		"auth_version":   gorm.Expr("auth_version+1"),
-		"updated_at":     gorm.Expr("now()"),
-	}).Error
-}
-
 // BumpUserAuthVersion 增加身份版本，使旧会话失效。
 func BumpUserAuthVersion(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
 	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{

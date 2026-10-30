@@ -7,6 +7,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 )
@@ -27,6 +28,10 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 	current, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, normalized)
 	if err != nil {
 		return err
+	}
+
+	if current.IsSuperAdmin {
+		return authorization.ErrDenied
 	}
 
 	hasher := identity.PasswordHasher{}

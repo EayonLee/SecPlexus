@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,11 +60,6 @@ func InsertSession(ctx context.Context, db *gorm.DB, newID uuid.UUID, userID uui
 // ResetLoginFailures 成功登录后清除账户失败计数。
 func ResetLoginFailures(ctx context.Context, db *gorm.DB, userID uuid.UUID) error {
 	return db.WithContext(ctx).Exec(`UPDATE iam.password_credentials SET failed_attempts=0,locked_until=NULL,updated_at=now() WHERE user_id=$1`, userID).Error
-}
-
-// ActiveSessions 读取仍同时满足 SCS、身份版本和逻辑期限的会话。
-func ActiveSessions(ctx context.Context, db *gorm.DB, userID string, authVersion int64) (*sql.Rows, error) {
-	return db.WithContext(ctx).Raw(`SELECT s.id::text,s.authenticated_at,s.last_seen_at,s.idle_expires_at,s.absolute_expires_at,s.user_agent,COALESCE(s.client_ip::text,'') FROM iam.user_sessions s JOIN iam.scs_sessions c ON c.token=s.token_hash AND c.expiry>clock_timestamp() WHERE s.user_id=$1 AND s.state='active' AND s.auth_version=$2 AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() ORDER BY s.created_at DESC LIMIT 100`, userID, authVersion).Rows()
 }
 
 // CompensateSession 撤销 SCS 提交失败的逻辑会话，禁止产生孤立登录。

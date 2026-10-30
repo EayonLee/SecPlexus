@@ -2,12 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironment } from './environment.mjs';
-import { webListener } from './endpoints.mjs';
+import { webListener, webOrigin } from './endpoints.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 try {
   const env = loadEnvironment(root);
-  // Internal Compose substitution only; the public URL remains the user setting.
+  env.SPX_WEB_ORIGIN = webOrigin(env);
+  // Internal Compose substitution only; the public origin is independent.
   env.SPX_COMPOSE_WEB_PORT = String(webListener(env).port);
   const checkout = createHash('sha256').update(root).digest('hex').slice(0, 8);
   const services = process.argv.slice(2);

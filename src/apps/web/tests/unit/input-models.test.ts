@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import {
+  zCreateOrganizationBody,
   zCreateRoleBody,
   zPreviewPermissionBody,
   zSetMemberRolesBody,
@@ -39,4 +40,17 @@ test("preview and save reject duplicate permissions and oversized role sets", ()
   expect(zPreviewPermissionBody.safeParse({ membership_id: id, role_ids, authz_version: "1" }).success).toBe(false);
   expect(zSetRolePermissionsBody.safeParse({ permissions: [], version: "1" }).success).toBe(true);
   expect(zSetMemberRolesBody.safeParse({ role_ids: [], authz_version: "1" }).success).toBe(true);
+});
+
+test("organization names and identifiers have separate Unicode-aware rules", () => {
+  const body = { name: "  安全运营中心  ", slug: "soc_team-01", admin_user_id: id };
+  expect(zCreateOrganizationBody.parse(body).name).toBe("安全运营中心");
+  expect(zCreateOrganizationBody.safeParse({ ...body, name: "😀".repeat(30) }).success).toBe(true);
+  for (const name of ["中".repeat(31), "Ops\nTeam", "Ops\u0085Team", " "]) {
+    expect(zCreateOrganizationBody.safeParse({ ...body, name }).success).toBe(false);
+    expect(zUpdateCurrentOrganizationBody.safeParse({ name, authz_version: "1" }).success).toBe(false);
+  }
+  for (const slug of ["a".repeat(31), "1soc", "soc_", "SOC", "ab"]) {
+    expect(zCreateOrganizationBody.safeParse({ ...body, slug }).success).toBe(false);
+  }
 });

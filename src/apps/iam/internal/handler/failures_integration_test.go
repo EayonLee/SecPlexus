@@ -44,7 +44,6 @@ func TestSecurityChangesRollbackWhenAuditCannotCommit(t *testing.T) {
 	ctx := context.Background()
 	client := newAPIClient(t, f.public.URL, f.public.URL)
 	client.login(f.admin, f.initial)
-	client.change(f.initial, f.password)
 	client.login(f.admin, f.password)
 	_, err := f.server.Service.Store.Pool.Exec(ctx, `CREATE FUNCTION iam.reject_audit_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unavailable'; END $$; CREATE TRIGGER reject_audit_write BEFORE INSERT ON iam.audit_events FOR EACH ROW EXECUTE FUNCTION iam.reject_audit_write()`)
 	if err != nil {

@@ -9,7 +9,6 @@ import {
   reauthenticate as confirmPassword,
   login,
   logout,
-  logoutAll,
   me,
   changePassword as updatePassword,
 } from "@/spx/api/iam/auth";
@@ -150,8 +149,8 @@ export async function signIn(username: string, password: string) {
 }
 
 /** signOut 先请求服务端撤销，再清理当前标签的身份投影。 */
-export async function signOut(all = false) {
-  await (all ? logoutAll : logout)();
+export async function signOut() {
+  await logout();
   clear();
   channel?.postMessage("session_changed");
 }
@@ -165,11 +164,12 @@ export async function changePassword(old_password: string, new_password: string)
 
 /** reauthenticate 确认当前账号密码，再刷新能力与安全凭据。 */
 export async function reauthenticate(password: string) {
+  const orgID = useIdentity.getState().org_id;
   advance();
   await confirmPassword({ password });
-  clear("unknown");
+  // 同一身份确认只替换会话投影，保持当前页面挂载以保留表单草稿。
+  await refreshIdentity(orgID);
   channel?.postMessage("session_changed");
-  await refreshIdentity();
 }
 
 /** switchOrganization 取消旧组织请求，再加载目标组织能力。 */

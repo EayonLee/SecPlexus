@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import en from "../../messages/en.json";
 import zh from "../../messages/zh-CN.json";
-import { resolveLocale } from "../../src/i18n/config";
+import { oppositeLocale, resolveLocale } from "../../src/i18n/config";
 
 function keys(value: object, prefix = ""): string[] {
   return Object.entries(value).flatMap(([key, entry]) =>
@@ -77,4 +77,10 @@ describe("platform localization", () => {
       expect(formatter.dateTime(date, { dateStyle: "medium", timeStyle: "medium" })).toContain("18:27");
     }
   });
+});
+
+test("language toggle alternates only between the supported English and Chinese locales", () => {
+  expect(oppositeLocale("en")).toBe("zh-CN");
+  expect(oppositeLocale("zh-CN")).toBe("en");
+  expect(oppositeLocale(oppositeLocale("en"))).toBe("en");
 });

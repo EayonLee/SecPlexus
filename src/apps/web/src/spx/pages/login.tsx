@@ -63,7 +63,6 @@ export function LoginPage() {
         <div className="flex w-full max-w-md flex-col gap-10 py-24 lg:py-32">
           <div className="flex flex-col gap-4 text-center">
             <h2 className="font-medium tracking-tight">{t("signIn")}</h2>
-            <p className="text-muted-foreground mx-auto max-w-xl">{t("description")}</p>
           </div>
           {auth.status === "unavailable" && (
             <Alert variant="destructive">

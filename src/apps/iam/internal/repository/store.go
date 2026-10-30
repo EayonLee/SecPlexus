@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,7 +14,6 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 )
 
 const ManagementLock int64 = 0x73707869616d
@@ -158,47 +156,22 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		}
 	}
 
-	var count, admins int
-	if err = tx.WithContext(ctx).Raw(`SELECT count(*),count(*) FILTER(WHERE is_super_admin AND status='active') FROM iam.users`).Row().Scan(&count, &admins); err != nil {
+	var count int64
+	if err = tx.WithContext(ctx).Table("iam.users").Count(&count).Error; err != nil {
 		return err
 	}
-
+	userID, err := syncAdministrator(ctx, tx, username, password)
+	if err != nil {
+		return err
+	}
 	if count == 0 {
-		username = strings.TrimSpace(username)
-		normalized, err := identity.NormalizeUsername(username)
-		if err != nil {
-			return err
-		}
-
-		hash, err := (identity.PasswordHasher{}).GenerateHash(password)
-		if err != nil {
-			return err
-		}
-
-		userID, orgID := uuid.New(), uuid.New()
-		if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.users(id,username,username_normalized,display_name,status,is_super_admin) VALUES($1,$2,$3,$2,'active',true)`, userID, username, normalized).Error; err != nil {
-			return err
-		}
-
-		if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.password_credentials(user_id,password_hash) VALUES($1,$2)`, userID, hash).Error; err != nil {
-			return err
-		}
-
+		orgID := uuid.New()
 		if err = CreateOrganization(ctx, tx, orgID, "default", "默认组织", userID, userID); err != nil {
 			return err
 		}
-
-		if err = AppendAudit(ctx, tx, Audit{
-			ActorType:  "deployment_operator",
-			Action:     "iam.initialize",
-			TargetType: "organization",
-			TargetID:   &orgID,
-			RequestID:  uuid.NewString(),
-		}); err != nil {
+		if err = AppendAudit(ctx, tx, Audit{ActorType: "deployment_operator", Action: "iam.initialize", TargetType: "organization", TargetID: &orgID, RequestID: uuid.NewString()}); err != nil {
 			return err
 		}
-	} else if admins == 0 {
-		return errors.New("accounts exist but no active super administrator; operator recovery is required")
 	}
 	// 只同步内置角色授权；自定义角色属于用户数据，不能被初始化覆盖。
 	if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT r.org_id,r.id,p.key FROM iam.roles r CROSS JOIN iam.permissions p WHERE r.kind='system' AND r.code='org_admin' AND p.scope='organization' AND p.status='active' ON CONFLICT DO NOTHING`).Error; err != nil {

@@ -25,6 +25,7 @@ export const zApiCreated = z.object({
 });
 
 export const zApiMember = z.object({
+  is_super_admin: z.boolean(),
   display_name: z.string(),
   id: z.string(),
   role_ids: z.array(z.string()).optional(),
@@ -103,26 +104,6 @@ export const zApiRole = z.object({
   version: z.string(),
 });
 
-export const zApiSecurityOverview = z.object({
-  login_lock_duration: z.string(),
-  login_max_failures: z.int(),
-  reauth_window: z.string(),
-  self_registration: z.boolean(),
-  session_absolute_timeout: z.string(),
-  session_idle_timeout: z.string(),
-});
-
-export const zApiSession = z.object({
-  absolute_expires_at: z.string().optional(),
-  authenticated_at: z.string().optional(),
-  client_ip: z.string().optional(),
-  current: z.boolean(),
-  id: z.string(),
-  idle_expires_at: z.string().optional(),
-  last_seen_at: z.iso.datetime({ offset: true }),
-  user_agent: z.string().optional(),
-});
-
 export const zApiUser = z.object({
   auth_version: z.string(),
   display_name: z.string(),
@@ -178,24 +159,24 @@ export const zResetUserPasswordBody = z
   })
   .strict();
 
-export const zSetSuperAdminBody = z
-  .object({
-    enabled: z.boolean(),
-    reason: z.string().min(1).max(500),
-  })
-  .strict();
+// Names are normalized once at the request boundary; Unicode-aware regex counts code points.
+const organizationName = z
+  .string()
+  .refine((value) => !/\p{Cc}/u.test(value))
+  .transform((value) => value.trim())
+  .pipe(z.string().regex(/^.{1,30}$/u));
 
 export const zCreateOrganizationBody = z
   .object({
-    slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/),
-    name: z.string().min(1).max(100),
-    admin_user_id: z.string(),
+    slug: z.string().regex(/^[a-z][a-z0-9_-]{1,28}[a-z0-9]$/),
+    name: organizationName,
+    admin_user_id: z.uuid(),
   })
   .strict();
 
 export const zUpdateOrganizationBody = z
   .object({
-    name: z.string().min(1).max(100),
+    name: organizationName,
     status: z.enum(["active", "suspended"]),
     authz_version: z.string().regex(/^[1-9][0-9]*$/),
   })
@@ -203,14 +184,14 @@ export const zUpdateOrganizationBody = z
 
 export const zUpdateCurrentOrganizationBody = z
   .object({
-    name: z.string().min(1).max(100),
+    name: organizationName,
     authz_version: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
 export const zCreateMemberBody = z
   .object({
-    user_id: z.string().optional(),
+    user_id: z.uuid().optional(),
     username: z
       .string()
       .regex(/^[A-Za-z][A-Za-z0-9_.-]{2,63}$/)
@@ -304,10 +285,6 @@ export type ApiPrincipal = z.infer<typeof zApiPrincipal>;
 export type ApiMe = z.infer<typeof zApiMe>;
 
 export type ApiRole = z.infer<typeof zApiRole>;
-
-export type ApiSecurityOverview = z.infer<typeof zApiSecurityOverview>;
-
-export type ApiSession = z.infer<typeof zApiSession>;
 
 export type ApiUser = z.infer<typeof zApiUser>;
 

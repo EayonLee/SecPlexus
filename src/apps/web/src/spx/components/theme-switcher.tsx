@@ -20,6 +20,7 @@ export function ThemeSwitcher() {
 
   return (
     <Button
+      variant="ghost"
       size="icon"
       onClick={() => setPreference("theme_mode", nextTheme)}
       aria-label={nextTheme === "dark" ? t("switchDark") : t("switchLight")}

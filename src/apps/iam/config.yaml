@@ -1,67 +1,62 @@
-# 应用监听。host为绑定IP，port为整数；公共URL用于Cookie与CSRF来源校验。
+# 统一 HTTP 监听；HTTPS 由外部入口处理。环境变量覆盖 YAML，默认值仅在本文件维护。
 app:
-  name: "iam"
-  host: "127.0.0.1"
-  port: 8081
-  public_url: "http://127.0.0.1:5173"
+  host: "${SPX_IAM_BIND_HOST-0.0.0.0}"
+  port: "${SPX_IAM_BIND_PORT-${SPX_IAM_PORT-8081}}"
   # 只信任明确配置的反向代理网段；多个网段用逗号分隔。
-  trusted_proxy_cidrs: ""
+  trusted_proxy_cidrs: "${SPX_IAM_TRUSTED_PROXY_CIDRS-}"
 
 # PostgreSQL默认连接全局配置；需要独立连接时修改本模块字段即可。
 # 运行、迁移和维护使用同一连接，账号需有本项目的建表和迁移权限。
 db:
-  host: "127.0.0.1"
-  port: 5432
-  name: "secplexus"
-  user: "secplexus"
-  password: "secplexus"
-  sslmode: "disable"
+  host: "${SPX_IAM_POSTGRES_HOST-${SPX_POSTGRES_HOST-127.0.0.1}}"
+  port: "${SPX_IAM_POSTGRES_PORT-${SPX_POSTGRES_PORT-5432}}"
+  name: "${SPX_IAM_POSTGRES_DATABASE-${SPX_POSTGRES_DATABASE-secplexus}}"
+  user: "${SPX_IAM_POSTGRES_USER-${SPX_POSTGRES_USER-secplexus}}"
+  password: "${SPX_IAM_POSTGRES_PASSWORD-${SPX_POSTGRES_PASSWORD-secplexus}}"
+  sslmode: "${SPX_IAM_POSTGRES_SSLMODE-${SPX_POSTGRES_SSLMODE-disable}}"
   # 完整DSN仅用于需要额外驱动参数的连接；通常填写上面的字段即可。
-  url: ""
+  url: "${SPX_IAM_POSTGRES_URL-${SPX_POSTGRES_URL-}}"
 
 # Redis共用全局连接，通过前缀和模块/业务模板区分key。
 cache:
-  host: "127.0.0.1"
-  port: 6379
+  host: "${SPX_IAM_REDIS_HOST-${SPX_REDIS_HOST-127.0.0.1}}"
+  port: "${SPX_IAM_REDIS_PORT-${SPX_REDIS_PORT-6379}}"
   # 外部 Redis 需预先建立对应 ACL 用户；自带 Compose 会按同一配置创建。
-  user: "default"
-  password: "secplexus"
-  db: 0
-  url: ""
+  user: "${SPX_IAM_REDIS_USER-${SPX_REDIS_USER-default}}"
+  password: "${SPX_IAM_REDIS_PASSWORD-${SPX_REDIS_PASSWORD-secplexus}}"
+  db: "${SPX_IAM_REDIS_DB-${SPX_REDIS_DB-0}}"
+  url: "${SPX_IAM_REDIS_URL-${SPX_REDIS_URL-}}"
 
-# 内部鉴权监听与TLS；相对路径以进程工作目录为准，环境变量可传绝对路径。
-internal:
-  host: "127.0.0.1"
-  port: 9081
-  tls_cert_file: "certs/iam.crt"
-  tls_key_file: "certs/iam.key"
-  clients:
-    console:
-      token: ""
-      actions: [iam.organizations.read]
+# 各调用服务独立认证，只能请求声明的权限检查；不能代替用户身份。
+service_clients:
+  console:
+    token: "${SPX_CONSOLE_IAM_TOKEN-}"
+    actions: [iam.organizations.read]
 
 # 账号与登录策略。密码、密钥和调用凭证通过环境变量或私有.env填写。
 auth:
-  csrf_key: ""
-  session_idle_timeout: "30m"
-  session_absolute_timeout: "8h"
-  reauth_window: "5m"
-  login_max_failures: 5
-  login_lock_duration: "15m"
+  web_origin: "${SPX_WEB_ORIGIN:-http://localhost:${SPX_WEB_PORT-5173}}"
+  csrf_key: "${SPX_IAM_CSRF_KEY-}"
+  session_idle_timeout: "${SPX_IAM_SESSION_IDLE_TIMEOUT-30m}"
+  session_absolute_timeout: "${SPX_IAM_SESSION_ABSOLUTE_TIMEOUT-8h}"
+  reauth_window: "${SPX_IAM_REAUTH_WINDOW-30m}"
+  login_max_failures: "${SPX_IAM_LOGIN_MAX_FAILURES-5}"
+  login_lock_duration: "${SPX_IAM_LOGIN_LOCK_DURATION-15m}"
+# 唯一超级管理员的身份与凭据；平台与运维重置接口均不可修改。
 bootstrap:
-  username: "admin"
-  # 仅空账号库需要；不会重置已有管理员密码。
-  password: "secplexus"
+  username: "${SPX_IAM_BOOTSTRAP_USERNAME-admin}"
+  # 持续权威凭据；配置变化会同步哈希并撤销旧会话，所有副本须一致。
+  password: "${SPX_IAM_BOOTSTRAP_PASSWORD-secplexus}"
 retention:
-  audit_days: 180
-  session_days: 30
+  audit_days: "${SPX_IAM_AUDIT_RETENTION_DAYS-180}"
+  session_days: "${SPX_IAM_SESSION_RETENTION_DAYS-30}"
 
 # 源码/二进制默认写根logs目录。容器可把file设为空，仅保留stdout。
 logging:
-  level: "info"
-  stdout: true
-  file: "logs/iam.log"
-  max_size_mb: 50
-  max_backups: 5
-  max_age_days: 14
-  compress: true
+  level: "${SPX_IAM_LOG_LEVEL-info}"
+  stdout: "${SPX_IAM_LOG_STDOUT-true}"
+  file: "${SPX_IAM_LOG_FILE-logs/iam.log}"
+  max_size_mb: "${SPX_IAM_LOG_MAX_SIZE_MB-50}"
+  max_backups: "${SPX_IAM_LOG_MAX_BACKUPS-5}"
+  max_age_days: "${SPX_IAM_LOG_MAX_AGE_DAYS-14}"
+  compress: "${SPX_IAM_LOG_COMPRESS-true}"

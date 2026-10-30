@@ -10,7 +10,6 @@ import {
   zApiPermissionItem,
   zApiPreview,
   zApiRole,
-  zApiSecurityOverview,
   zApiUser,
   type zCreateMemberBody,
   type zCreateOrganizationBody,
@@ -20,7 +19,6 @@ import {
   type zResetUserPasswordBody,
   type zSetMemberRolesBody,
   type zSetRolePermissionsBody,
-  type zSetSuperAdminBody,
   type zUpdateCurrentOrganizationBody,
   type zUpdateMemberBody,
   type zUpdateOrganizationBody,
@@ -34,8 +32,6 @@ export const createUser = (body: z.infer<typeof zCreateUserBody>) =>
   request({ method: "POST", url: "/api/v1/iam/users", data: body }, zApiCreated, 201);
 export const updateUser = ({ id, body }: { id: string; body: z.infer<typeof zUpdateUserBody> }) =>
   request({ method: "PATCH", url: `/api/v1/iam/users/${encodeURIComponent(id)}`, data: body }, z.void(), 204);
-export const setSuperAdmin = ({ id, body }: { id: string; body: z.infer<typeof zSetSuperAdminBody> }) =>
-  request({ method: "PUT", url: `/api/v1/iam/users/${encodeURIComponent(id)}/super-admin`, data: body }, z.void(), 204);
 export const resetUserPassword = ({ id, body }: { id: string; body: z.infer<typeof zResetUserPasswordBody> }) =>
   request(
     { method: "POST", url: `/api/v1/iam/users/${encodeURIComponent(id)}/reset-password`, data: body },
@@ -184,5 +180,3 @@ export const listOrganizationAuditEvents = (orgId: string, query?: ListQuery, si
     { url: `/api/v1/iam/orgs/${encodeURIComponent(orgId)}/audit-events`, params: query, signal },
     pageSchema(zApiAuditEvent),
   );
-export const securityOverview = (signal?: AbortSignal) =>
-  request({ url: "/api/v1/iam/security/overview", signal }, zApiSecurityOverview);

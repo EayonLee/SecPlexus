@@ -79,7 +79,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = first.Revoke(loaded, principal, principal.SessionID, false, "logout", uuid.NewString()); err != nil {
+	if err = first.Revoke(loaded, principal, principal.SessionID, "logout", uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	// 延迟写入可以恢复库内会话数据，但不能恢复已撤销的逻辑身份。
@@ -150,8 +150,8 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 	if _, err = first.Create(other, user, uuid.NewString(), "integration", "127.0.0.1", false); err == nil {
 		t.Fatal("stale password snapshot created a session")
 	}
-	// 重复初始化不需要初始密码，也不能重置已有凭据。
-	if err = store.Seed(ctx, "admin", ""); err != nil {
+	// 重复应用相同的管理员配置不得重置已有凭据。
+	if err = store.Seed(ctx, "admin", secret); err != nil {
 		t.Fatal(err)
 	}
 

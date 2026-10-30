@@ -1,13 +1,19 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { GET } from "../../src/app/api/v1/[module]/[...path]/route";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
 it("returns one safe 503 Result with correlated headers and controlled dependency diagnostics", async () => {
+  vi.stubEnv("SPX_WEB_PORT", "15173");
+  vi.stubEnv("SPX_IAM_HOST", "127.0.0.1");
+  vi.stubEnv("SPX_IAM_PORT", "18081");
+  vi.stubEnv("SPX_CONSOLE_HOST", "127.0.0.1");
+  vi.stubEnv("SPX_CONSOLE_PORT", "18080");
+  const { GET } = await import("../../src/app/api/v1/[module]/[...path]/route");
   const logs = vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.stubGlobal(
     "fetch",

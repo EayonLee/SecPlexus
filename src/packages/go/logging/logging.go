@@ -34,7 +34,7 @@ func (c Config) Validate() error {
 	}
 
 	if c.File != "" && (c.MaxSizeMB < 1 || c.MaxSizeMB > 1024 || c.MaxBackups < 1 || c.MaxBackups > 100 || c.MaxAgeDays < 1 || c.MaxAgeDays > 3650) {
-		return errors.New("invalid log rotation limits")
+		return errors.New("logging.max_size_mb must be 1–1024, logging.max_backups 1–100 and logging.max_age_days 1–3650")
 	}
 
 	return nil

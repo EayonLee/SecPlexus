@@ -12,3 +12,7 @@ export function resolveLocale(value: string | undefined): Locale {
 }
 
 export const openGraphLocales: Record<Locale, string> = { en: "en_US", "zh-CN": "zh_CN" };
+
+export function oppositeLocale(locale: string): Locale {
+  return locale === "zh-CN" ? "en" : "zh-CN";
+}

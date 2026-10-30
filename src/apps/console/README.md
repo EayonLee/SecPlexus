@@ -25,7 +25,7 @@ sequenceDiagram
     participant C as Console
     participant I as IAM
     W->>C: 组织路径、HttpOnly Cookie
-    C->>I: TLS + 服务凭证 + 原请求上下文
+    C->>I: HTTP + 服务凭证 + 原请求上下文
     I->>I: 检查会话、组织、当前授权
     I-->>C: Principal + organization scope + decision_id
     C->>C: 校验返回范围与路由组织一致
@@ -38,8 +38,8 @@ sequenceDiagram
 - `internal/bootstrap`：IAM 客户端、HTTP 生命周期与优雅退出。
 - `internal/config`：独立YAML配置及环境变量覆盖。
 - `internal/handler`：声明路由所需action、解析组织并检查结构化scope；不使用浏览器的身份或角色头。
-- [`iamclient`](../../packages/go/iamclient/client.go)：复用的IAM客户端，固定内部API路径、TLS证书校验、有界请求、错误契约；不接受浏览器指定所需action。
-- [原生路由](internal/router/routes.go)、[响应模型](internal/handler/models.go)及[内部 IAM 客户端](../../packages/go/iamclient/client.go)定义实际边界；内部授权不进入 Web。
+- [`iamclient`](../../packages/go/iamclient/client.go)：复用的IAM客户端，统一API路径、标准HTTP传输、有界请求、错误契约；不接受浏览器指定所需action。
+- [原生路由](internal/router/routes.go)、[响应模型](internal/handler/models.go)及[IAM 客户端](../../packages/go/iamclient/client.go)定义实际边界；服务凭证不进入 Web。
 
 ## API
 
@@ -52,14 +52,14 @@ sequenceDiagram
 
 ## 配置与运行
 
-直接维护[config.yaml](config.yaml)：app为服务名字、host及port；iam为内部地址、token及TLS CA；logging为JSON日志与轮转。没有数据库、Redis或空业务配置占位。
+直接维护[config.yaml](config.yaml)：app为监听host及port；iam为连接host/port及服务token；logging为JSON日志与轮转。没有数据库、Redis或空业务配置占位。
 
 ```sh
 # 从仓库根执行；进程环境提供私有凭证。
 go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 ```
 
-普通YAML保存字面默认值，Viper显式绑定环境，mapstructure严格解码；不支持旧占位符语法。主要变量为`SPX_CONSOLE_HOST`、`SPX_CONSOLE_PORT`、`SPX_CONSOLE_IAM_BASE_URL`、`SPX_CONSOLE_IAM_TOKEN`、`SPX_CONSOLE_IAM_CA_FILE`。token直接来自环境，不通过凭证文件。
+YAML字段直接声明环境变量和默认值，参数组件逐值展开，Viper/mapstructure严格解码。根连接变量为`SPX_IAM_HOST/PORT`，本机监听用`SPX_CONSOLE_BIND_HOST`及`SPX_CONSOLE_PORT`；服务凭证用`SPX_CONSOLE_IAM_TOKEN`。专用 IAM host/port 环境覆盖仅用于调用方确有不同目标的场景。HTTPS由Nginx等入口处理，应用无scheme或证书配置。token直接来自环境，不通过凭证文件。
 
 默认本机日志为`logs/console.log`，同时输出stdout；容器默认仅stdout，由Docker轮转。与IAM及其他副本使用不同日志文件，不能共写同一个轮转文件。
 
@@ -73,3 +73,7 @@ go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 普通接口通过 `src/packages/go/result` 返回统一 Result，SSE 直接使用流协议。公共请求标识、日志和异常恢复在共享 HTTP middleware；组织访问由 IAM 内部客户端校验，不读取 IAM 私表。config 只解析/校验文件，bootstrap 按配置创建客户端并负责关闭空闲连接。Console 没有实际 DB/cache 依赖，不增加占位配置。
 
 运行诊断见 [日志与错误定位](../../../docs/observability.md)。内部 IAM 调用记录 upstream_request_id 和受控失败阶段，SSE 记录建立/结束及撤权原因，不记录请求凭据。
+
+## 离线配置检查
+
+运行 `go run ./src/apps/console/cmd check-config --config src/apps/console/config.yaml` 校验完整运行配置；不连接依赖、不执行迁移、不创建业务日志。根目录 `pnpm config:check` 按模块注入统一环境并校验所有选中模块；必须先填写根 `.env`。配置字段、优先级、默认值与重启要求见[配置指南](../../../docs/configuration.md)。

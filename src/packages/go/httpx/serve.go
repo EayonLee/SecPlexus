@@ -12,7 +12,6 @@ import (
 )
 
 // Serve 统一拥有本进程的监听，任一启动失败或上下文取消都会释放全部监听与活跃请求。
-// TLS 服务通过 Server.TLSConfig 提供已加载的证书，初始化失败不能留下其他已启动的监听。
 func Serve(ctx context.Context, servers ...*http.Server) error {
 	listeners := make([]net.Listener, 0, len(servers))
 	defer func() {
@@ -46,12 +45,7 @@ func serveListeners(ctx context.Context, servers []*http.Server, listeners []net
 		}
 		listener := listeners[i]
 		group.Go(func() error {
-			var err error
-			if server.TLSConfig != nil {
-				err = server.ServeTLS(listener, "", "")
-			} else {
-				err = server.Serve(listener)
-			}
+			err := server.Serve(listener)
 			if errors.Is(err, http.ErrServerClosed) {
 				return nil
 			}

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -101,45 +100,4 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 	}
 
 	return result, nil
-}
-
-// SessionsList 返回当前用户仍有效的会话，不暴露令牌摘要。
-func (s *Service) SessionsList(ctx context.Context) (map[string]any, error) {
-	p, err := s.Sessions.Resolve(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := repository.ActiveSessions(ctx, s.Store.DB, p.UserID, p.AuthVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	items := []map[string]any{}
-	for rows.Next() {
-		var id, agent, ip string
-		var authenticated, seen, idle, absolute time.Time
-		if err = rows.Scan(&id, &authenticated, &seen, &idle, &absolute, &agent, &ip); err != nil {
-			return nil, err
-		}
-
-		items = append(items, map[string]any{
-			"id":                  id,
-			"authenticated_at":    authenticated,
-			"last_seen_at":        seen,
-			"idle_expires_at":     idle,
-			"absolute_expires_at": absolute,
-			"user_agent":          agent,
-			"client_ip":           ip,
-			"current":             id == p.SessionID,
-		})
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return map[string]any{"items": items}, nil
 }

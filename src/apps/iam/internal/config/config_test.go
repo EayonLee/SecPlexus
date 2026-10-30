@@ -27,7 +27,7 @@ func configFile(t *testing.T) string {
 func TestConfigurationPrecedence(t *testing.T) {
 	file := configFile(t)
 	data, _ := os.ReadFile(file)
-	data = []byte(strings.Replace(string(data), "port: 8081", "port: 9081", 1))
+	data = []byte(strings.Replace(string(data), "SPX_IAM_PORT-8081", "SPX_IAM_PORT-9081", 1))
 	if err := os.WriteFile(file, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestConfigurationPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.App.Port != 9082 || cfg.Auth.SessionIdleTimeout != 30*time.Minute || cfg.Auth.SessionAbsoluteTimeout != 8*time.Hour {
+	if cfg.App.Port != 9082 || cfg.Auth.SessionIdleTimeout != 30*time.Minute || cfg.Auth.ReauthWindow != 30*time.Minute || cfg.Auth.SessionAbsoluteTimeout != 8*time.Hour {
 		t.Fatal("incorrect configuration precedence")
 	}
 
@@ -149,8 +149,8 @@ func TestGlobalRedisConnection(t *testing.T) {
 	}
 }
 
-func TestPostgresModelessEnvironment(t *testing.T) {
-	t.Setenv("SPX_POSTGRES_MODELESS", "require")
+func TestPostgresSSLModeEnvironment(t *testing.T) {
+	t.Setenv("SPX_POSTGRES_SSLMODE", "require")
 	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestPostgresModelessEnvironment(t *testing.T) {
 	}
 
 	if cfg.DB.SSLMode != "require" || parsed.Query().Get("sslmode") != "require" {
-		t.Fatal("数据库 TLS 模式未从 SPX_POSTGRES_MODELESS 传递到连接地址")
+		t.Fatal("数据库 TLS 模式未从 SPX_POSTGRES_SSLMODE 传递到连接地址")
 	}
 }
 
@@ -204,7 +204,7 @@ func TestProvidedSecurityConfigurationIsValidatedDuringLoad(t *testing.T) {
 	}
 }
 
-func TestInternalClientActionsMustExistInTheContract(t *testing.T) {
+func TestServiceClientActionsMustExistInTheContract(t *testing.T) {
 	file := configFile(t)
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -216,5 +216,40 @@ func TestInternalClientActionsMustExistInTheContract(t *testing.T) {
 	}
 	if _, err := Load(file); err == nil {
 		t.Fatal("unknown internal action accepted")
+	}
+}
+
+// TestDefaultHTTPNeedsNoCertificates 默认服务在凭证齐全时无需证书。
+func TestDefaultHTTPNeedsNoCertificates(t *testing.T) {
+	t.Setenv("SPX_IAM_CSRF_KEY", strings.Repeat("k", 32))
+	t.Setenv("SPX_CONSOLE_IAM_TOKEN", strings.Repeat("t", 32))
+	cfg, err := Load(configFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cfg.ValidateServe(); err != nil {
+		t.Fatal("default HTTP must not require certificates", err)
+	}
+}
+
+// TestConnectionHostDoesNotBindListener 连接目标不能改变本地监听；后备值只来自 YAML。
+func TestConnectionHostDoesNotBindListener(t *testing.T) {
+	t.Setenv("SPX_IAM_HOST", "iam.corp")
+	cfg, err := Load(configFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.Host != "0.0.0.0" {
+		t.Fatal("connection address changed listener")
+	}
+	t.Setenv("SPX_IAM_BIND_HOST", "127.0.0.1")
+	t.Setenv("SPX_IAM_BIND_PORT", "18081")
+	t.Setenv("SPX_IAM_PORT", "9443")
+	cfg, err = Load(configFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.Host != "127.0.0.1" || cfg.App.Port != 18081 {
+		t.Fatal("explicit listener override not respected")
 	}
 }

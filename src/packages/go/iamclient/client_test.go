@@ -22,7 +22,7 @@ func TestTransportFailureKeepsCauseAndSafeResult(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	client, err := New(server.URL, strings.Repeat("x", 32), "")
+	client, err := New(server.URL, strings.Repeat("x", 32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,8 @@ func TestTransportFailureKeepsCauseAndSafeResult(t *testing.T) {
 	}
 }
 
-// TestGeneratedInternalClientKeepsResultAndResourceBoundaries 通过真实TLS校验生成客户端和项目策略的组合。
-func TestGeneratedInternalClientKeepsResultAndResourceBoundaries(t *testing.T) {
+// TestClientKeepsResultAndResourceBoundaries 通过真实 HTTP 校验客户端和项目结果边界。
+func TestClientKeepsResultAndResourceBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		status  int
@@ -55,16 +55,16 @@ func TestGeneratedInternalClientKeepsResultAndResourceBoundaries(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			credential := strings.Repeat("x", 32)
-			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/internal/v1/iam/authorize" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer "+credential || r.Header.Get("Cookie") != "" {
-					t.Error("generated request violated internal boundary")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/iam/authorize" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer "+credential || r.Header.Get("Cookie") != "" {
+					t.Error("request violated service authentication boundary")
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.payload))
 			}))
 			defer server.Close()
-			client, err := New(server.URL, credential, "")
+			client, err := New(server.URL, credential)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,5 +84,19 @@ func TestGeneratedInternalClientKeepsResultAndResourceBoundaries(t *testing.T) {
 				t.Fatalf("want status %d, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// TestURLConfiguration 只接受 HTTP(S) origin，不能注入路径、凭据或其他传输协议。
+func TestURLConfiguration(t *testing.T) {
+	for _, origin := range []string{"http://127.0.0.1:8081", "https://127.0.0.1:8443", "http://iam.corp:8081"} {
+		if err := ValidateConfig(origin, strings.Repeat("x", 32), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, origin := range []string{"ftp://iam", "http://user:pass@iam", "http://iam/path", "http://iam?token=x", "http://iam#fragment"} {
+		if err := ValidateConfig(origin, strings.Repeat("x", 32), true); err == nil {
+			t.Fatal("invalid origin accepted")
+		}
 	}
 }

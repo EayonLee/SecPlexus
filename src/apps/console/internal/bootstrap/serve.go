@@ -20,7 +20,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	if err := cfg.ValidateServe(); err != nil {
 		return err
 	}
-	logger, closeLog, err := logging.Open(cfg.Logging, cfg.App.Name)
+	logger, closeLog, err := logging.Open(cfg.Logging, "console")
 	if err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	slog.SetDefault(logger)
 	credential := cfg.IAM.Token
-	client, err := iamclient.New(cfg.IAM.BaseURL, credential, cfg.IAM.CAFile)
+	client, err := iamclient.New(cfg.IAM.BaseURL, credential)
 	if err != nil {
 		return err
 	}

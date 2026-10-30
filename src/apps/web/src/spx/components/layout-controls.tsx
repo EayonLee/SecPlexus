@@ -80,7 +80,7 @@ export function LayoutControls() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button size="icon" aria-label={t("title")} title={t("title")}>
+        <Button variant="ghost" size="icon" aria-label={t("title")} title={t("title")}>
           <Palette />
         </Button>
       </PopoverTrigger>

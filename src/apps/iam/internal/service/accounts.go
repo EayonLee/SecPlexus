@@ -98,7 +98,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			target, err := repository.NewQueries(tx).LockMutableUser(ctx, id)
 			if err != nil {
 				return err
 			}
@@ -117,50 +117,6 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 				return err
 			}
 
-			return repository.ProtectLastAdministrators(ctx, tx)
-		},
-	)
-}
-
-// SetSuperAdmin 变更超级管理员身份并保护管理员不变量。
-func (s *Service) SetSuperAdmin(ctx context.Context, userID string, enabled bool, reason, requestID string) error {
-	if strings.TrimSpace(reason) == "" {
-		return repository.ErrInvalid
-	}
-
-	return s.Manage(
-		ctx,
-		iamclient.PermissionIAMPlatformSuperAdminsManage,
-		"",
-		requestID,
-		"user",
-		uuidPointer(userID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
-			id, err := uuid.Parse(userID)
-			if err != nil {
-				return repository.ErrInvalid
-			}
-
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
-			if err != nil {
-				return err
-			}
-
-			if target.Status != "active" {
-				return repository.ErrInvalid
-			}
-
-			if err = repository.SetSuperAdmin(ctx, tx, id, enabled); err != nil {
-				return err
-			}
-
-			if err = repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
-				RevokeReason: text("admin_identity_change")}); err != nil {
-				return err
-			}
-
-			metadata["enabled"] = enabled
-			metadata["reason"] = reason
 			return repository.ProtectLastAdministrators(ctx, tx)
 		},
 	)
@@ -186,7 +142,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 				return repository.ErrInvalid
 			}
 
-			if _, err = repository.NewQueries(tx).LockUser(ctx, id); err != nil {
+			if _, err = repository.NewQueries(tx).LockMutableUser(ctx, id); err != nil {
 				return err
 			}
 
