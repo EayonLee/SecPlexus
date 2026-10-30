@@ -19,7 +19,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -79,7 +79,6 @@ export function RecentLeadsTable({ data }: { data: RecentLeadRow[] }) {
     <Card>
       <CardHeader>
         <CardTitle>{t("recentLeads")}</CardTitle>
-        <CardDescription>{t("recentLeadsDescription")}</CardDescription>
         <CardAction>
           <div className="flex items-center gap-2">
             <DropdownMenu>

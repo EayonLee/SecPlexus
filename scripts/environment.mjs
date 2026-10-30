@@ -27,19 +27,18 @@ export function loadEnvironment(root, environment = process.env) {
 }
 
 export function webEnvironment(environment) {
-  const values = Object.fromEntries(Object.entries(environment).filter(([key]) =>
-    !key.startsWith('SPX_') || key.startsWith('SPX_WEB_')));
-  if (environment.SPX_PUBLIC_URL) values.NEXT_PUBLIC_APP_URL = environment.NEXT_PUBLIC_APP_URL || environment.SPX_PUBLIC_URL;
-  return values;
+  const allowed = new Set(['SPX_WEB_PORT','SPX_WEB_BIND_HOST','SPX_IAM_HOST','SPX_IAM_PORT','SPX_CONSOLE_HOST','SPX_CONSOLE_PORT']);
+  return Object.fromEntries(Object.entries(environment).filter(([key]) =>
+    key.startsWith('SPX_') ? allowed.has(key) : true));
 }
 
-export function moduleEnvironment(environment, module, initializing = false) {
-  const allowed = new Set(module === 'iam' ? ['SPX_PUBLIC_URL', 'SPX_CONSOLE_IAM_TOKEN'] : []);
+export function moduleEnvironment(environment, module) {
+  const allowed = new Set(module === 'iam' ? ['SPX_WEB_ORIGIN', 'SPX_CONSOLE_IAM_TOKEN'] : ['SPX_IAM_HOST','SPX_IAM_PORT']);
   return Object.fromEntries(Object.entries(environment).filter(([key]) => {
     if (!key.startsWith('SPX_')) return !key.startsWith('NEXT_PUBLIC_');
     if (allowed.has(key)) return true;
     if (module === 'iam' && (key.startsWith('SPX_POSTGRES_') || key.startsWith('SPX_REDIS_'))) return true;
     if (!key.startsWith(`SPX_${module.toUpperCase()}_`)) return false;
-    return initializing || !key.startsWith('SPX_IAM_BOOTSTRAP_');
+    return true;
   }));
 }

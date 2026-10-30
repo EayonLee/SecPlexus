@@ -23,10 +23,11 @@ Install Go 1.27.3, Node.js 22.12+ (24 recommended), and pnpm 10.32.1.
 
 ```sh
 cp .env.example .env
-pnpm certs:generate
-# Fill the database/bootstrap passwords, CSRF key and internal token in .env.
+chmod 600 .env
+# Fill the database/administrator passwords, CSRF key and internal token in .env.
 # Use existing PostgreSQL/Redis, or explicitly deploy them:
 pnpm compose:up postgres redis
+pnpm config:check
 make dev
 ```
 
@@ -42,16 +43,16 @@ make stop        # Stop this checkout's applications and containers; retain data
 ```
 
 IAM provides real login, voluntary password changes, revocable sessions, organizations,
-custom roles, and audit records. The initial administrator defaults to `admin/secplexus` for an empty account database.
-Override its initial password with SPX_IAM_BOOTSTRAP_PASSWORD.
-The management center and personal security pages use real APIs. Console currently
+custom roles, and audit records. The unique system administrator defaults to `admin/secplexus` and is configuration-managed.
+Set `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` and restart all IAM replicas to update it; application pages cannot change its identity or password.
+The management center and personal settings pages use real APIs. Console currently
 verifies organization access and SSE authorization through IAM; business workflows
-are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based intelligent security workbench at `/dashboard` and real IAM pages at `/login`, `/account` and `/management`. Other template pages and menus are removed; the workbench currently displays sample data. The Web interface supports English and Simplified Chinese through next-intl.
+are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based intelligent security workbench at `/dashboard` and real IAM pages at `/login`, `/settings/profile`, `/settings/account` and `/management`. Other template pages and menus are removed; the workbench currently displays sample data. The Web interface supports English and Simplified Chinese through next-intl.
 
 See [configuration and startup](docs/configuration.md), [testing](docs/testing.md),
 [IAM architecture](src/apps/iam/README.md), and [Web](src/apps/web/README.md).
 
-Go modules use plain `config.yaml`, Viper/mapstructure for explicit environment bindings and strict typed decoding, and Cobra commands.
+Go modules declare environment variables and defaults in `config.yaml`, use mature POSIX parameter expansion and Viper/mapstructure for strict typed decoding, and expose Cobra commands.
 Local rotating JSON logs use `logs/iam.log` and `logs/console.log`; containers use stdout.
 
 ## Repository layout

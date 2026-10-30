@@ -11,15 +11,17 @@ function buildWorkspace(t, configuration, overrides = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(path.join(root, 'scripts'));
   mkdirSync(path.join(root, 'tools'));
-  for (const file of ['build.mjs', 'environment.mjs']) {
+  for (const file of ['build.mjs', 'environment.mjs', 'endpoints.mjs']) {
     copyFileSync(fileURLToPath(new URL(file, import.meta.url)), path.join(root, 'scripts', file));
   }
+  copyFileSync(fileURLToPath(new URL('../.env.example', import.meta.url)),path.join(root,'.env.example'));
   if (configuration !== undefined) writeFileSync(path.join(root, '.env'), configuration);
   writeFileSync(path.join(root, 'tools/go'), `#!${process.execPath}\n`, { mode: 0o755 });
   writeFileSync(path.join(root, 'tools/pnpm'), `#!${process.execPath}
 require('node:fs').writeFileSync('web-build.json', JSON.stringify({
-  publicURL: process.env.NEXT_PUBLIC_APP_URL,
-  iamOrigin: process.env.SPX_WEB_IAM_PROXY_TARGET,
+  trustedOrigin: process.env.SPX_WEB_ORIGIN,
+  iamHost: process.env.SPX_IAM_HOST,
+  iamPort: process.env.SPX_IAM_PORT,
   databasePassword: process.env.SPX_POSTGRES_PASSWORD,
   internalToken: process.env.SPX_CONSOLE_IAM_TOKEN,
 }));
@@ -32,17 +34,15 @@ require('node:fs').writeFileSync('web-build.json', JSON.stringify({
 }
 
 test('root build passes public configuration to Web and excludes backend credentials', (t) => {
-  const configuration = 'SPX_PUBLIC_URL=https://spx.example\nSPX_WEB_IAM_PROXY_TARGET=https://iam.example\nSPX_POSTGRES_PASSWORD=database-only\nSPX_CONSOLE_IAM_TOKEN=internal-only\n';
+  const configuration = 'SPX_WEB_ORIGIN=https://spx.example\nSPX_IAM_HOST=iam.corp\nSPX_IAM_PORT=18081\nSPX_POSTGRES_PASSWORD=database-only\nSPX_CONSOLE_IAM_TOKEN=internal-only\n';
   const { root, web } = buildWorkspace(t, configuration);
-  assert.deepEqual(web, { publicURL: 'https://spx.example', iamOrigin: 'https://iam.example' });
+  assert.deepEqual(web, { iamHost: 'iam.corp', iamPort: '18081' });
   assert.equal(readFileSync(path.join(root, '.env'), 'utf8'), configuration);
 });
 
-test('root build honors an explicit public metadata override', (t) => {
-  const { web } = buildWorkspace(t, 'SPX_PUBLIC_URL=https://spx.example\nNEXT_PUBLIC_APP_URL=https://file.example\n', {
-    NEXT_PUBLIC_APP_URL: 'https://process.example',
-  });
-  assert.equal(web.publicURL, 'https://process.example');
+test('root build excludes authentication origin from Web because metadata needs no absolute URL', (t) => {
+ const {web}=buildWorkspace(t,'SPX_WEB_ORIGIN=https://file.example\n',{SPX_WEB_ORIGIN:'https://process.example'});
+ assert.equal(web.trustedOrigin,undefined);
 });
 
 test('root build works without creating development configuration', (t) => {

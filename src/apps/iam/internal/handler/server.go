@@ -21,6 +21,7 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
+	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
@@ -29,7 +30,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
-	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 )
 
 // Server 显式装配 IAM 用例与 HTTP 安全边界。
@@ -181,15 +181,15 @@ func (s *Server) AuthContext(c *gin.Context) {
 	result.Success(c.Writer, map[string]string{"csrf_token": csrf.Token(c.Request)})
 }
 
-// AuthorizeInternal 先确认服务身份，再按转发的原始会话执行权限检查。
-func (s *Server) AuthorizeInternal(c *gin.Context) {
+// AuthorizeRequest 先确认服务身份，再按转发的原始会话执行权限检查。
+func (s *Server) AuthorizeRequest(c *gin.Context) {
 	r := c.Request
 	var input iamclient.AuthorizeRequest
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
-	if !s.Security.InternalClient(r, input.Action) {
+	if !s.Security.ServiceClient(r, input.Action) {
 		httpx.Reject(c, authorization.ErrDenied)
 		return
 	}

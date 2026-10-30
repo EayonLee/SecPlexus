@@ -6,15 +6,16 @@
 | --- | --- |
 | `/login` | Real IAM username/password login and mandatory password change |
 | `/dashboard` | Authenticated security workbench based on CRM V1; template sample data |
-| `/account/profile`, `/account/security` | Personal identity, password changes, recent authentication, device revocation and logout |
+| `/settings/profile` | Profile details and organization membership |
+| `/settings/account` | Account identity and password changes |
 | `/management/orgs/{org_id}/...` | Organization settings, members, roles, permission previews and audit |
-| `/management/platform/...`, `/management/system/security` | Platform users, organizations, audit and read-only security overview |
+| `/management/platform/...` | Platform accounts, organization directory and platform audit |
 
 The product shell uses the shared Sidebar, form, dialog and table components, plus its existing layout controls and theme switcher. Navigation follows the server capability projection. The single workbench retains CRM V1 sample data and never counts as real business statistics. The Dashboards group contains only “安全智驾工作台”; real IAM navigation remains capability-based.
 
 IAM credentials stay in HttpOnly cookies. Zustand holds only the current in-memory identity and capability projection. No session, token, role, permission or business data is persisted in localStorage; only a remembered username and presentation preferences may persist. Identity epochs and cancellation reject stale responses after logout or organization changes. BroadcastChannel synchronizes session changes across tabs without sharing secrets. URL organization context remains independent per tab.
 
-`src/app/api/v1/[module]/[...path]/route.ts` streams public IAM/Console requests to server-configured origins. It forwards Cookie, Origin and CSRF context, preserves response status and Set-Cookie, and does not expose internal APIs or service credentials. Backend authorization remains authoritative. A dependency failure returns 503 and pauses interaction without turning it into a successful logout.
+`src/app/api/v1/[module]/[...path]/route.ts` streams IAM/Console API requests to server-configured origins. It forwards Cookie, Origin and CSRF context, preserves response status and Set-Cookie, and does not forward Authorization headers or receive service credentials. Backend authorization remains authoritative. A dependency failure returns 503 and pauses interaction without turning it into a successful logout.
 
 ## Development and build
 
@@ -30,9 +31,11 @@ pnpm preview
 make stop
 ```
 
-Root startup reads the root `.env`, derives backend addresses, and supplies `SPX_WEB_IAM_PROXY_TARGET` and `SPX_WEB_CONSOLE_PROXY_TARGET` only to the Next server. `SPX_WEB_HOST` controls the bind address; the browser port comes from `SPX_PUBLIC_URL`. `make dev` applies IAM migrations against configured development infrastructure; it never starts Docker.
+Root startup reads the root `.env` as the shared configuration source. `SPX_IAM_HOST/PORT` and `SPX_CONSOLE_HOST/PORT` supply server-only connection locations to every caller. `SPX_WEB_PORT` controls the HTTP listener; `SPX_WEB_ORIGIN` is an IAM security input describing the trusted browser entry; Web metadata does not need an absolute origin. Application servers use HTTP; Nginx or another reverse proxy owns HTTPS and certificates.
 
-Root builds also load the root `.env` when present and pass filtered Web configuration. `SPX_PUBLIC_URL` supplies the default public metadata origin, with an optional `NEXT_PUBLIC_APP_URL` override. Process values take precedence. Public values are fixed by the production build, so rebuild after changing them; runtime listener or proxy changes require a restart. A build can run without creating a development `.env`.
+Web startup loads native environment files with official `@next/env`, then invokes the Next CLI on the configured port, defaulting its bind address to `0.0.0.0`. Standalone Web uses the module `.env.example` → `.env.local` with the same keys. Root startup already injects them, so a second file is unnecessary. Root `pnpm dev web` / `pnpm preview web` starts only Web against existing services, without Go migration or startup.
+
+Root builds use the same filtered environment, falling back to non-secret example settings when no private file exists. Web never receives database/Redis credentials, administrator passwords or service credentials. Web does not receive the IAM origin setting or maintain a separate metadata URL. Restart after changing runtime configuration.
 
 For independent Web development, copy [.env.example](.env.example) to `.env.local`, configure the public API origins, and run `pnpm dev` here. This uses Next.js native environment loading and the default port 3000. Keep IAM's public origin consistent with the browser entry. Never place secrets in `NEXT_PUBLIC_*`.
 
@@ -57,7 +60,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e --docker
 ```
 
-These commands run in `src/apps/web/`. E2E provisions owned isolated infrastructure and uses the repository startup entry; it does not read developer credentials. For deployment, set `NEXT_PUBLIC_APP_URL` to the browser origin before building. This is public metadata, never a credential.
+These commands run in `src/apps/web/`. E2E provisions owned isolated infrastructure and uses the repository startup entry; it does not read developer credentials. For remote or reverse-proxy access, set root `SPX_WEB_ORIGIN` to the actual browser origin so IAM can validate requests and apply Secure Cookie policy.
 
 ## Selective template adoption
 
@@ -69,7 +72,7 @@ Replace sample data with the owning module's generated API client when that busi
 
 ## Internationalization
 
-The application uses `next-intl` with `en` and `zh-CN` catalogs in `messages/`. English is the default. A language menu is available on sign-in, authenticated pages, service-error and not-found views. The validated `spx-locale` preference cookie is separate from IAM credentials and is written by a Server Action; Next updates the current UI and layouts after the cookie changes. Routes and API contracts keep their existing paths without locale prefixes.
+The application uses `next-intl` with `en` and `zh-CN` catalogs in `messages/`. English is the default. A direct English/Chinese toggle is available on sign-in, authenticated pages, service-error and not-found views. The validated `spx-locale` preference cookie is separate from IAM credentials and is written by a Server Action; Next updates the current UI and layouts after the cookie changes. Routes and API contracts keep their existing paths without locale prefixes.
 
 `src/i18n/config.ts` owns supported locales, defaults and the display time zone. `request.ts` loads the matching catalog per request. The root provider shares that configuration with client components, and `html lang`, metadata and page titles follow the same locale. Dashboard is the English page name; 安全智驾工作台 is the Chinese name.
 
@@ -85,7 +88,7 @@ Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboar
 
 `spx/iam/session.ts` configures Axios identity/CSRF behavior before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session, identity and organization authorization versions. Logout/organization changes cancel and clear caches. Password login, confirmation, change and reset call module API functions directly and never enter MutationCache or persistent storage.
 
-IAM lists use Query and the existing TanStack Table with controlled server pagination. RHF uses generated Zod schemas and existing shadcn Field/FieldError controls; business pages declare fields explicitly. There is no string-map form DSL or effect/revision list fetcher. See the [role implementation walkthrough](../../../docs/development/role-management.md).
+IAM lists use Query and the existing TanStack Table with controlled server pagination. RHF uses authored Zod schemas and existing shadcn Field/FieldError controls; business pages declare fields explicitly. There is no string-map form DSL or effect/revision list fetcher. See the [role implementation walkthrough](../../../docs/development/role-management.md).
 
 
 ## 可信入口与协议边界
@@ -95,3 +98,23 @@ IAM lists use Query and the existing TanStack Table with controlled server pagin
 本机链路为浏览器 → Next → IAM/Console。Next 不透传客户端来源头；当前来源限流按代理连接来源计数，多人公网真实来源隔离尚未实现。Cookie/CSRF、Allow/Retry-After、多 Set-Cookie 与 SSE 保留各自协议，IAM API 不绕行 Console。
 
 Axios 负责传输、JSON、超时和取消，平台拦截器按模块 API 声明核对成功状态和 Zod 消费模型；204 校验空正文；HTML 或未声明成功状态不能触发 Mutation 成功。身份范围由会话/授权版本和能力决定，变更时统一取消请求并清缓存，二次认证开始及成功切换均隔离旧请求，错误密码保留有效身份。
+
+
+## Settings and administration experience
+
+The avatar menu exposes Settings and System. Settings has separate Profile and Account routes under the same application shell. Device management is not exposed. System has three task sections: Members & access, Organization management and Audit logs. Capability-filtered tabs retain the existing management deep links and distinguish organization membership from platform account administration; merging navigation never grants access.
+
+The read-only system security overview and its unused API/permission were removed. Session policy, authentication, authorization and personal security controls remain. Organization and form pickers use the existing shadcn Select; toolbar actions use ghost buttons. Semantic status badges share success, danger, warning and information colors across both themes, with visible text. Categories remain neutral. This iteration targets desktop browsers; it does not add mobile-specific layouts or tests. See the [settings plan](../../../docs/plans/settings-experience/spec.md).
+
+
+The single system administrator is configuration-managed. Its identity, profile, status, membership and password cannot be changed through the application or operator password-reset command. Personal settings shows a read-only explanation; account/member lists omit mutation actions for that user. Other accounts keep their normal password and membership workflows. IAM applies its existing bootstrap username/password configuration during explicit initialization and startup, rotating identity versions only when configuration changes. No UI can grant or remove the system administrator identity.
+
+Data tables default to 10 rows, with 10/20/30/40/50 rows-per-page controls. Server pagination includes page size in the scoped query key and resets to the first page when the size changes. Selection catalogs are not paginated data tables.
+
+UI copy avoids repeating page titles, tab labels and field purposes as permanent descriptions. Status belongs to the corresponding object or details field. Necessary constraints and recovery guidance appear at the relevant control; configuration-managed password guidance is available on hover or keyboard focus. Localized copy follows professional product terminology and the conventions of each language.
+
+Member selection uses the template's existing Combobox with server search and TanStack infinite queries (10 options per page). Scrolling loads subsequent pages; disabled members cannot be selected. Identity confirmation happens inside the active FormDialog, retaining its RHF draft and selected member. A successful confirmation refreshes the session scope without unmounting the page; the member explicitly submits the original form afterward. Confirmation passwords are not sent through MutationCache, persisted, logged, or replayed. The standalone Account confirmation action is removed. Organization name and identifier limits follow the IAM README.
+
+## Offline configuration check
+
+Root startup injects the shared environment; run `pnpm config:check` from the repository root before starting services. For standalone Web, copy this module’s `.env.example` to `.env.local`, then run `pnpm config:check` in the module directory. Use `pnpm config:check --development` to include `.env.development*`; the default checks the production environment used by `start`. This validates listener and upstream fields without starting Next.js or connecting to IAM/Console. Restart after environment changes. See [configuration](../../../docs/configuration.md) for required values and service boundaries.

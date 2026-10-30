@@ -1,11 +1,9 @@
-// Package iamclient 通过内部接口校验原始浏览器请求，不引用 IAM 私有实现或表。
+// Package iamclient 通过 IAM 鉴权接口校验原始浏览器请求，不引用 IAM 私有实现或表。
 package iamclient
 
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,7 +11,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -38,40 +35,20 @@ func (e *Error) Error() string { return "IAM authorization failed: " + string(e.
 // Unwrap 保留技术错误链，便于区分超时、TLS 与连接故障。
 func (e *Error) Unwrap() error { return e.Cause }
 
-// Client 通过内部接口请求 IAM 授权。
+// Client 通过 IAM 鉴权接口请求 IAM 授权。
 type Client struct {
 	origin     string
 	credential string
 	http       *http.Client
 }
 
-// New 创建使用 TLS 和服务凭证的 IAM 客户端。
-func New(baseURL, credential, caFile string) (*Client, error) {
+// New 创建使用 HTTP(S) 和服务凭证的 IAM 客户端。
+func New(baseURL, credential string) (*Client, error) {
 	if err := ValidateConfig(baseURL, credential, true); err != nil {
 		return nil, err
 	}
 
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if caFile != "" {
-		data, err := os.ReadFile(caFile)
-		if err != nil || len(data) > 1024*1024 {
-			return nil, errors.New("cannot read IAM CA certificate")
-		}
-
-		roots, err := x509.SystemCertPool()
-		if err != nil {
-			roots = x509.NewCertPool()
-		}
-
-		if !roots.AppendCertsFromPEM(data) {
-			return nil, errors.New("invalid IAM CA certificate")
-		}
-
-		tlsConfig.RootCAs = roots
-	}
-
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = tlsConfig
 	httpClient := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return &Client{origin: strings.TrimSuffix(baseURL, "/"), credential: credential, http: httpClient}, nil
 }
@@ -118,7 +95,7 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 	if err != nil {
 		return decision, unavailable("encode_request", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+"/internal/v1/iam/authorize", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+"/api/v1/iam/authorize", bytes.NewReader(body))
 	if err != nil {
 		return decision, unavailable("construct_request", err)
 	}
@@ -185,15 +162,15 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 // Close 释放不再使用的空闲 HTTP 连接。
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
-// ValidateConfig 只校验内部调用配置，不读取文件或建立网络连接。
+// ValidateConfig 只校验服务调用配置，不读取文件或建立网络连接。
 func ValidateConfig(baseURL, credential string, required bool) error {
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return errors.New("IAM internal URL must be an HTTPS origin")
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return errors.New("IAM URL must be an HTTP(S) origin")
 	}
 
 	if (required || credential != "") && (len(credential) < 32 || len(credential) > 512) {
-		return errors.New("internal credential must contain 32–512 bytes")
+		return errors.New("service credential must contain 32–512 bytes")
 	}
 
 	return nil

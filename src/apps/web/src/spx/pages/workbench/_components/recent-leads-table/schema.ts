@@ -5,6 +5,7 @@ const recentLeadsSchema = z.object({
   name: z.string(),
   company: z.string(),
   status: z.string(),
+  statusKey: z.string(),
   source: z.string(),
   lastActivity: z.string(),
 });

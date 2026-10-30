@@ -10,24 +10,23 @@ import { useForm } from "react-hook-form";
 import type { z } from "zod";
 
 import { permissions } from "@/auth/permissions.gen";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getOrganization,
   listAuditEvents,
   listOrganizationAuditEvents,
-  securityOverview,
   updateCurrentOrganization,
 } from "@/spx/api/iam/management";
 import type { ApiAuditEvent, ApiOrganization } from "@/spx/api/iam/schemas";
 import { zUpdateCurrentOrganizationBody } from "@/spx/api/iam/schemas";
 
-import { AccessDenied, Can, RequireAccess } from "../components/access";
+import { AccessDenied, RequireAccess, useCan } from "../components/access";
 import { DataTable, useAction, usePagedQuery } from "../components/data";
+import { StatusBadge } from "../components/status-badge";
 import { managementChanged } from "../iam/management";
 import { managementPages, visibleManagementPages } from "../iam/navigation";
 import { identityScope } from "../iam/query";
@@ -39,8 +38,6 @@ import { RolesPage } from "./roles";
 
 export function ManagementPage() {
   const nav = useTranslations("Navigation");
-  const t = useTranslations("Management");
-
   const auth = useIdentity();
   const pathname = usePathname();
   const router = useRouter();
@@ -51,39 +48,47 @@ export function ManagementPage() {
       if (first) router.replace(first.path(auth.org_id));
     }
   }, [pathname, auth, router]);
+  if (pathname === "/management") {
+    return visibleManagementPages(auth).length ? <Skeleton className="h-48 w-full" /> : <AccessDenied />;
+  }
   if (!page) return <AccessDenied />;
+  const tabs = visibleManagementPages(auth).filter((entry) => entry.group === page.group);
   return (
     <RequireAccess action={page.action}>
-      <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{nav(page.title)}</h1>
-          <p className="text-muted-foreground text-sm">{nav(page.group)}</p>
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>{nav(page.title)}</CardTitle>
-            <CardDescription>
-              {page.scope === "organization" ? t("orgDescription") : t("platformDescription")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <h1 className="text-2xl font-semibold tracking-tight">{nav(page.group)}</h1>
+        <Tabs
+          value={page.id}
+          onValueChange={(id) => {
+            const target = tabs.find((entry) => entry.id === id);
+            if (target) router.push(target.path(auth.org_id));
+          }}
+        >
+          <TabsList variant="line" className="mb-2">
+            {tabs.map((entry) => (
+              <TabsTrigger key={entry.id} value={entry.id}>
+                {nav(entry.title)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <TabsContent value={page.id} className="flex flex-col gap-6">
             {page.id === "users" && <AccountsPage />}
             {page.id === "organizations" && <OrganizationsPage />}
             {page.id === "members" && <MembersPage key={auth.org_id} />}
             {page.id === "roles" && <RolesPage key={auth.org_id} />}
             {page.id === "overview" && <OverviewPage key={auth.org_id} />}
             {(page.id === "audit" || page.id === "platform-audit") && (
-              <AuditPage key={page.id} platform={page.id === "platform-audit"} />
+              <AuditPage key={`${page.id}:${auth.org_id}`} platform={page.id === "platform-audit"} />
             )}
-            {page.id === "security" && <SecurityOverview />}
-          </CardContent>
-        </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </RequireAccess>
   );
 }
 function OverviewPage() {
   const t = useTranslations("Management");
+  const canManage = useCan(permissions.IAMOrganizationsManage);
 
   const auth = useIdentity();
   const org = auth.org_id ?? "";
@@ -93,26 +98,37 @@ function OverviewPage() {
     enabled: !!org,
   });
   const data = organization.data;
-  if (!data) return null;
+  if (organization.isError) return <p role="alert">{t("loadOrganizationFailed")}</p>;
+  if (!data) return <Skeleton className="h-48 w-full" />;
   return (
-    <div className="flex flex-col gap-6">
-      <dl className="grid gap-4 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-muted-foreground">{t("orgId")}</dt>
-          <dd>{data.id}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("orgCode")}</dt>
-          <dd>{data.slug}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t("status")}</dt>
-          <dd>{data.status === "active" ? t("active") : t("disabled")}</dd>
-        </div>
-      </dl>
-      <Can action={permissions.IAMOrganizationsManage}>
+    <div className="flex max-w-3xl flex-col gap-8">
+      {canManage ? (
         <OrganizationNameForm key={data.authz_version} organization={data} />
-      </Can>
+      ) : (
+        <Field className="max-w-xl">
+          <FieldLabel htmlFor="organization-name">{t("orgName")}</FieldLabel>
+          <Input id="organization-name" value={data.name} readOnly />
+        </Field>
+      )}
+      <section className="flex flex-col gap-4">
+        <h2 className="border-b pb-3 text-lg font-medium">{t("organizationDetails")}</h2>
+        <dl className="grid grid-cols-2 gap-6 text-sm">
+          <div className="flex flex-col gap-2">
+            <dt className="font-medium">{t("status")}</dt>
+            <dd>
+              <StatusBadge status={data.status}>{data.status === "active" ? t("active") : t("disabled")}</StatusBadge>
+            </dd>
+          </div>
+          <div className="flex flex-col gap-2">
+            <dt className="font-medium">{t("orgCode")}</dt>
+            <dd className="text-muted-foreground">{data.slug}</dd>
+          </div>
+          <div className="flex flex-col gap-2">
+            <dt className="font-medium">{t("orgId")}</dt>
+            <dd className="text-muted-foreground font-mono text-xs">{data.id}</dd>
+          </div>
+        </dl>
+      </section>
     </div>
   );
 }
@@ -138,11 +154,11 @@ function AuditPage({ platform }: { platform: boolean }) {
         {
           title: t("outcome"),
           cell: (row) => (
-            <Badge variant="secondary">
+            <StatusBadge status={row.outcome}>
               {({ success: t("success"), failure: t("failure"), denied: t("denied") } as Record<string, string>)[
                 row.outcome
               ] ?? row.outcome}
-            </Badge>
+            </StatusBadge>
           ),
         },
         { title: t("requestId"), cell: (row) => row.request_id },
@@ -150,44 +166,8 @@ function AuditPage({ platform }: { platform: boolean }) {
     />
   );
 }
-function SecurityOverview() {
-  const t = useTranslations("Management");
-
-  const auth = useIdentity();
-  const query = useQuery({
-    queryKey: ["iam", "security", ...identityScope(auth)],
-    queryFn: ({ signal }) => securityOverview(signal),
-  });
-  const data = query.data;
-  return (
-    <div className="flex flex-col gap-6">
-      <Alert>
-        <AlertDescription>{t("securityDescription")}</AlertDescription>
-      </Alert>
-      {data && (
-        <dl className="grid gap-4 text-sm sm:grid-cols-2">
-          {[
-            [t("idleTimeout"), data.session_idle_timeout],
-            [t("absoluteTimeout"), data.session_absolute_timeout],
-            [t("reauthWindow"), data.reauth_window],
-            [t("maxFailures"), data.login_max_failures],
-            [t("lockDuration"), data.login_lock_duration],
-            [t("selfRegistration"), data.self_registration ? t("enabled") : t("off")],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </div>
-  );
-}
-
 function OrganizationNameForm({ organization }: { organization: ApiOrganization }) {
   const t = useTranslations("Management");
-  const errors = useTranslations("Errors");
   const perform = useAction();
   const edit = useMutation({
     mutationFn: updateCurrentOrganization,
@@ -199,7 +179,7 @@ function OrganizationNameForm({ organization }: { organization: ApiOrganization 
   });
   return (
     <form
-      className="max-w-lg"
+      className="max-w-xl"
       noValidate
       onSubmit={form.handleSubmit(async (body) => {
         await perform(async () => {
@@ -210,14 +190,18 @@ function OrganizationNameForm({ organization }: { organization: ApiOrganization 
         }, t("orgNameSaved"));
       })}
     >
-      <fieldset disabled={form.formState.isSubmitting}>
+      <fieldset disabled={form.formState.isSubmitting} className="max-w-xl">
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="org-name">{t("orgName")}</FieldLabel>
             <Input id="org-name" {...form.register("name")} aria-invalid={!!form.formState.errors.name} />
-            {form.formState.errors.name && <FieldError>{errors("invalidRequest")}</FieldError>}
+            {form.formState.errors.name && <FieldError>{t("invalidOrgName")}</FieldError>}
           </Field>
-          <Button type="submit">{t("saveOrg")}</Button>
+          <Field orientation="horizontal">
+            <Button type="submit" disabled={!form.formState.isDirty || form.formState.isSubmitting}>
+              {t("saveOrg")}
+            </Button>
+          </Field>
         </FieldGroup>
       </fieldset>
     </form>

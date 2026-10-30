@@ -6,7 +6,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
-	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
@@ -46,24 +45,4 @@ func (s *Handler) auditEvents(c *gin.Context, orgID string, platform bool, limit
 	}
 
 	result.Success(w, response)
-}
-
-// SecurityOverview 返回可公开的认证策略摘要，不包含密钥。
-func (s *Handler) SecurityOverview(c *gin.Context) {
-	w := c.Writer
-	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformSecurityRead, ""); err != nil {
-		httpx.Reject(c, err)
-		return
-	}
-
-	cfg := s.Service.Config
-	result.Success(w, map[string]any{
-		"session_idle_timeout":     cfg.Auth.SessionIdleTimeout.String(),
-		"session_absolute_timeout": cfg.Auth.SessionAbsoluteTimeout.String(),
-		"reauth_window":            cfg.Auth.ReauthWindow.String(),
-		"login_max_failures":       cfg.Auth.LoginMaxFailures,
-		"login_lock_duration":      cfg.Auth.LoginLockDuration.String(),
-		"self_registration":        false,
-	})
 }

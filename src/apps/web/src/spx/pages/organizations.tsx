@@ -6,10 +6,9 @@ import { useTranslations } from "next-intl";
 import { Controller } from "react-hook-form";
 
 import { permissions } from "@/auth/permissions.gen";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createOrganization, listOrganizations, updateOrganization } from "@/spx/api/iam/management";
 import type { ApiOrganization } from "@/spx/api/iam/schemas";
 import { zCreateOrganizationBody, zUpdateOrganizationBody } from "@/spx/api/iam/schemas";
@@ -17,6 +16,7 @@ import { zCreateOrganizationBody, zUpdateOrganizationBody } from "@/spx/api/iam/
 import { Can } from "../components/access";
 import { DataTable, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
+import { StatusBadge } from "../components/status-badge";
 import { UserPicker } from "../components/user-picker";
 import { managementChanged } from "../iam/management";
 
@@ -51,7 +51,9 @@ export function OrganizationsPage() {
           { title: t("key"), cell: (org) => org.slug },
           {
             title: t("status"),
-            cell: (org) => <Badge variant="secondary">{org.status === "active" ? t("active") : t("disabled")}</Badge>,
+            cell: (org) => (
+              <StatusBadge status={org.status}>{org.status === "active" ? t("active") : t("disabled")}</StatusBadge>
+            ),
           },
           { title: t("orgId"), cell: (org) => org.id },
           {
@@ -78,23 +80,38 @@ export function OrganizationsPage() {
         >
           {(form) => (
             <>
-              <FormInput label={t("orgName")} registration={form.register("name")} error={form.formState.errors.name} />
+              <FormInput
+                label={t("orgName")}
+                errorText={t("invalidOrgName")}
+                registration={form.register("name")}
+                error={form.formState.errors.name}
+              />
               <FormInput
                 label={t("orgCode")}
+                errorText={t("invalidOrgCode")}
                 registration={form.register("slug")}
                 error={form.formState.errors.slug}
                 placeholder={t("exampleOrg")}
               />
-              <Field>
-                <FieldLabel>{t("initialAdmin")}</FieldLabel>
+              <Field data-invalid={!!form.formState.errors.admin_user_id}>
+                <FieldLabel htmlFor="organization-administrator">{t("initialAdmin")}</FieldLabel>
                 <Controller
                   control={form.control}
                   name="admin_user_id"
                   render={({ field }) => (
-                    <UserPicker label={t("initialAdmin")} value={field.value} onValueChange={field.onChange} />
+                    <UserPicker
+                      id="organization-administrator"
+                      label={t("initialAdmin")}
+                      name={field.name}
+                      ref={field.ref}
+                      onBlur={field.onBlur}
+                      required
+                      invalid={!!form.formState.errors.admin_user_id}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    />
                   )}
                 />
-                <FieldDescription>{t("initialAdminDescription")}</FieldDescription>
                 {form.formState.errors.admin_user_id && <FieldError>{t("chooseInitialAdmin")}</FieldError>}
               </Field>
             </>
@@ -113,13 +130,36 @@ export function OrganizationsPage() {
         >
           {(form) => (
             <>
-              <FormInput label={t("orgName")} registration={form.register("name")} error={form.formState.errors.name} />
+              <FormInput
+                label={t("orgName")}
+                errorText={t("invalidOrgName")}
+                registration={form.register("name")}
+                error={form.formState.errors.name}
+              />
               <Field>
                 <FieldLabel>{t("status")}</FieldLabel>
-                <NativeSelect {...form.register("status")}>
-                  <NativeSelectOption value="active">{t("active")}</NativeSelectOption>
-                  <NativeSelectOption value="suspended">{t("disabled")}</NativeSelectOption>
-                </NativeSelect>
+                <Controller
+                  control={form.control}
+                  name="status"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange} name={field.name}>
+                      <SelectTrigger
+                        id="organizations-status"
+                        aria-label={t("status")}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="active">{t("active")}</SelectItem>
+                          <SelectItem value="suspended">{t("disabled")}</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </Field>
             </>
           )}

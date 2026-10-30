@@ -103,7 +103,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 	}
 
 	q := NewQueries(tx)
-	if _, err = q.LockUser(ctx, userID); err != nil {
+	if _, err = q.LockMutableUser(ctx, userID); err != nil {
 		return err
 	}
 

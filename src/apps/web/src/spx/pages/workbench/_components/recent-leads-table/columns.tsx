@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { DataTableFeatures } from "@/lib/data-table-features";
+import { StatusBadge } from "@/spx/components/status-badge";
 
 import type { RecentLeadRow } from "./schema";
 
@@ -82,7 +83,7 @@ export function useRecentLeadsColumns(): ColumnDef<DataTableFeatures, RecentLead
       {
         accessorKey: "status",
         header: t("status"),
-        cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.statusKey}>{row.original.status}</StatusBadge>,
       },
       {
         accessorKey: "source",

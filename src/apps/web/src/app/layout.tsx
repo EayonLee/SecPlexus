@@ -19,7 +19,6 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   const t = await getTranslations("Metadata");
   return {
-    metadataBase: new URL(APP_CONFIG.url),
     applicationName: APP_CONFIG.name,
     title: APP_CONFIG.name,
     description: t("description"),

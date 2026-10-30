@@ -115,6 +115,16 @@ test("a rejected password confirmation preserves the current session", async () 
   reauthRejected = false;
 });
 
+test("confirming identity keeps the current page mounted while replacing its session scope", async () => {
+  const states: string[] = [];
+  const unsubscribe = useIdentity.subscribe((state) => states.push(state.status));
+  await reauthenticate("test-password");
+  unsubscribe();
+  expect(states).not.toContain("unknown");
+  expect(useIdentity.getState().org_id).toBe(org);
+  expect(useIdentity.getState().status).toBe("authenticated");
+});
+
 const validCreated = JSON.stringify({ code: "ok", message: "ok", request_id: "test", data: { id: org } });
 for (const reply of [
   { status: 200, contentType: "text/html", body: "<html>Gateway sign in</html>" },

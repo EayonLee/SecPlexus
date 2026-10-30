@@ -12,7 +12,11 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw Error("Missing test listener");
-  vi.stubEnv("SPX_WEB_IAM_PROXY_TARGET", `http://127.0.0.1:${address.port}`);
+  vi.stubEnv("SPX_IAM_HOST", "127.0.0.1");
+  vi.stubEnv("SPX_IAM_PORT", String(address.port));
+  vi.stubEnv("SPX_CONSOLE_HOST", "127.0.0.1");
+  vi.stubEnv("SPX_CONSOLE_PORT", "18080");
+  vi.stubEnv("SPX_WEB_PORT", "15173");
 });
 afterAll(async () => {
   vi.unstubAllEnvs();

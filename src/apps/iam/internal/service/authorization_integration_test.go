@@ -176,20 +176,24 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 	}
 }
 
-func TestConcurrentGlobalDisableRetainsLastEffectiveAdministrators(t *testing.T) {
-	s, first, org := domainFixture(t)
+func TestConcurrentDisablesRetainAnEffectiveOrganizationAdministrator(t *testing.T) {
+	s, first, _ := domainFixture(t)
 	ctx := context.Background()
-	firstUser, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "admin")
+	firstID, err := s.CreateUser(first, UserInput{Username: "firstadmin", DisplayName: "第一管理员", Password: "regular first password"}, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, err := s.CreateOrganization(first, OrganizationInput{Slug: "concurrent-admins", Name: "并发管理员", AdminUserID: firstID}, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstUser, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "firstadmin")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	member, err := s.CreateMember(first, org, MemberInput{Username: "secondadmin", DisplayName: "第二管理员", Password: "temporary second password"}, uuid.NewString())
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err = s.Store.Pool.Exec(ctx, `UPDATE iam.users SET is_super_admin=true WHERE username_normalized='secondadmin'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,7 +206,7 @@ func TestConcurrentGlobalDisableRetainsLastEffectiveAdministrators(t *testing.T)
 		t.Fatal(err)
 	}
 
-	second := actorContext(t, s, "secondadmin")
+	second := actorContext(t, s, "admin")
 	secondUser, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "secondadmin")
 	if err != nil {
 		t.Fatal(err)
@@ -295,5 +299,30 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 	input.AuthzVersion = authzVersion(t, s, org)
 	if _, err = s.Preview(admin, org, input); !errors.Is(err, authorization.ErrDenied) {
 		t.Fatalf("new deprecated binding preview allowed: %v", err)
+	}
+}
+
+func TestConfiguredAdministratorRejectsApplicationAndOperatorWrites(t *testing.T) {
+	for _, operation := range []string{"profile", "password", "reset", "operator"} {
+		t.Run(operation, func(t *testing.T) {
+			s, actor, _ := domainFixture(t)
+			user, err := repository.NewQueries(s.Store.DB).GetLoginUser(context.Background(), "admin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "profile":
+				err = s.UpdateUser(actor, user.ID.String(), UserUpdate{DisplayName: "Changed", Status: "active", AuthVersion: user.AuthVersion}, uuid.NewString())
+			case "password":
+				err = s.ChangePassword(actor, "isolated domain password", "not from configuration", uuid.NewString())
+			case "reset":
+				err = s.ResetPassword(actor, user.ID.String(), "not from configuration", uuid.NewString())
+			case "operator":
+				err = s.Store.RecoverPassword(context.Background(), user.ID, "not from configuration")
+			}
+			if !errors.Is(err, authorization.ErrDenied) {
+				t.Fatalf("configured administrator write %s was not denied: %v", operation, err)
+			}
+		})
 	}
 }

@@ -3,22 +3,23 @@ import { useState } from "react";
 
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { Controller } from "react-hook-form";
 
 import { permissions } from "@/auth/permissions.gen";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { createUser, listUsers, resetUserPassword, setSuperAdmin, updateUser } from "@/spx/api/iam/management";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { createUser, listUsers, resetUserPassword, updateUser } from "@/spx/api/iam/management";
 import type { ApiUser } from "@/spx/api/iam/schemas";
-import { zCreateUserBody, zResetUserPasswordBody, zSetSuperAdminBody, zUpdateUserBody } from "@/spx/api/iam/schemas";
+import { zCreateUserBody, zResetUserPasswordBody, zUpdateUserBody } from "@/spx/api/iam/schemas";
 
 import { Can } from "../components/access";
 import { DataTable, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
+import { StatusBadge } from "../components/status-badge";
 import { managementChanged } from "../iam/management";
 
-type AccountAction = { action: "create" } | { action: "edit" | "reset" | "super"; user: ApiUser };
+type AccountAction = { action: "create" } | { action: "edit" | "reset"; user: ApiUser };
 export function AccountsPage() {
   const t = useTranslations("Management");
 
@@ -41,28 +42,28 @@ export function AccountsPage() {
           { title: t("displayName"), cell: (user) => user.display_name },
           {
             title: t("status"),
-            cell: (user) => <Badge variant="secondary">{user.status === "active" ? t("active") : t("disabled")}</Badge>,
+            cell: (user) => (
+              <StatusBadge status={user.status}>{user.status === "active" ? t("active") : t("disabled")}</StatusBadge>
+            ),
           },
           { title: t("platformRole"), cell: (user) => (user.is_super_admin ? t("superAdmin") : t("regularUser")) },
           {
             title: t("action"),
-            cell: (user) => (
-              <div className="flex gap-2">
-                <Can action={permissions.IAMPlatformUsersManage}>
-                  <Button variant="ghost" onClick={() => setDialog({ action: "edit", user })}>
-                    {t("edit")}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setDialog({ action: "reset", user })}>
-                    {t("resetPassword")}
-                  </Button>
-                </Can>
-                <Can action={permissions.IAMPlatformSuperAdminsManage}>
-                  <Button variant="ghost" onClick={() => setDialog({ action: "super", user })}>
-                    {user.is_super_admin ? t("removeSuperAdmin") : t("makeSuperAdmin")}
-                  </Button>
-                </Can>
-              </div>
-            ),
+            cell: (user) =>
+              user.is_super_admin ? (
+                <StatusBadge status="system">{t("configurationManaged")}</StatusBadge>
+              ) : (
+                <div className="flex gap-2">
+                  <Can action={permissions.IAMPlatformUsersManage}>
+                    <Button variant="ghost" onClick={() => setDialog({ action: "edit", user })}>
+                      {t("edit")}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setDialog({ action: "reset", user })}>
+                      {t("resetPassword")}
+                    </Button>
+                  </Can>
+                </div>
+              ),
           },
         ]}
       />
@@ -82,10 +83,6 @@ function AccountDialog({
 }) {
   const t = useTranslations("Management");
   const edit = useMutation({ mutationFn: updateUser, onSuccess: managementChanged });
-  const superAdmin = useMutation({
-    mutationFn: setSuperAdmin,
-    onSuccess: managementChanged,
-  });
   if (dialog.action === "create")
     return (
       <FormDialog
@@ -157,10 +154,23 @@ function AccountDialog({
             />
             <Field>
               <FieldLabel>{t("status")}</FieldLabel>
-              <NativeSelect {...form.register("status")}>
-                <NativeSelectOption value="active">{t("active")}</NativeSelectOption>
-                <NativeSelectOption value="disabled">{t("disabled")}</NativeSelectOption>
-              </NativeSelect>
+              <Controller
+                control={form.control}
+                name="status"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange} name={field.name}>
+                    <SelectTrigger id="accounts-status" aria-label={t("status")} onBlur={field.onBlur} ref={field.ref}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="active">{t("active")}</SelectItem>
+                        <SelectItem value="disabled">{t("disabled")}</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </Field>
           </>
         )}
@@ -189,24 +199,5 @@ function AccountDialog({
         )}
       </FormDialog>
     );
-  return (
-    <FormDialog
-      title={t("changeSuperAdmin")}
-      schema={zSetSuperAdminBody}
-      defaultValues={{ enabled: !dialog.user.is_super_admin, reason: "" }}
-      onClose={onClose}
-      onSubmit={async (body) => {
-        await superAdmin.mutateAsync({ id: dialog.user.id, body });
-      }}
-    >
-      {(form) => (
-        <FormInput
-          label={t("reason")}
-          type="textarea"
-          registration={form.register("reason")}
-          error={form.formState.errors.reason}
-        />
-      )}
-    </FormDialog>
-  );
+  return null;
 }

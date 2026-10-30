@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,11 +29,11 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler"
+	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
-	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 )
 
 // apiClient 为单个测试保存独立 Cookie 和 CSRF 状态。
@@ -138,7 +139,7 @@ func newAPIClient(t *testing.T, base, origin string) *apiClient {
 type httpFixture struct {
 	redis                         *redis.Client
 	server                        *handler.Server
-	public, internal              *httptest.Server
+	public                        *httptest.Server
 	initial, password, credential string
 	admin, member                 string
 }
@@ -149,7 +150,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	adminUsername := "admin-" + uuid.NewString()
 	memberUsername := "auditor-" + uuid.NewString()
 	initial := "isolated initial password"
-	password := "isolated changed password"
+	password := initial
 	if err := store.Seed(ctx, adminUsername, initial); err != nil {
 		t.Fatal(err)
 	}
@@ -165,11 +166,13 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	}
 
 	public := httptest.NewUnstartedServer(nil)
-	cfg.App.PublicURL = "http://" + public.Listener.Addr().String()
+	cfg.Auth.WebOrigin = "http://" + public.Listener.Addr().String()
 	cfg.Auth.CSRFKey = hex.EncodeToString(key)
+	cfg.Bootstrap.Username = adminUsername
+	cfg.Bootstrap.Password = initial
 	cfg.App.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
 	credential := hex.EncodeToString(key) + hex.EncodeToString(key)
-	cfg.Internal.Clients = map[string]config.InternalClient{"console": {Token: credential, Actions: []string{"iam.organizations.read"}}}
+	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: credential, Actions: []string{"iam.organizations.read"}}}
 	options, err := redis.ParseURL(os.Getenv("SPX_TEST_REDIS_URL"))
 	if err != nil {
 		t.Fatal(err)
@@ -243,15 +246,12 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		t.Fatal(err)
 	}
 
-	public.Config.Handler = router.PublicHandler(server)
+	public.Config.Handler = router.Handler(server)
 	public.Start()
 	t.Cleanup(public.Close)
-	internal := httptest.NewTLSServer(router.InternalHandler(server))
-	t.Cleanup(internal.Close)
 	return &httpFixture{redis: redisClient, admin: adminUsername, member: memberUsername,
 		server:     server,
 		public:     public,
-		internal:   internal,
 		initial:    initial,
 		password:   password,
 		credential: credential,
@@ -260,21 +260,40 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 
 func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	f := newFixture(t, nil)
-	public, internal, initial, password, credential := f.public, f.internal, f.initial, f.password, f.credential
+	public, initial, password, credential := f.public, f.initial, f.password, f.credential
 
 	admin := newAPIClient(t, public.URL, public.URL)
 	admin.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": initial}, 403)
 	admin.login(f.admin, initial)
 	admin.request("GET", "/api/v1/iam/users", nil, 200)
-	admin.change(initial, password)
-	admin.request("GET", "/api/v1/iam/me", nil, 401)
-	admin.login(f.admin, password)
+	admin.request("POST", "/api/v1/iam/me/password", map[string]string{"old_password": initial, "new_password": "another changed password"}, 403)
+	admin.request("GET", "/api/v1/iam/me", nil, 200)
 	admin.request("POST", "/api/v1/iam/auth/reauthenticate", map[string]string{"password": "incorrect password"}, 400)
-	admin.request("POST", "/api/v1/iam/me/password", map[string]string{"old_password": "incorrect password", "new_password": "another changed password"}, 400)
+	admin.request("POST", "/api/v1/iam/me/password", map[string]string{"old_password": "incorrect password", "new_password": "another changed password"}, 403)
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	userID := me["principal"].(map[string]any)["user_id"].(string)
 	orgPath := "/api/v1/iam/orgs/" + org
+	admin.request("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": "Changed", "status": "disabled", "auth_version": me["principal"].(map[string]any)["auth_version"]}, 403)
+	admin.request("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "not configured password"}, 403)
+	members := admin.request("GET", orgPath+"/members", nil, 200)["items"].([]any)
+	var configuredMembership string
+	for _, item := range members {
+		row := item.(map[string]any)
+		if row["user_id"] == userID {
+			configuredMembership = row["id"].(string)
+		}
+	}
+	if configuredMembership == "" {
+		t.Fatal("configured administrator membership missing")
+	}
+	configuredVersion := admin.request("GET", orgPath, nil, 200)["authz_version"].(string)
+	protectedPath := orgPath + "/members/" + configuredMembership
+	admin.request("PATCH", protectedPath, map[string]any{"status": "disabled", "authz_version": configuredVersion}, 403)
+	admin.request("DELETE", protectedPath+"?authz_version="+configuredVersion, nil, 403)
+	admin.request("PUT", protectedPath+"/roles", map[string]any{"role_ids": []string{}, "authz_version": configuredVersion}, 403)
+	admin.request("POST", orgPath+"/permission-preview", map[string]any{"membership_id": configuredMembership, "role_ids": []string{}, "authz_version": configuredVersion}, 403)
+
 	catalog := admin.request("GET", "/api/v1/iam/permissions?org_id="+org, nil, 200)["items"].([]any)
 	foundAudit := false
 	for _, item := range catalog {
@@ -290,7 +309,7 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 		t.Fatal("超级管理员应能在权限目录中看到并分配组织审计权限")
 	}
 
-	admin.request("PUT", "/api/v1/iam/users/"+userID+"/super-admin", map[string]any{"enabled": false, "reason": "cannot remove final administrator"}, 409)
+	admin.request("PUT", "/api/v1/iam/users/"+userID+"/super-admin", map[string]any{"enabled": false, "reason": "identity is configuration-owned"}, 404)
 	initialMember := "12345678"
 	memberPassword := "isolated member password"
 	memberID := admin.request("POST", orgPath+"/members", map[string]string{"username": f.member, "display_name": "审计成员", "password": initialMember}, 201)["id"].(string)
@@ -342,18 +361,21 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 		}
 
 		body, _ := json.Marshal(input)
-		req, _ := http.NewRequest("POST", internal.URL+"/internal/v1/iam/authorize", bytes.NewReader(body))
+		req, _ := http.NewRequest("POST", public.URL+"/api/v1/iam/authorize", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+credential)
 		req.Header.Set("Content-Type", "application/json")
-		response, err := internal.Client().Do(req)
+		response, err := public.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		defer response.Body.Close()
 
+		if len(response.Cookies()) != 0 {
+			t.Fatal("service authorization must not set browser cookies")
+		}
 		if response.StatusCode != want {
-			t.Fatalf("internal authorization expected %d, got %d", want, response.StatusCode)
+			t.Fatalf("service authorization expected %d, got %d", want, response.StatusCode)
 		}
 	}
 	request, _ := http.NewRequest("GET", public.URL, nil)
@@ -367,6 +389,43 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 		cookieHeader += cookie.Name + "=" + cookie.Value
 	}
 
+	// 同一入口中，仅用户 Cookie 或错误服务凭证不能请求鉴权。
+	for _, serviceToken := range []string{"", strings.Repeat("x", 64)} {
+		body, _ := json.Marshal(map[string]string{"cookie": cookieHeader, "method": "GET", "path": "/api/v1/console/context", "action": "iam.organizations.read", "org_id": org})
+		req, _ := http.NewRequest("POST", public.URL+"/api/v1/iam/authorize", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", cookieHeader)
+		if serviceToken != "" {
+			req.Header.Set("Authorization", "Bearer "+serviceToken)
+		}
+		response, err := public.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != 403 || len(response.Cookies()) != 0 {
+			t.Fatal("user Cookie or invalid service credential crossed authentication boundary")
+		}
+	}
+	// 服务凭证也不能代替用户会话访问用户 API。
+	req, _ := http.NewRequest("GET", public.URL+"/api/v1/iam/me", nil)
+	req.Header.Set("Authorization", "Bearer "+credential)
+	response, err := public.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != 401 {
+		t.Fatal("service credential authenticated a user route")
+	}
+	old, err := public.Client().Get(public.URL + "/internal/v1/iam/authorize")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Body.Close()
+	if old.StatusCode != 404 {
+		t.Fatal("legacy route still registered")
+	}
 	call(cookieHeader, "GET", 200)
 	call(cookieHeader, "GET", 400, map[string]string{"type": "unsupported", "id": uuid.NewString()})
 	call("", "GET", 401)
@@ -375,12 +434,16 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	admin.csrf = "invalid"
 	call(cookieHeader, "POST", 403)
 	admin.csrf = saved
-	sessions := admin.request("GET", "/api/v1/iam/me/sessions", nil, 200)["items"].([]any)
-	if len(sessions) != 1 {
-		t.Fatalf("expected one usable session, got %d", len(sessions))
+	var activeSessions int
+	if err := f.server.Service.Store.Pool.QueryRow(context.Background(), "SELECT count(*) FROM iam.user_sessions WHERE user_id=$1 AND state='active'", userID).Scan(&activeSessions); err != nil {
+		t.Fatal(err)
 	}
-
-	admin.request("POST", "/api/v1/iam/auth/logout-all", nil, 204)
+	if activeSessions != 1 {
+		t.Fatalf("expected one active root session, got %d", activeSessions)
+	}
+	admin.request("GET", "/api/v1/iam/me/sessions", nil, 404)
+	admin.request("POST", "/api/v1/iam/auth/logout-all", nil, 404)
+	admin.request("POST", "/api/v1/iam/auth/logout", nil, 204)
 	call(cookieHeader, "GET", 401)
 	admin.request("GET", "/api/v1/iam/me", nil, 401)
 	t.Log(fmt.Sprintf("identity, custom role, version conflicts, last administrator and internal authorization verified for org %s", org))
@@ -390,7 +453,6 @@ func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
 	f := newFixture(t, nil)
 	admin := newAPIClient(t, f.public.URL, f.public.URL)
 	admin.login(f.admin, f.initial)
-	admin.change(f.initial, f.password)
 	admin.login(f.admin, f.password)
 	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password}, 201)
 	userPath := "/api/v1/iam/users/" + user["id"].(string)
@@ -422,7 +484,6 @@ func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
 	f := newFixture(t, nil)
 	admin := newAPIClient(t, f.public.URL, f.public.URL)
 	admin.login(f.admin, f.initial)
-	admin.change(f.initial, f.password)
 	admin.login(f.admin, f.password)
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)

@@ -65,9 +65,8 @@ try {
   if (!process.argv.includes("--docker") && (!process.env.SPX_TEST_POSTGRES_URL || !process.env.SPX_TEST_REDIS_URL))
     throw new Error("Provide SPX_TEST_POSTGRES_URL and SPX_TEST_REDIS_URL, or explicitly pass --docker.");
   const pgPassword = randomBytes(24).toString("hex");
-  const initialPassword = randomBytes(24).toString("hex");
-  const adminUsername = `e2e_${randomBytes(8).toString("hex")}`;
   const password = randomBytes(24).toString("hex");
+  const adminUsername = `e2e_${randomBytes(8).toString("hex")}`;
   const credential = randomBytes(32).toString("hex");
   const env = { ...systemEnv, POSTGRES_PASSWORD: pgPassword };
   const pg = `${name}-pg`;
@@ -75,6 +74,7 @@ try {
   let databaseURL;
   let redisURL;
   if (process.argv.includes("--docker")) {
+    const dockerDatabase = `spx_e2e_${randomBytes(16).toString("hex")}`;
     command(
       "docker",
       [
@@ -85,7 +85,7 @@ try {
         "-e",
         "POSTGRES_PASSWORD",
         "-e",
-        "POSTGRES_DB=secplexus",
+        `POSTGRES_DB=${dockerDatabase}`,
         "-p",
         "127.0.0.1::5432",
         "--health-cmd",
@@ -108,7 +108,7 @@ try {
     }
     const pgPort = command("docker", ["port", pg, "5432/tcp"]).split(":").at(-1);
     const redisPort = command("docker", ["port", redis, "6379/tcp"]).split(":").at(-1);
-    databaseURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/secplexus?sslmode=disable`;
+    databaseURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${dockerDatabase}?sslmode=disable`;
     redisURL = `redis://127.0.0.1:${redisPort}/0`;
   } else {
     postgresAdminURL = process.env.SPX_TEST_POSTGRES_URL;
@@ -122,33 +122,12 @@ try {
   }
   const webPort = await port();
   const iamPort = await port();
-  const internalPort = await port();
   const consolePort = await port();
   const iamPort2 = await port();
-  const internalPort2 = await port();
   const consolePort2 = await port();
-  listenerPorts.push(webPort, iamPort, internalPort, consolePort, iamPort2, internalPort2, consolePort2);
+  listenerPorts.push(webPort, iamPort, consolePort, iamPort2, consolePort2);
   const publicURL = `http://127.0.0.1:${webPort}`;
   const csrf = randomBytes(16).toString("hex");
-  const cert = path.join(directory, "cert.pem");
-  const key = path.join(directory, "key.pem");
-  command("openssl", [
-    "req",
-    "-x509",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-keyout",
-    key,
-    "-out",
-    cert,
-    "-subj",
-    "/CN=localhost",
-    "-addext",
-    "subjectAltName=IP:127.0.0.1,DNS:localhost",
-    "-days",
-    "1",
-  ]);
   const iamBinary = path.join(directory, "iam");
   const consoleBinary = path.join(directory, "console");
   command("go", ["build", "-o", iamBinary, "./src/apps/iam/cmd"]);
@@ -157,26 +136,27 @@ try {
     env: {
       ...systemEnv,
       SPX_POSTGRES_URL: databaseURL,
-      SPX_IAM_BOOTSTRAP_PASSWORD: initialPassword,
+      SPX_IAM_BOOTSTRAP_PASSWORD: password,
       SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
       SPX_IAM_LOG_FILE: "",
     },
   });
   const iamEnv = {
     ...systemEnv,
-    SPX_PUBLIC_URL: publicURL,
+    SPX_WEB_ORIGIN: publicURL,
     SPX_POSTGRES_URL: databaseURL,
     SPX_REDIS_URL: redisURL,
+    SPX_IAM_POSTGRES_URL: databaseURL,
+    SPX_IAM_REDIS_URL: redisURL,
+    SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
+    SPX_IAM_BOOTSTRAP_PASSWORD: password,
     SPX_IAM_CSRF_KEY: csrf,
     SPX_CONSOLE_IAM_TOKEN: credential,
-    SPX_IAM_TLS_CERT_FILE: cert,
-    SPX_IAM_TLS_KEY_FILE: key,
     SPX_IAM_LOG_FILE: path.join(directory, "iam-one.log"),
   };
   const consoleEnv = {
     ...systemEnv,
     SPX_CONSOLE_IAM_TOKEN: credential,
-    SPX_CONSOLE_IAM_CA_FILE: cert,
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-one.log"),
   };
   const rootEnv = {
@@ -184,24 +164,24 @@ try {
     ...consoleEnv,
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort),
-    SPX_IAM_INTERNAL_HOST: "127.0.0.1",
-    SPX_IAM_INTERNAL_PORT: String(internalPort),
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort),
-    SPX_WEB_HOST: "127.0.0.1",
+    SPX_WEB_BIND_HOST: "127.0.0.1",
+    SPX_WEB_PORT: String(webPort),
+    SPX_IAM_BIND_PORT: String(iamPort),
+    SPX_CONSOLE_BIND_PORT: String(consolePort),
+    SPX_IAM_BIND_HOST: "127.0.0.1",
+    SPX_CONSOLE_BIND_HOST: "127.0.0.1",
   };
   // Root startup derives backend URLs from actual module ports. Use one DB
   // connection for initialization, HTTP replicas and maintenance.
-  rootEnv.SPX_IAM_BOOTSTRAP_PASSWORD = "";
-  rootEnv.SPX_CONSOLE_IAM_BASE_URL = "";
-  rootEnv.SPX_WEB_IAM_PROXY_TARGET = "";
-  rootEnv.SPX_WEB_CONSOLE_PROXY_TARGET = "";
   const mode = process.argv.includes("--dev") ? "dev" : "preview";
   // Preview 使用构建产物；dev 复用同一入口验证原生热更新。
   // 构建环境不带数据库密码及内部调用凭证。
-  if (mode === "preview") command("pnpm", ["--dir", "src/apps/web", "build"], {
-    env: { ...systemEnv, NEXT_PUBLIC_APP_URL: publicURL },
-  });
+  if (mode === "preview")
+    command("pnpm", ["--dir", "src/apps/web", "build"], {
+      env: { ...systemEnv, SPX_WEB_ORIGIN: publicURL, SPX_WEB_PORT: String(webPort), SPX_IAM_HOST:"127.0.0.1",SPX_IAM_PORT:String(iamPort),SPX_CONSOLE_HOST:"127.0.0.1",SPX_CONSOLE_PORT:String(consolePort) },
+    });
   const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv);
   await ready(`${publicURL}/login`, stack);
   await ready(`${publicURL}/api/v1/iam/auth/context`, stack);
@@ -209,8 +189,7 @@ try {
     ...iamEnv,
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
-    SPX_IAM_INTERNAL_HOST: "127.0.0.1",
-    SPX_IAM_INTERNAL_PORT: String(internalPort2),
+    SPX_IAM_BIND_HOST: "127.0.0.1",
     SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
   });
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
@@ -218,7 +197,9 @@ try {
     ...consoleEnv,
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort2),
-    SPX_CONSOLE_IAM_BASE_URL: `https://127.0.0.1:${internalPort2}`,
+    SPX_CONSOLE_BIND_HOST: "127.0.0.1",
+    SPX_IAM_HOST: "127.0.0.1",
+    SPX_IAM_PORT: String(iamPort2),
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
   });
   await ready(`http://127.0.0.1:${consolePort2}/health/ready`, console2);
@@ -227,7 +208,15 @@ try {
     const filename = path.join(directory, "browser.json");
     writeFileSync(
       filename,
-      JSON.stringify({ baseURL: publicURL, username: adminUsername, password: initialPassword, iamLog: path.join(directory,"iam-one.log") }),
+      JSON.stringify({
+        baseURL: publicURL,
+        database: ownedDatabase ?? new URL(databaseURL).pathname.slice(1),
+        iamSecondURL: `http://127.0.0.1:${iamPort2}`,
+        consoleSecondURL: `http://127.0.0.1:${consolePort2}`,
+        username: adminUsername,
+        password: password,
+        iamLog: path.join(directory, "iam-one.log"),
+      }),
       { mode: 0o600 },
     );
     console.log(`Isolated browser acceptance ready: ${filename}`);
@@ -264,7 +253,8 @@ try {
         env: {
           ...systemEnv,
           SPX_E2E_BASE_URL: publicURL,
-          SPX_E2E_INITIAL_PASSWORD: initialPassword,
+          SPX_E2E_DATABASE: ownedDatabase ?? new URL(databaseURL).pathname.slice(1),
+          SPX_TEST_POSTGRES_URL: databaseURL,
           SPX_E2E_PASSWORD: password,
           SPX_E2E_USERNAME: adminUsername,
           SPX_E2E_IAM_SECOND_URL: `http://127.0.0.1:${iamPort2}`,
@@ -286,7 +276,7 @@ try {
     const context = await api.get("/api/v1/iam/auth/context");
     const token = (await context.json()).data.csrf_token;
     const authenticated = await api.post("/api/v1/iam/auth/login", {
-      data: { username: adminUsername, password: process.argv.includes("--manual") ? initialPassword : password },
+      data: { username: adminUsername, password: password },
       headers: { Origin: publicURL, "X-CSRF-Token": token },
     });
     if (authenticated.status() !== 200) throw new Error("Cannot establish the owned lifecycle test session.");
@@ -315,7 +305,7 @@ try {
   }
   for (const filename of ["iam-one.log", "iam-two.log", "console-one.log", "console-two.log"]) {
     const data = readFileSync(path.join(directory, filename), "utf8");
-    if (![pgPassword, initialPassword, password, credential, csrf].every((value) => !data.includes(value)))
+    if (![pgPassword, password, credential, csrf].every((value) => !data.includes(value)))
       throw new Error("A secret reached application logs.");
     if (
       !data

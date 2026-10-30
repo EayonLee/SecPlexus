@@ -9,7 +9,7 @@ import { z } from "zod";
 import { permissions } from "@/auth/permissions.gen";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldError, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import {
   createMember,
   deleteMember,
@@ -24,6 +24,7 @@ import { zCreateMemberBody, zSetMemberRolesBody, zUpdateMemberBody } from "@/spx
 import { Can, useCan } from "../components/access";
 import { DataTable, useAction, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
+import { StatusBadge } from "../components/status-badge";
 import { UserPicker } from "../components/user-picker";
 import { managementChanged } from "../iam/management";
 import { identityScope } from "../iam/query";
@@ -84,49 +85,59 @@ export function MembersPage() {
         columns={[
           { title: t("username"), cell: (member) => member.username },
           { title: t("displayName"), cell: (member) => member.display_name },
-          { title: t("status"), cell: (member) => (member.status === "active" ? t("active") : t("disabled")) },
+          {
+            title: t("status"),
+            cell: (member) => (
+              <StatusBadge status={member.status}>
+                {member.status === "active" ? t("active") : t("disabled")}
+              </StatusBadge>
+            ),
+          },
           {
             title: t("action"),
-            cell: (member) => (
-              <div className="flex gap-2">
-                {canAssign && canReadRoles && (
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      void perform(async () => {
-                        setSelected(member.role_ids ?? []);
-                        setAssigning(member);
-                      })
-                    }
-                  >
-                    {t("assignRoles")}
-                  </Button>
-                )}
-                <Can action={permissions.IAMMembersManage}>
-                  <Button
-                    variant="ghost"
-                    disabled={edit.isPending}
-                    onClick={() =>
-                      void perform(async () => {
-                        await edit.mutateAsync({
-                          orgId: org,
-                          id: member.id,
-                          body: zUpdateMemberBody.parse({
-                            status: member.status === "active" ? "disabled" : "active",
-                            authz_version: version,
-                          }),
-                        });
-                      })
-                    }
-                  >
-                    {member.status === "active" ? t("disabled") : t("active")}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setRemoving(member)}>
-                    {t("remove")}
-                  </Button>
-                </Can>
-              </div>
-            ),
+            cell: (member) =>
+              member.is_super_admin ? (
+                <StatusBadge status="system">{t("configurationManaged")}</StatusBadge>
+              ) : (
+                <div className="flex gap-2">
+                  {canAssign && canReadRoles && (
+                    <Button
+                      variant="ghost"
+                      onClick={() =>
+                        void perform(async () => {
+                          setSelected(member.role_ids ?? []);
+                          setAssigning(member);
+                        })
+                      }
+                    >
+                      {t("assignRoles")}
+                    </Button>
+                  )}
+                  <Can action={permissions.IAMMembersManage}>
+                    <Button
+                      variant="ghost"
+                      disabled={edit.isPending}
+                      onClick={() =>
+                        void perform(async () => {
+                          await edit.mutateAsync({
+                            orgId: org,
+                            id: member.id,
+                            body: zUpdateMemberBody.parse({
+                              status: member.status === "active" ? "disabled" : "active",
+                              authz_version: version,
+                            }),
+                          });
+                        })
+                      }
+                    >
+                      {member.status === "active" ? t("disabled") : t("active")}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setRemoving(member)}>
+                      {t("remove")}
+                    </Button>
+                  </Can>
+                </div>
+              ),
           },
         ]}
       />
@@ -155,13 +166,23 @@ export function MembersPage() {
                   </Field>
                 )}
                 <Field>
-                  <FieldLabel>{t("existingAccount")}</FieldLabel>
+                  <FieldLabel htmlFor="existing-member-picker">{t("existingAccount")}</FieldLabel>
                   <Controller
                     control={form.control}
                     name="user_id"
-                    render={({ field }) => <UserPicker value={field.value} onValueChange={field.onChange} />}
+                    render={({ field }) => (
+                      <UserPicker
+                        id="existing-member-picker"
+                        name={field.name}
+                        ref={field.ref}
+                        onBlur={field.onBlur}
+                        required
+                        invalid={!!form.formState.errors.user_id}
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      />
+                    )}
                   />
-                  <FieldDescription>{t("existingAccountDescription")}</FieldDescription>
                 </Field>
               </>
             )}

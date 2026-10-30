@@ -236,6 +236,15 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 				return repository.ErrNotFound
 			}
 
+			var targetID uuid.UUID
+			var administrator bool
+			if err := repository.LockMembershipAdministrator(ctx, tx, orgID, membershipID, &targetID, &administrator); err != nil {
+				return err
+			}
+			if _, err := repository.NewQueries(tx).LockMutableUser(ctx, targetID); err != nil {
+				return err
+			}
+
 			previous, err := repository.MemberRoleIDs(ctx, tx, orgID, membershipID)
 			if err != nil {
 				return err

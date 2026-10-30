@@ -75,7 +75,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 		return data
 	}
 	backup := run("pg_dump", nil, "--format=custom", "--no-owner")
-	if err = sessions.Revoke(loaded, principal, principal.SessionID, false, "logout", uuid.NewString()); err != nil {
+	if err = sessions.Revoke(loaded, principal, principal.SessionID, "logout", uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 

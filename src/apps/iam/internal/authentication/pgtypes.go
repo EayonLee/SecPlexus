@@ -11,9 +11,3 @@ func interval(duration time.Duration) pgtype.Interval {
 	return pgtype.Interval{Microseconds: duration.Microseconds(),
 		Valid: true}
 }
-
-// nullableText 将非空文本转换为可选数据库字段。
-func nullableText(value string) pgtype.Text {
-	return pgtype.Text{String: value,
-		Valid: true}
-}

@@ -9,7 +9,7 @@ x-database: &database
   SPX_POSTGRES_DATABASE: ${SPX_POSTGRES_DATABASE:-secplexus}
   SPX_POSTGRES_USER: ${SPX_POSTGRES_USER:-secplexus}
   SPX_POSTGRES_PASSWORD: ${SPX_POSTGRES_PASSWORD-secplexus}
-  SPX_POSTGRES_MODELESS: ${SPX_POSTGRES_MODELESS:-disable}
+  SPX_POSTGRES_SSLMODE: ${SPX_POSTGRES_SSLMODE:-disable}
 
 services:
   postgres:
@@ -74,14 +74,11 @@ services:
   iam:
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: iam } }
     command: [serve]
-    tmpfs: [/run/spx-certs]
     environment:
       <<: *database
-      SPX_PUBLIC_URL: ${SPX_PUBLIC_URL:-http://127.0.0.1:5173}
-      SPX_IAM_HOST: 0.0.0.0
+      SPX_WEB_ORIGIN: ${SPX_WEB_ORIGIN:-http://127.0.0.1:5173}
+      SPX_IAM_BIND_HOST: 0.0.0.0
       SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
-      SPX_IAM_INTERNAL_HOST: 0.0.0.0
-      SPX_IAM_INTERNAL_PORT: ${SPX_IAM_INTERNAL_PORT:-9081}
       SPX_REDIS_HOST: redis
       SPX_REDIS_PORT: '6379'
       SPX_REDIS_USER: ${SPX_REDIS_USER:-default}
@@ -89,11 +86,8 @@ services:
       SPX_REDIS_DB: ${SPX_REDIS_DB:-0}
       SPX_IAM_CSRF_KEY: ${SPX_IAM_CSRF_KEY:?Set a 32-byte SPX_IAM_CSRF_KEY}
       SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
-      SPX_IAM_TLS_CERT_FILE: /run/secrets/iam_tls_cert
-      SPX_IAM_TLS_KEY_FILE: /run/secrets/iam_tls_key
       SPX_IAM_LOG_LEVEL: ${SPX_IAM_LOG_LEVEL:-info}
       SPX_IAM_LOG_FILE: ''
-    secrets: [iam_tls_cert, iam_tls_key]
     depends_on: { iam-migrate: { condition: service_completed_successfully }, redis: { condition: service_healthy } }
     mem_limit: 512m
     logging: *logging
@@ -104,31 +98,30 @@ services:
       retries: 30
   console:
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: console } }
-    tmpfs: [/run/spx-certs]
     environment:
-      SPX_CONSOLE_HOST: 0.0.0.0
+      SPX_CONSOLE_BIND_HOST: 0.0.0.0
       SPX_CONSOLE_PORT: ${SPX_CONSOLE_PORT:-8080}
-      SPX_CONSOLE_IAM_BASE_URL: https://iam:${SPX_IAM_INTERNAL_PORT:-9081}
+      SPX_IAM_HOST: iam
+      SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
       SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
-      SPX_CONSOLE_IAM_CA_FILE: /run/secrets/iam_tls_cert
       SPX_CONSOLE_LOG_LEVEL: ${SPX_CONSOLE_LOG_LEVEL:-info}
       SPX_CONSOLE_LOG_FILE: ''
-    secrets: [iam_tls_cert]
     depends_on: { iam: { condition: service_healthy } }
     mem_limit: 96m
     logging: *logging
   web:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
     environment:
-      SPX_WEB_IAM_PROXY_TARGET: http://iam:${SPX_IAM_PORT:-8081}
-      SPX_WEB_CONSOLE_PROXY_TARGET: http://console:${SPX_CONSOLE_PORT:-8080}
+      SPX_IAM_HOST: iam
+      SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
+      SPX_CONSOLE_HOST: console
+      SPX_CONSOLE_PORT: ${SPX_CONSOLE_PORT:-8080}
+      SPX_WEB_PORT: 8080
+      SPX_WEB_ORIGIN: ${SPX_WEB_ORIGIN:-http://localhost:5173}
     ports: ["127.0.0.1:${SPX_COMPOSE_WEB_PORT:?Start through pnpm compose:up}:8080"]
     depends_on: { iam: { condition: service_healthy }, console: { condition: service_started } }
     mem_limit: 768m
     logging: *logging
-secrets:
-  iam_tls_cert: { file: "${SPX_IAM_TLS_CERT_FILE:-certs/iam.crt}" }
-  iam_tls_key: { file: "${SPX_IAM_TLS_KEY_FILE:-certs/iam.key}" }
 volumes:
   postgres_data:
   redis_data:

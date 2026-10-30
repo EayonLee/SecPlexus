@@ -21,8 +21,8 @@ type APIChangePasswordInput struct {
 
 // APICurrentOrganizationUpdate 绑定当前组织名称及并发版本。
 type APICurrentOrganizationUpdate struct {
-	AuthzVersion int64  `json:"authz_version,string" binding:"required,min=1"`
-	Name         string `json:"name" binding:"required,min=1,max=100"`
+	AuthzVersion int64            `json:"authz_version,string" binding:"required,min=1"`
+	Name         OrganizationName `json:"name" binding:"required"`
 }
 
 // APIGrantsInput 绑定角色权限替换及并发版本。
@@ -74,16 +74,16 @@ type APIOrganization struct {
 
 // APIOrganizationInput 绑定创建组织及初始管理员请求。
 type APIOrganizationInput struct {
-	AdminUserID string `json:"admin_user_id" binding:"required"`
-	Name        string `json:"name" binding:"required,min=1,max=100"`
-	Slug        string `json:"slug" binding:"required"`
+	AdminUserID string           `json:"admin_user_id" binding:"required"`
+	Name        OrganizationName `json:"name" binding:"required"`
+	Slug        OrganizationSlug `json:"slug" binding:"required"`
 }
 
 // APIOrganizationUpdate 绑定平台组织更新请求。
 type APIOrganizationUpdate struct {
-	AuthzVersion int64  `json:"authz_version,string" binding:"required,min=1"`
-	Name         string `json:"name" binding:"required,min=1,max=100"`
-	Status       string `json:"status" binding:"required,oneof=active suspended"`
+	AuthzVersion int64            `json:"authz_version,string" binding:"required,min=1"`
+	Name         OrganizationName `json:"name" binding:"required"`
+	Status       string           `json:"status" binding:"required,oneof=active suspended"`
 }
 
 // APIPreview 表示授权变更的只读影响。
@@ -145,12 +145,6 @@ type APIRoleInput struct {
 	Version     int64            `json:"version,string" binding:"required,min=1"`
 }
 
-// APISetSuperAdminInput 绑定超级管理员变更；指针区分 false 与未提供。
-type APISetSuperAdminInput struct {
-	Enabled *bool  `json:"enabled" binding:"required"`
-	Reason  string `json:"reason" binding:"required,min=1,max=500"`
-}
-
 // APIUser 是平台账号公开投影，不含密码凭据。
 type APIUser struct {
 	AuthVersion  int64   `json:"auth_version,string"`
@@ -180,7 +174,7 @@ type APIUserUpdate struct {
 
 // ListQuery 绑定分页与搜索，偏移最大为十万。
 type ListQuery struct {
-	Limit  int    `form:"limit,default=50" binding:"min=1,max=100"`
+	Limit  int    `form:"limit,default=10" binding:"min=1,max=100"`
 	Offset int    `form:"offset,default=0" binding:"min=0,max=100000"`
 	Q      string `form:"q"`
 	OrgID  string `form:"org_id" binding:"omitempty,uuid"`

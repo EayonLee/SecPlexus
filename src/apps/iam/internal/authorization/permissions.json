@@ -1,11 +1,9 @@
 [
- {"key":"iam.platform.users.read","module":"iam","resource_type":"users","action":"read","scope":"platform","description":"查看平台账号","risk_level":"normal","delegable":false,"requires_recent_auth":false,"status":"active"},
- {"key":"iam.platform.users.manage","module":"iam","resource_type":"users","action":"manage","scope":"platform","description":"管理平台账号与重置密码","risk_level":"high","delegable":false,"requires_recent_auth":true,"status":"active"},
+ {"key":"iam.platform.users.read","module":"iam","resource_type":"users","action":"read","scope":"platform","description":"查看平台成员","risk_level":"normal","delegable":false,"requires_recent_auth":false,"status":"active"},
+ {"key":"iam.platform.users.manage","module":"iam","resource_type":"users","action":"manage","scope":"platform","description":"管理平台成员与重置密码","risk_level":"high","delegable":false,"requires_recent_auth":true,"status":"active"},
  {"key":"iam.platform.organizations.read","module":"iam","resource_type":"organizations","action":"read","scope":"platform","description":"查看平台组织","risk_level":"normal","delegable":false,"requires_recent_auth":false,"status":"active"},
  {"key":"iam.platform.organizations.manage","module":"iam","resource_type":"organizations","action":"manage","scope":"platform","description":"管理组织与组织管理员","risk_level":"high","delegable":false,"requires_recent_auth":true,"status":"active"},
- {"key":"iam.platform.super_admins.manage","module":"iam","resource_type":"super_admins","action":"manage","scope":"platform","description":"管理超级管理员身份","risk_level":"high","delegable":false,"requires_recent_auth":true,"status":"active"},
  {"key":"iam.platform.audit.read","module":"iam","resource_type":"audit","action":"read","scope":"platform","description":"查看平台审计","risk_level":"sensitive","delegable":false,"requires_recent_auth":false,"status":"active"},
- {"key":"iam.platform.security.read","module":"iam","resource_type":"security","action":"read","scope":"platform","description":"查看脱敏安全配置","risk_level":"normal","delegable":false,"requires_recent_auth":false,"status":"active"},
  {"key":"iam.organizations.read","module":"iam","resource_type":"organizations","action":"read","scope":"organization","description":"查看当前组织","risk_level":"normal","delegable":true,"requires_recent_auth":false,"status":"active"},
  {"key":"iam.organizations.manage","module":"iam","resource_type":"organizations","action":"manage","scope":"organization","description":"修改组织展示信息","risk_level":"sensitive","delegable":true,"requires_recent_auth":false,"status":"active"},
  {"key":"iam.members.read","module":"iam","resource_type":"members","action":"read","scope":"organization","description":"查看组织成员","risk_level":"normal","delegable":true,"requires_recent_auth":false,"status":"active"},

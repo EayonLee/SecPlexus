@@ -71,9 +71,13 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 
 		var userID uuid.UUID
 		var version int64
-		var memberActive bool
-		if err = repository.MemberPreviewState(ctx, tx, orgID, input.MembershipID, &userID, &version, &memberActive); err != nil {
+		var memberActive, systemAdmin bool
+		if err = repository.MemberPreviewState(ctx, tx, orgID, input.MembershipID, &userID, &version, &memberActive, &systemAdmin); err != nil {
 			return response, err
+		}
+
+		if systemAdmin {
+			return response, authorization.ErrDenied
 		}
 
 		if input.AuthzVersion != version {

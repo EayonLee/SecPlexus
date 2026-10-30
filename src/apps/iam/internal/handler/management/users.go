@@ -102,25 +102,6 @@ func (s *Handler) UpdateUser(c *gin.Context) {
 	result.NoContent(w)
 }
 
-// SetSuperAdmin 处理需要近期认证的管理员身份变更。
-func (s *Handler) SetSuperAdmin(c *gin.Context) {
-	id := c.Param("id")
-	w := c.Writer
-	r := c.Request
-	var input model.APISetSuperAdminInput
-	if err := httpx.Bind(c, &input); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
-
-	if err := s.Service.SetSuperAdmin(r.Context(), id, *input.Enabled, input.Reason, middleware.RequestID(r)); err != nil {
-		httpx.Reject(c, err)
-		return
-	}
-
-	result.NoContent(w)
-}
-
 // ResetUserPassword 限制密码计算并通过用例重置密码。
 func (s *Handler) ResetUserPassword(c *gin.Context) {
 	id := c.Param("id")

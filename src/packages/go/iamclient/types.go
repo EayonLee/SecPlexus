@@ -20,7 +20,7 @@ type AuthorizedScope struct {
 	OrgID string `json:"org_id,omitempty"`
 }
 
-// CapabilityDecision 是单次内部授权判定及排障标识。
+// CapabilityDecision 是单次服务授权判定及排障标识。
 type CapabilityDecision struct {
 	Allowed    bool            `json:"allowed"`
 	DecisionID string          `json:"decision_id"`

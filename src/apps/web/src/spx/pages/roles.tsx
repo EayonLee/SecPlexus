@@ -4,19 +4,17 @@ import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
 import { permissions } from "@/auth/permissions.gen";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -39,11 +37,12 @@ import {
 } from "@/spx/api/iam/schemas";
 
 import { Can, useCan } from "../components/access";
-import { DataTable, useAction } from "../components/data";
+import { DataTable, useAction, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
+import { StatusBadge } from "../components/status-badge";
 import { managementChanged } from "../iam/management";
 import { identityScope, queryClient } from "../iam/query";
-import { errorMessageKey, useIdentity } from "../iam/session";
+import { useIdentity } from "../iam/session";
 import { useRoleLabel } from "../iam/use-role-label";
 
 export function RolesPage() {
@@ -58,23 +57,7 @@ export function RolesPage() {
 
   const auth = useIdentity();
   const org = auth.org_id ?? "";
-  const [page, setPage] = useState(1);
-  const roleQuery = useQuery({
-    queryKey: ["iam", "roles", org, page, ...identityScope(auth)],
-    queryFn: ({ signal }) => listRoles(org, { limit: 20, offset: (page - 1) * 20 }, signal),
-    enabled: auth.status === "authenticated",
-  });
-  const state = {
-    items: roleQuery.data?.items ?? [],
-    total: roleQuery.data?.total ?? 0,
-    loading: roleQuery.isFetching,
-    error: roleQuery.error ? errorMessageKey(roleQuery.error) : ("" as const),
-    page,
-    setPage,
-    reload: () => {
-      void roleQuery.refetch();
-    },
-  };
+  const state = usePagedQuery<ApiRole>(["iam", "roles", org], (query, signal) => listRoles(org, query, signal));
   const canMembers = useCan(permissions.IAMMembersRead);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ApiRole | undefined>(undefined);
@@ -90,12 +73,6 @@ export function RolesPage() {
     enabled: auth.status === "authenticated",
   });
   const catalog = catalogQuery.data?.items ?? [];
-  const memberQuery = useQuery({
-    queryKey: ["iam", "role-members", org, editing?.id, ...identityScope(auth)],
-    enabled: !!editing && canMembers,
-    queryFn: ({ signal }) => listRoleMembers(org, editing?.id ?? "", { limit: 100 }, signal),
-  });
-  const members = memberQuery.data?.items ?? [];
   const create = useMutation({ mutationFn: createRole, onSuccess: managementChanged });
   const remove = useMutation({ mutationFn: deleteRole, onSuccess: managementChanged });
   const edit = useMutation({
@@ -155,11 +132,16 @@ export function RolesPage() {
           {
             title: t("type"),
             cell: (role) => (
-              <Badge variant="secondary">{role.kind === "system" ? t("systemRole") : t("customRole")}</Badge>
+              <StatusBadge status={role.kind}>{role.kind === "system" ? t("systemRole") : t("customRole")}</StatusBadge>
             ),
           },
           { title: t("memberCount"), cell: (role) => role.member_count },
-          { title: t("status"), cell: (role) => (role.status === "active" ? t("active") : t("disabled")) },
+          {
+            title: t("status"),
+            cell: (role) => (
+              <StatusBadge status={role.status}>{role.status === "active" ? t("active") : t("disabled")}</StatusBadge>
+            ),
+          },
           {
             title: t("action"),
             cell: (role) => (
@@ -238,10 +220,9 @@ export function RolesPage() {
             }
           }}
         >
-          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
+          <DialogContent aria-describedby={undefined} className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>{roleLabel(editing)}</DialogTitle>
-              <DialogDescription>{t("roleDescription")}</DialogDescription>
             </DialogHeader>
             <Tabs defaultValue="information">
               <TabsList>
@@ -290,16 +271,38 @@ export function RolesPage() {
                         />
                       </Field>
                       <Field>
-                        <FieldLabel htmlFor="role-status">{t("status")}</FieldLabel>
-                        <NativeSelect key={editing.version} id="role-status" {...roleForm.register("status")}>
-                          <NativeSelectOption value="active">{t("active")}</NativeSelectOption>
-                          <NativeSelectOption value="disabled">{t("disabled")}</NativeSelectOption>
-                        </NativeSelect>
+                        <FieldLabel htmlFor="roles-status">{t("status")}</FieldLabel>
+                        <Controller
+                          control={roleForm.control}
+                          name="status"
+                          render={({ field }) => (
+                            <Select value={field.value} onValueChange={field.onChange} name={field.name}>
+                              <SelectTrigger
+                                id="roles-status"
+                                aria-label={t("status")}
+                                onBlur={field.onBlur}
+                                ref={field.ref}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem value="active">{t("active")}</SelectItem>
+                                  <SelectItem value="disabled">{t("disabled")}</SelectItem>
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
                       </Field>
                       {Object.keys(roleForm.formState.errors).length > 0 && (
                         <FieldError>{errors("invalidRequest")}</FieldError>
                       )}
-                      {canEdit && <Button type="submit">{t("saveRole")}</Button>}
+                      {canEdit && (
+                        <Field orientation="horizontal">
+                          <Button type="submit">{t("saveRole")}</Button>
+                        </Field>
+                      )}
                     </FieldGroup>
                   </fieldset>
                 </form>
@@ -391,24 +394,7 @@ export function RolesPage() {
               </TabsContent>
               {canMembers && (
                 <TabsContent value="members">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("username")}</TableHead>
-                        <TableHead>{t("displayName")}</TableHead>
-                        <TableHead>{t("status")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {members.map((member) => (
-                        <TableRow key={member.id}>
-                          <TableCell>{member.username}</TableCell>
-                          <TableCell>{member.display_name}</TableCell>
-                          <TableCell>{member.status === "active" ? t("active") : t("disabled")}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <RoleMembersTable key={editing.id} orgID={org} roleID={editing.id} />
                 </TabsContent>
               )}
             </Tabs>
@@ -416,5 +402,27 @@ export function RolesPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+function RoleMembersTable({ orgID, roleID }: { orgID: string; roleID: string }) {
+  const t = useTranslations("Management");
+  const state = usePagedQuery(["iam", "role-members", orgID, roleID], (query, signal) =>
+    listRoleMembers(orgID, roleID, query, signal),
+  );
+  return (
+    <DataTable
+      state={state}
+      columns={[
+        { title: t("username"), cell: (member) => member.username },
+        { title: t("displayName"), cell: (member) => member.display_name },
+        {
+          title: t("status"),
+          cell: (member) => (
+            <StatusBadge status={member.status}>{t(member.status === "active" ? "active" : "disabled")}</StatusBadge>
+          ),
+        },
+      ]}
+    />
   );
 }

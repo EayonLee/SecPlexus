@@ -17,31 +17,31 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// Security 管理公开接口的 CSRF 防护及内部服务认证。
+// Security 管理公开接口的 CSRF 防护及服务服务认证。
 type Security struct {
 	host    string                          // 安全读取请求使用的配置主机。
 	scheme  string                          // 公开入口协议，决定 CSRF 与 Cookie 的 TLS 策略。
 	protect func(http.Handler) http.Handler // 真实 CSRF Cookie 和令牌校验器。
 	origins map[string]string               // 允许的完整来源及其主机，不接受任意转发地址。
 	secure  bool                            // 公开入口是否要求 HTTPS。
-	clients []InternalClient                // 内部调用方的凭证摘要与权限。
+	clients []ServiceClient                 // 服务调用方的凭证摘要与权限。
 }
 
-// InternalClient 保存内部调用方的凭证摘要和允许的操作。
-type InternalClient struct {
+// ServiceClient 保存服务调用方的凭证摘要和允许的操作。
+type ServiceClient struct {
 	ID        string
 	TokenHash string
 	Actions   []string
 }
 
-// NewSecurity 根据配置初始化安全检查和内部调用方。
+// NewSecurity 根据配置初始化安全检查和服务调用方。
 func NewSecurity(cfg config.Config) (*Security, error) {
 	if err := cfg.ValidateSecurity(true); err != nil {
 		return nil, err
 	}
 	key := cfg.Auth.CSRFKey
 
-	origin := strings.TrimSuffix(cfg.App.PublicURL, "/")
+	origin := strings.TrimSuffix(cfg.Auth.WebOrigin, "/")
 	parsed, err := url.Parse(origin)
 	if err != nil {
 		return nil, err
@@ -77,10 +77,10 @@ func NewSecurity(cfg config.Config) (*Security, error) {
 			result.Fail(w, result.CodeCSRFInvalid)
 		})),
 	)
-	for id, client := range cfg.Internal.Clients {
+	for id, client := range cfg.ServiceClients {
 
 		digest := sha256.Sum256([]byte(client.Token))
-		security.clients = append(security.clients, InternalClient{
+		security.clients = append(security.clients, ServiceClient{
 			ID:        id,
 			TokenHash: hex.EncodeToString(digest[:]),
 			Actions:   client.Actions,
@@ -119,16 +119,12 @@ func (s *Security) Protect(next http.Handler) http.Handler {
 	})
 }
 
-// InternalClient 验证 TLS、调用凭证和调用方允许的操作。
-func (s *Security) InternalClient(r *http.Request, action string) bool {
-	if r.TLS == nil {
-		logging.From(r.Context()).Warn("内部调用必须使用 TLS", "event", "security.client_rejected", "reason", "tls_required")
-		return false
-	}
+// ServiceClient 验证调用凭证和调用方允许的操作。
+func (s *Security) ServiceClient(r *http.Request, action string) bool {
 
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || len(token) < 32 || len(token) > 512 {
-		logging.From(r.Context()).Warn("内部调用凭证格式不符合要求", "event", "security.client_rejected", "reason", "credential_invalid")
+		logging.From(r.Context()).Warn("服务调用凭证格式不符合要求", "event", "security.client_rejected", "reason", "credential_invalid")
 		return false
 	}
 
@@ -138,13 +134,13 @@ func (s *Security) InternalClient(r *http.Request, action string) bool {
 		if err == nil && subtle.ConstantTimeCompare(digest[:], expected) == 1 {
 			allowed := slices.Contains(client.Actions, action)
 			if !allowed {
-				logging.From(r.Context()).Warn("内部调用方无权执行目标能力", "event", "security.client_action_rejected", "client_id", client.ID, "action", action)
+				logging.From(r.Context()).Warn("服务调用方无权执行目标能力", "event", "security.client_action_rejected", "client_id", client.ID, "action", action)
 			}
 			return allowed
 		}
 	}
 
-	logging.From(r.Context()).Warn("内部调用凭证未匹配", "event", "security.client_rejected", "reason", "credential_unknown")
+	logging.From(r.Context()).Warn("服务调用凭证未匹配", "event", "security.client_rejected", "reason", "credential_unknown")
 	return false
 }
 
