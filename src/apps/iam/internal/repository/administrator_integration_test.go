@@ -31,7 +31,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repeated.PasswordHash != before.PasswordHash || repeated.AuthVersion != before.AuthVersion {
+	if repeated.PasswordHash != before.PasswordHash || repeated.AuthEpoch != before.AuthEpoch {
 		t.Fatal("unchanged configuration invalidated credentials")
 	}
 	if err = store.Seed(ctx, "admin", changed); err != nil {
@@ -44,7 +44,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if err = (identity.PasswordHasher{}).CompareHashAndPassword(after.PasswordHash, changed); err != nil {
 		t.Fatal("configured password was not applied")
 	}
-	if after.ID != before.ID || after.AuthVersion <= before.AuthVersion {
+	if after.ID != before.ID || after.AuthEpoch <= before.AuthEpoch {
 		t.Fatal("credential rotation did not preserve identity and revoke old identity versions")
 	}
 	if err = store.Seed(ctx, "admin", ""); err == nil {

@@ -67,7 +67,7 @@ func actorContext(t *testing.T, service *Service, username string) context.Conte
 func authzVersion(t *testing.T, s *Service, org string) int64 {
 	t.Helper()
 	var v int64
-	if err := s.Store.Pool.QueryRow(context.Background(), `SELECT authz_version FROM iam.organizations WHERE id=$1`, org).Scan(&v); err != nil {
+	if err := s.Store.Pool.QueryRow(context.Background(), `SELECT authz_epoch FROM iam.organizations WHERE id=$1`, org).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal(err)
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{managerRole, readRole}, AuthzVersion: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
+	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{managerRole, readRole}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +165,7 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal("revoked authority granted a permission")
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{}, AuthzVersion: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
+	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,7 +202,7 @@ func TestConcurrentDisablesRetainAnEffectiveOrganizationAdministrator(t *testing
 		t.Fatal(err)
 	}
 
-	if err = s.ReplaceMemberRoles(first, org, member, MemberRolesInput{RoleIDs: []string{adminRole}, AuthzVersion: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
+	if err = s.ReplaceMemberRoles(first, org, member, MemberRolesInput{RoleIDs: []string{adminRole}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,7 +222,7 @@ func TestConcurrentDisablesRetainAnEffectiveOrganizationAdministrator(t *testing
 		go func() {
 			defer wg.Done()
 
-			results <- s.UpdateUser(actor.ctx, actor.user.ID.String(), UserUpdate{DisplayName: actor.user.DisplayName, Status: "disabled", AuthVersion: actor.user.AuthVersion}, uuid.NewString())
+			results <- s.UpdateUser(actor.ctx, actor.user.ID.String(), UserUpdate{DisplayName: actor.user.DisplayName, Status: "disabled", AuthEpoch: actor.user.AuthEpoch}, uuid.NewString())
 		}()
 	}
 
@@ -261,30 +261,30 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 	}
 
 	roles := []string{role}
-	input := PreviewInput{MembershipID: member, RoleIDs: &roles, AuthzVersion: authzVersion(t, s, org)}
+	input := PreviewInput{MembershipID: member, RoleIDs: &roles, AuthzEpoch: authzVersion(t, s, org)}
 	preview, err := s.Preview(admin, org, input)
 	if err != nil || len(preview.Added) != 1 || preview.Added[0] != "iam.audit.read" {
 		t.Fatalf("new binding preview: %#v %v", preview, err)
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: roles, AuthzVersion: input.AuthzVersion}, uuid.NewString()); err != nil {
+	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: roles, AuthzEpoch: input.AuthzEpoch}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err = s.Store.Pool.Exec(context.Background(), `UPDATE iam.permissions SET status='deprecated' WHERE key='iam.audit.read'`); err != nil {
+	if _, err = s.Store.Pool.Exec(context.Background(), `UPDATE iam.permissions SET status='deprecated' WHERE permission_key='iam.audit.read'`); err != nil {
 		t.Fatal(err)
 	}
 
-	input.AuthzVersion = authzVersion(t, s, org)
+	input.AuthzEpoch = authzVersion(t, s, org)
 	if _, err = s.Preview(admin, org, input); err != nil {
 		t.Fatal("existing deprecated binding cannot be previewed", err)
 	}
 
-	if err = s.UpdateMember(admin, org, member, MemberUpdate{Status: "disabled", AuthzVersion: input.AuthzVersion}, false, uuid.NewString()); err != nil {
+	if err = s.UpdateMember(admin, org, member, MemberUpdate{Status: "disabled", AuthzEpoch: input.AuthzEpoch}, false, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
-	input.AuthzVersion = authzVersion(t, s, org)
+	input.AuthzEpoch = authzVersion(t, s, org)
 	preview, err = s.Preview(admin, org, input)
 	if err != nil || len(preview.After) != 0 {
 		t.Fatalf("disabled member has effective grants: %#v %v", preview, err)
@@ -296,7 +296,7 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 	}
 
 	input.MembershipID = other
-	input.AuthzVersion = authzVersion(t, s, org)
+	input.AuthzEpoch = authzVersion(t, s, org)
 	if _, err = s.Preview(admin, org, input); !errors.Is(err, authorization.ErrDenied) {
 		t.Fatalf("new deprecated binding preview allowed: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestConfiguredAdministratorRejectsApplicationAndOperatorWrites(t *testing.T
 			}
 			switch operation {
 			case "profile":
-				err = s.UpdateUser(actor, user.ID.String(), UserUpdate{DisplayName: "Changed", Status: "active", AuthVersion: user.AuthVersion}, uuid.NewString())
+				err = s.UpdateUser(actor, user.ID.String(), UserUpdate{DisplayName: "Changed", Status: "active", AuthEpoch: user.AuthEpoch}, uuid.NewString())
 			case "password":
 				err = s.ChangePassword(actor, "isolated domain password", "not from configuration", uuid.NewString())
 			case "reset":

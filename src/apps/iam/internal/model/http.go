@@ -21,8 +21,8 @@ type APIChangePasswordInput struct {
 
 // APICurrentOrganizationUpdate 绑定当前组织名称及并发版本。
 type APICurrentOrganizationUpdate struct {
-	AuthzVersion int64            `json:"authz_version,string" binding:"required,min=1"`
-	Name         OrganizationName `json:"name" binding:"required"`
+	AuthzEpoch int64            `json:"authz_epoch,string" binding:"required,min=1"`
+	Name       OrganizationName `json:"name" binding:"required"`
 }
 
 // APIGrantsInput 绑定角色权限替换及并发版本。
@@ -53,23 +53,23 @@ type APIMemberInput struct {
 
 // APIMemberRolesInput 绑定成员角色替换及组织并发版本。
 type APIMemberRolesInput struct {
-	AuthzVersion int64      `json:"authz_version,string" binding:"required,min=1"`
-	RoleIDs      APIRoleIDs `json:"role_ids" binding:"required,iam_role_ids"`
+	AuthzEpoch int64      `json:"authz_epoch,string" binding:"required,min=1"`
+	RoleIDs    APIRoleIDs `json:"role_ids" binding:"required,iam_role_ids"`
 }
 
 // APIMemberUpdate 绑定成员状态及组织并发版本。
 type APIMemberUpdate struct {
-	AuthzVersion int64  `json:"authz_version,string" binding:"required,min=1"`
-	Status       string `json:"status" binding:"required,oneof=active disabled"`
+	AuthzEpoch int64  `json:"authz_epoch,string" binding:"required,min=1"`
+	Status     string `json:"status" binding:"required,oneof=active disabled"`
 }
 
 // APIOrganization 是组织的公开投影。
 type APIOrganization struct {
-	AuthzVersion int64  `json:"authz_version,string"`
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Slug         string `json:"slug"`
-	Status       string `json:"status,omitempty"`
+	AuthzEpoch int64  `json:"authz_epoch,string"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Slug       string `json:"slug"`
+	Status     string `json:"status,omitempty"`
 }
 
 // APIOrganizationInput 绑定创建组织及初始管理员请求。
@@ -81,9 +81,9 @@ type APIOrganizationInput struct {
 
 // APIOrganizationUpdate 绑定平台组织更新请求。
 type APIOrganizationUpdate struct {
-	AuthzVersion int64            `json:"authz_version,string" binding:"required,min=1"`
-	Name         OrganizationName `json:"name" binding:"required"`
-	Status       string           `json:"status" binding:"required,oneof=active suspended"`
+	AuthzEpoch int64            `json:"authz_epoch,string" binding:"required,min=1"`
+	Name       OrganizationName `json:"name" binding:"required"`
+	Status     string           `json:"status" binding:"required,oneof=active suspended"`
 }
 
 // APIPreview 表示授权变更的只读影响。
@@ -97,7 +97,7 @@ type APIPreview struct {
 
 // APIPreviewInput 绑定角色权限或成员角色预览；两类目标互斥。
 type APIPreviewInput struct {
-	AuthzVersion int64           `json:"authz_version,omitempty,string" binding:"required_with=MembershipID,omitempty,min=1"`
+	AuthzEpoch   int64           `json:"authz_epoch,omitempty,string" binding:"required_with=MembershipID,omitempty,min=1"`
 	MembershipID string          `json:"membership_id,omitempty" binding:"omitempty,uuid"`
 	Permissions  *APIPermissions `json:"permissions,omitempty" binding:"required_with=RoleID,omitempty,iam_permissions"`
 	RoleID       string          `json:"role_id,omitempty" binding:"omitempty,uuid"`
@@ -147,7 +147,7 @@ type APIRoleInput struct {
 
 // APIUser 是平台账号公开投影，不含密码凭据。
 type APIUser struct {
-	AuthVersion  int64   `json:"auth_version,string"`
+	AuthEpoch    int64   `json:"auth_epoch,string"`
 	DisplayName  string  `json:"display_name"`
 	Email        *string `json:"email"`
 	ID           string  `json:"id"`
@@ -166,7 +166,7 @@ type APIUserInput struct {
 
 // APIUserUpdate 绑定账号更新；邮箱缺省保留、空值清空、null 拒绝。
 type APIUserUpdate struct {
-	AuthVersion int64            `json:"auth_version,string" binding:"required,min=1"`
+	AuthEpoch   int64            `json:"auth_epoch,string" binding:"required,min=1"`
 	DisplayName string           `json:"display_name" binding:"required,min=1,max=100"`
 	Email       omit.Val[string] `json:"email,omitempty,omitzero" binding:"omitempty"`
 	Status      string           `json:"status" binding:"required,oneof=active disabled"`
@@ -192,5 +192,5 @@ type VersionQuery struct {
 
 // AuthorizationVersionQuery 绑定组织授权并发版本。
 type AuthorizationVersionQuery struct {
-	AuthzVersion int64 `form:"authz_version" binding:"required,min=1"`
+	AuthzEpoch int64 `form:"authz_epoch" binding:"required,min=1"`
 }

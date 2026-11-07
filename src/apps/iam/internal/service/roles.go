@@ -222,7 +222,7 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 				return err
 			}
 
-			if version != input.AuthzVersion {
+			if version != input.AuthzEpoch {
 				return repository.ErrConflict
 			}
 
@@ -288,7 +288,7 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 			// 业务变更、管理员保护与审计由 Manage 在同一事务内提交。
 			metadata["before_role_ids"] = previous
 			metadata["after_role_ids"] = input.RoleIDs
-			metadata["expected_authz_version"] = strconv.FormatInt(input.AuthzVersion, 10)
+			metadata["expected_authz_epoch"] = strconv.FormatInt(input.AuthzEpoch, 10)
 			if err := repository.ReplaceMemberRoles(ctx, tx, orgID, membershipID, input.RoleIDs, p.UserID); err != nil {
 				return err
 			}

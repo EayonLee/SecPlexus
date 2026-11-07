@@ -41,7 +41,7 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 			return nil, err
 		}
 
-		organizations = append(organizations, map[string]string{"id": id, "slug": slug, "name": name, "authz_version": version})
+		organizations = append(organizations, map[string]string{"id": id, "slug": slug, "name": name, "authz_epoch": version})
 	}
 
 	_ = rows.Close()

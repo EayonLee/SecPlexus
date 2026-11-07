@@ -111,9 +111,9 @@ func ReplaceGrants(ctx context.Context, tx *gorm.DB, orgID, roleID string, permi
 
 // OrganizationVersion 锁定组织并读取当前权限版本。
 func OrganizationVersion(ctx context.Context, tx *gorm.DB, orgID string) (int64, error) {
-	var row struct{ AuthzVersion int64 }
+	var row struct{ AuthzEpoch int64 }
 	err := tx.WithContext(ctx).Table("iam.organizations").Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", orgID).Take(&row).Error
-	return row.AuthzVersion, err
+	return row.AuthzEpoch, err
 }
 
 // MemberExists 判断目标是否属于当前组织。

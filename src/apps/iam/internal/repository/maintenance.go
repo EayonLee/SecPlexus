@@ -59,7 +59,7 @@ func (s *Store) RevokeAfterRestore(ctx context.Context) error {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`UPDATE iam.users SET auth_version=auth_version+1,updated_at=now()`).Error; err != nil {
+	if err = tx.WithContext(ctx).Exec(`UPDATE iam.users SET auth_epoch=auth_epoch+1,updated_at=now()`).Error; err != nil {
 		return err
 	}
 
@@ -107,7 +107,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 		return err
 	}
 
-	if err = BumpUserAuthVersion(ctx, tx, userID); err != nil {
+	if err = BumpUserAuthEpoch(ctx, tx, userID); err != nil {
 		return err
 	}
 

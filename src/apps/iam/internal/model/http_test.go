@@ -12,8 +12,8 @@ func TestPatchEncodingOmitsAbsentAndKeepsExplicitEmpty(t *testing.T) {
 		input   APIUserUpdate
 		present bool
 	}{
-		{APIUserUpdate{DisplayName: "Name", Status: "active", AuthVersion: 1}, false},
-		{APIUserUpdate{DisplayName: "Name", Status: "active", AuthVersion: 1, Email: omit.From("")}, true},
+		{APIUserUpdate{DisplayName: "Name", Status: "active", AuthEpoch: 1}, false},
+		{APIUserUpdate{DisplayName: "Name", Status: "active", AuthEpoch: 1, Email: omit.From("")}, true},
 	} {
 		data, err := json.Marshal(tc.input)
 		if err != nil {

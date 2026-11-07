@@ -104,7 +104,7 @@ func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, inpu
 				return err
 			}
 
-			if version != input.AuthzVersion {
+			if version != input.AuthzEpoch {
 				return repository.ErrConflict
 			}
 

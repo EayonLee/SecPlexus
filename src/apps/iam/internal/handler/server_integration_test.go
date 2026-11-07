@@ -274,7 +274,7 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	userID := me["principal"].(map[string]any)["user_id"].(string)
 	orgPath := "/api/v1/iam/orgs/" + org
-	admin.request("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": "Changed", "status": "disabled", "auth_version": me["principal"].(map[string]any)["auth_version"]}, 403)
+	admin.request("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": "Changed", "status": "disabled", "auth_epoch": me["principal"].(map[string]any)["auth_epoch"]}, 403)
 	admin.request("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "not configured password"}, 403)
 	members := admin.request("GET", orgPath+"/members", nil, 200)["items"].([]any)
 	var configuredMembership string
@@ -287,12 +287,12 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	if configuredMembership == "" {
 		t.Fatal("configured administrator membership missing")
 	}
-	configuredVersion := admin.request("GET", orgPath, nil, 200)["authz_version"].(string)
+	configuredVersion := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
 	protectedPath := orgPath + "/members/" + configuredMembership
-	admin.request("PATCH", protectedPath, map[string]any{"status": "disabled", "authz_version": configuredVersion}, 403)
-	admin.request("DELETE", protectedPath+"?authz_version="+configuredVersion, nil, 403)
-	admin.request("PUT", protectedPath+"/roles", map[string]any{"role_ids": []string{}, "authz_version": configuredVersion}, 403)
-	admin.request("POST", orgPath+"/permission-preview", map[string]any{"membership_id": configuredMembership, "role_ids": []string{}, "authz_version": configuredVersion}, 403)
+	admin.request("PATCH", protectedPath, map[string]any{"status": "disabled", "authz_epoch": configuredVersion}, 403)
+	admin.request("DELETE", protectedPath+"?authz_epoch="+configuredVersion, nil, 403)
+	admin.request("PUT", protectedPath+"/roles", map[string]any{"role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
+	admin.request("POST", orgPath+"/permission-preview", map[string]any{"membership_id": configuredMembership, "role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
 
 	catalog := admin.request("GET", "/api/v1/iam/permissions?org_id="+org, nil, 200)["items"].([]any)
 	foundAudit := false
@@ -316,8 +316,8 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	roleID := admin.request("POST", orgPath+"/roles", map[string]string{"code": "security_auditor", "name": "审计员"}, 201)["id"].(string)
 	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{"iam.audit.read"}, "version": "1"}, 204)
 	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{}, "version": "1"}, 409)
-	version := admin.request("GET", orgPath, nil, 200)["authz_version"].(string)
-	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{roleID}, "authz_version": version}, 204)
+	version := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
+	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{roleID}, "authz_epoch": version}, 204)
 	member := newAPIClient(t, public.URL, public.URL)
 	member.login(f.member, initialMember)
 	member.request("GET", orgPath+"/audit-events", nil, 200)
@@ -334,8 +334,8 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	otherOrg := admin.request("POST", "/api/v1/iam/organizations", map[string]string{"slug": "isolated-team", "name": "Other organization", "admin_user_id": userID}, 201)["id"].(string)
 	otherRole := admin.request("POST", "/api/v1/iam/orgs/"+otherOrg+"/roles", map[string]string{"code": "other_reader", "name": "Other reader"}, 201)["id"].(string)
 	member.request("GET", "/api/v1/iam/orgs/"+otherOrg+"/audit-events", nil, 403)
-	currentVersion := admin.request("GET", orgPath, nil, 200)["authz_version"].(string)
-	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{otherRole}, "authz_version": currentVersion}, 404)
+	currentVersion := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
+	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{otherRole}, "authz_epoch": currentVersion}, 404)
 	member.request("GET", orgPath+"/audit-events", nil, 200)
 	admin.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": password, "return_to": "https://untrusted.invalid"}, 400)
 	// 角色显示名称可以改变，稳定的能力语义不随名称改变。
@@ -456,15 +456,15 @@ func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
 	admin.login(f.admin, f.password)
 	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password}, 201)
 	userPath := "/api/v1/iam/users/" + user["id"].(string)
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "1"}, 204)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "1"}, 204)
 	if got := admin.request("GET", userPath, nil, 200)["email"]; got != "patch@example.com" {
 		t.Fatalf("omitted email changed stored value: %v", got)
 	}
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "2", "email": ""}, 204)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "2", "email": ""}, 204)
 	if got := admin.request("GET", userPath, nil, 200)["email"]; got != nil {
 		t.Fatalf("explicit empty email was not cleared: %v", got)
 	}
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_version": "3", "email": nil}, 400)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "3", "email": nil}, 400)
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	role := admin.request("POST", "/api/v1/iam/orgs/"+org+"/roles", map[string]any{"code": "patch_role", "name": "Before", "description": "Preserve me"}, 201)
@@ -499,8 +499,8 @@ func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
 		roles[i] = uuid.NewString()
 	}
 	member := uuid.NewString()
-	admin.request("POST", base+"/permission-preview", map[string]any{"membership_id": member, "role_ids": roles, "authz_version": "1"}, 400)
-	admin.request("PUT", base+"/members/"+member+"/roles", map[string]any{"role_ids": roles, "authz_version": "1"}, 400)
+	admin.request("POST", base+"/permission-preview", map[string]any{"membership_id": member, "role_ids": roles, "authz_epoch": "1"}, 400)
+	admin.request("PUT", base+"/members/"+member+"/roles", map[string]any{"role_ids": roles, "authz_epoch": "1"}, 400)
 
 	for _, version := range []string{"0", "9223372036854775808", "invalid"} {
 		admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Review", "status": "active", "version": version}, 400)

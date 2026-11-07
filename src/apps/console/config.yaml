@@ -1,20 +1,46 @@
-# Console只配置实际使用的能力，没有数据库/Redis占位项。
+# Console 模块配置。
+#
+# 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
+# 每项写作 ${环境变量名-默认值}：环境变量未设置时用默认值。
+# 本模块没有数据库和 Redis 配置——当前它只做"向 IAM 换授权结论"，还没有自有持久化业务，
+# 所以不建空库占位。实现案件等业务时再按模块自己的表增加。
+
+# ---- HTTP 监听 ----
+# HTTPS 由反向代理终止，本服务只监听明文 HTTP。
 app:
+  # 监听地址。0.0.0.0 = 所有网卡；127.0.0.1 = 只允许本机（前面有反向代理时用这个）。
   host: "${SPX_CONSOLE_BIND_HOST-0.0.0.0}"
+  # 监听端口。BIND_PORT 是本进程实际绑定的端口；未设置时回退到 SPX_CONSOLE_PORT（调用方连接的目标端口）。
   port: "${SPX_CONSOLE_BIND_PORT-${SPX_CONSOLE_PORT-8080}}"
 
-# IAM 地址及每服务凭证；不读取IAM数据库。
+# ---- 上游 IAM ----
+# Console 不读 IAM 的表、不导入 IAM 的内部包，全部通过 HTTP 契约访问。
+# 每个受保护请求都向 IAM 换取授权结论；IAM 不可用时返回 503，绝不放行。
 iam:
-  host: "${SPX_CONSOLE_IAM_HOST-${SPX_IAM_HOST-127.0.0.1}}"
-  port: "${SPX_CONSOLE_IAM_PORT-${SPX_IAM_PORT-8081}}"
+  # IAM 服务地址。同机部署留默认；分开部署改成实际地址。
+  # 注意不能填 0.0.0.0——那是监听地址，不是可连接的地址。
+  host: "${SPX_IAM_HOST-127.0.0.1}"
+  # IAM 服务端口，必须与 IAM 实际监听端口一致。
+  port: "${SPX_IAM_PORT-8081}"
+  # 调用 IAM 的服务凭证，32-512 字节。
+  # 必须与 IAM config.yaml 里 service_clients.console.token 完全相同，否则所有请求会被 IAM 以 401 拒绝。
   token: "${SPX_CONSOLE_IAM_TOKEN-}"
 
-# 多个进程不能写同一个轮转文件；容器默认stdout，由运行时轮转。
+# ---- 日志 ----
+# 结构化 JSON 日志。容器部署建议 file 留空、只走 stdout，由容器运行时做轮转。
 logging:
+  # 日志级别：debug / info / warn / error。生产用 info，排查问题临时改 debug。
   level: "${SPX_CONSOLE_LOG_LEVEL-info}"
+  # 是否同时输出到 stdout。容器部署必须 true（否则日志丢失）。
   stdout: "${SPX_CONSOLE_LOG_STDOUT-true}"
+  # 日志文件路径。容器里设为空字符串，只保留 stdout。
+  # 多个副本不能写同一个文件——会互相覆盖，每个副本要给不同路径或不写文件。
   file: "${SPX_CONSOLE_LOG_FILE-logs/console.log}"
+  # 单个日志文件最大体积（MB），超过就切分。仅在写文件时生效。
   max_size_mb: "${SPX_CONSOLE_LOG_MAX_SIZE_MB-50}"
+  # 保留多少个历史日志文件。仅在写文件时生效。
   max_backups: "${SPX_CONSOLE_LOG_MAX_BACKUPS-5}"
+  # 历史日志最长保留天数，超过就删除。仅在写文件时生效。
   max_age_days: "${SPX_CONSOLE_LOG_MAX_AGE_DAYS-14}"
+  # 是否压缩历史日志。仅在写文件时生效。
   compress: "${SPX_CONSOLE_LOG_COMPRESS-true}"

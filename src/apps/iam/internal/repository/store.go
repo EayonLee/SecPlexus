@@ -124,7 +124,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 	for _, p := range authorization.Catalog() {
 		var compatible bool
 		if err = tx.WithContext(ctx).Raw(
-			`SELECT NOT EXISTS(SELECT 1 FROM iam.permissions WHERE key=$1 AND (module<>$2 OR resource_type<>$3 OR action<>$4 OR scope<>$5))`,
+			`SELECT NOT EXISTS(SELECT 1 FROM iam.permissions WHERE permission_key=$1 AND (module<>$2 OR resource_type<>$3 OR action<>$4 OR scope<>$5))`,
 			p.Key,
 			p.Module,
 			p.ResourceType,
@@ -139,7 +139,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		}
 
 		err = tx.WithContext(ctx).Exec(
-			`INSERT INTO iam.permissions(key,module,resource_type,action,description,scope,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status=EXCLUDED.status,updated_at=now()`,
+			`INSERT INTO iam.permissions(permission_key,module,resource_type,action,description,scope,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status=EXCLUDED.status,updated_at=now()`,
 			p.Key,
 			p.Module,
 			p.ResourceType,
@@ -174,7 +174,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		}
 	}
 	// 只同步内置角色授权；自定义角色属于用户数据，不能被初始化覆盖。
-	if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT r.org_id,r.id,p.key FROM iam.roles r CROSS JOIN iam.permissions p WHERE r.kind='system' AND r.code='org_admin' AND p.scope='organization' AND p.status='active' ON CONFLICT DO NOTHING`).Error; err != nil {
+	if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT r.org_id,r.id,p.permission_key FROM iam.roles r CROSS JOIN iam.permissions p WHERE r.kind='system' AND r.code='org_admin' AND p.scope='organization' AND p.status='active' ON CONFLICT DO NOTHING`).Error; err != nil {
 		return err
 	}
 
@@ -192,7 +192,7 @@ func CreateOrganization(ctx context.Context, tx *gorm.DB, id uuid.UUID, slug, na
 		return err
 	}
 
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT $1,$2,key FROM iam.permissions WHERE scope='organization' AND status='active'`, id, adminRole).Error; err != nil {
+	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT $1,$2,permission_key FROM iam.permissions WHERE scope='organization' AND status='active'`, id, adminRole).Error; err != nil {
 		return err
 	}
 
