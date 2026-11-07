@@ -54,7 +54,30 @@
 | MS Sentinel | Data Lake tier | ⚠️ 只能 KQL job | ❌ **不能实时分析和威胁狩猎** | 摄入延迟 15 分钟 | — |
 | Google SecOps | **不分冷热** | ✅ 12 个月全热态 | ✅ | 与查最近一小时相同 | — |
 
-三条实现路径：A 统一热存储（仅 Google，不可复制）；B 冷层可查但降级 + **本地缓存层必需**（Elastic benchmark 证明无缓存的冷查询是灾难）；C 冷层=归档（腾讯/Sentinel）。按"工作记忆"存储模型（02 §6.1），告警只留 90 天工作窗口（≈9–27GB），冷热分层当前整体不需要；若未来规模超限（单租户 >100 万条/天或多租户 SaaS），沿路径 B 演进，本表备查。
+三条实现路径：A 统一热存储（仅 Google，不可复制）；B 冷层可查但降级 + **本地缓存层必需**（Elastic benchmark 证明无缓存的冷查询是灾难）；C 冷层=归档（腾讯/Sentinel）。按"工作记忆"存储模型（02 §6.1），告警存 PostgreSQL 只留 90 天工作窗口（≈9–27GB）；原始日志与遥测走 ClickHouse 按 TTL 滚动。若告警规模超限（单租户 >100 万条/天），先按 Panther 式拆分演进——告警核心状态留 PG、内容外置——本表备查。
+
+### 3.1 存储分工的参照实现
+
+告警与遥测分开存储是这些项目的共同选择，不是我们的发明：
+
+| 项目 | 遥测/日志 | 告警 | 备注 |
+|---|---|---|---|
+| [nano](https://blog.nano.rs/posts/introducing-nano) | ClickHouse | **PostgreSQL（完整告警）** | 原文："ClickHouse stores the logs. Postgres holds metadata like rules, alerts, users, dashboards, audit" |
+| [SigNoz](https://signoz.io/docs/manage/administrator-guide/configuration/relational-database/) | ClickHouse | PG/SQLite（告警规则与状态） | 原文：关系库"exclusively for storing metadata and control-plane information" |
+| [Panther](https://docs.panther.com/resources/panther-architecture) | Data Lake（S3） | **DynamoDB 存告警核心，关联事件回 lake 取** | 规模超限时的拆分范式 |
+| [Matano](https://github.com/matanolabs/matano) | Iceberg（S3） | 同一个 lake 的 `matano_alerts` 表 | 只追加，无状态更新 |
+| AiSOC（本项目参照） | ClickHouse | **PostgreSQL（完整告警，可 UPDATE）** | 见 02 §6.2 |
+
+**结论**：中小规模选"告警全在 PostgreSQL"（nano/SigNoz/AiSOC）；超过 PostgreSQL 承受能力再选 Panther 式拆分。我们采用前者，与 AiSOC 保持一致。
+
+### 3.2 组件版本选择
+
+| 组件 | 选定 | 依据 |
+|---|---|---|
+| Kafka | **4.2.2** | 4.x 全线移除 ZooKeeper（4.4.0 release notes 中 ZooKeeper 出现 0 次）；4.2 线已发至第 3 个补丁版（2026-09-22），首发版坑已过。4.4.0 刚发布一个月、尚无补丁版，不作新项目第一版 |
+| ClickHouse | **26.8 LTS** | 官方每年 3 月与 8 月各发一个 LTS，支持 1 年。26.8 于 2026-08-27 发布，支持到 2027-08-27，是当前支持窗口最长的 LTS（26.3 于 2027-03-26 到期）。月度 stable 只保最近三个版本，不适合作为部署基线 |
+
+CNCF/Apache 的版本选择原则：选"LTS + 已有多轮补丁"的组合，不选首发版，也不用非 LTS 的月度版本作为生产基线。
 
 ## 4. 工程质量检查项
 
@@ -130,7 +153,9 @@
 |---|---|---|---|
 | [agentgateway](https://github.com/agentgateway/agentgateway) | **Apache 2.0 全开源**（LF 项目，微软/阿里/AWS/思科/华为参与） | 活跃，Rust 数据面 | ✅ ai-gateway 数据面首选；只依赖 xDS + ext_authz |
 | [Higress](https://github.com/higress-group/higress)（阿里） | Apache 2.0，CNCF Sandbox | 活跃 | 国内云用户的备选 |
-| [LiteLLM](https://github.com/BerriAI/litellm) | MIT 核心；**SSO/SCIM/密钥轮换在企业许可** | 活跃 | 仅作 SDK 内嵌于 agent-runtime（我们的 iam 在前，不需要它的 SSO） |
+| [Bifrost](https://github.com/maximhq/bifrost) | Apache 2.0 | 活跃，Go；9,416★，2025-03 创建，`core` 可作 SDK 内嵌（当前 `core/v1.15.1`，2026-11-06 发布），`bifrost-http` 为独立网关 | ✅ **llm-gateway 的供应商适配层**：使用 `core`，实现 `schemas.Account` 的三个方法（`GetConfiguredProviders` / `GetKeysForProvider` / `GetConfigForProvider`），内置 37 个供应商标识与 `Key.Aliases` 别名映射；不启用其 virtual key / team / budget 体系 |
+| [LiteLLM](https://github.com/BerriAI/litellm) | MIT 核心；**SSO/SCIM/密钥轮换在企业许可** | 活跃，但 Python 代理存在内存增长与升级迁移风险（见其 issue #48678、升级指南） | 不选为服务形态；其 SDK 亦未采用，改由 Bifrost `core` 承担适配层 |
+| [respan-gateway](https://github.com/respanai/respan-gateway) | Apache 2.0 | Rust，592★，2026-09 创建 | 备选：性能数据最优，但项目仅两个月，暂不采用 |
 | [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails)（NVIDIA） | Apache 2.0 | 活跃 | ✅ ai-policy 内嵌检测库 |
 | LLM Guard（Protect AI） | MIT | ⚠️ **已归档停止维护** | 不选 |
 
@@ -181,5 +206,6 @@
 
 - agentgateway：`https://agentgateway.dev`（Apache 2.0，Linux Foundation）
 - Higress：`https://github.com/higress-group/higress`
-- LiteLLM：`https://github.com/BerriAI/litellm`
+- Bifrost：`https://github.com/maximhq/bifrost`（Apache 2.0；`core` 作为 SDK 使用）
+- LiteLLM（未采用，保留以便复核）：`https://github.com/BerriAI/litellm`
 - NeMo Guardrails：`https://github.com/NVIDIA/NeMo-Guardrails`

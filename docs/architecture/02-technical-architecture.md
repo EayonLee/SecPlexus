@@ -3,38 +3,96 @@
 > 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和真实共享包；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
 
 
-> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM 使用原生 Gin、Argon2id/SCS/CSRF并接入真实PG会话与组织授权，Console通过统一API及服务凭证接入鉴权，应用统一HTTP，外部HTTPS由反向代理处理。三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin；`llm-gateway` 内嵌 Bifrost `core` 作为供应商适配层），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块（Web / IAM / Console）的身份、会话、权限与存储设计以各模块 README（[IAM](../../src/apps/iam/README.md)、[Console](../../src/apps/console/README.md)、[Web](../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，其职责边界见下表与 §1.1。下文尚未实现的服务只描述规划，不代表已交付能力。
 
 
-> 用大白话说：9 个自研服务 + 4 个开源组件跑在 PostgreSQL 和 Redis 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。
+> 用大白话说：10 个自研服务 + 6 个开源组件跑在 PostgreSQL、Redis、Kafka 和 ClickHouse 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。
 
 ## 1. 服务清单与拆分理由
 
 服务拆分的判据不是"功能不同"，而是以下五条之一：**独立扩容**（瓶颈维度不同）、**故障隔离**（会卡住会崩溃）、**独立变更**（改动频率不同）、**技术栈强制**、**安全边界**（高危能力单独管控）。
 
-### 1.1 v1 全景（自研 8 组件（Python×7 + web 前端），2 镜像；开源 4 组件）
+### 1.1 v1 全景（自研 10 组件（Python×6 + Go×3 + web 前端）；开源 6 组件）
 
 | # | 服务 | 类型 | 语言 | 职责 | 为什么拆 |
 |---|---|---|---|---|---|
 | 1 | `collector` | 自研 | Python | 一切外部数据的唯一入口：告警接入、形状判别、OCSF 归一化、L0/L1 校验 | 改动最频繁（每接一家厂商就改），独立发版；突发流量独立扛 |
 | 2 | `correlator` | 自研 | Python | D1 去重 → D2 窗口折叠 → D3 跨源关联 → 告警 + 事件视图（攻击链） | 吞吐瓶颈，纯 CPU，按 `org:entity` 分区保序扩容 |
-| 3 | `agent-runtime` | 自研 | Python（内嵌 LiteLLM SDK + NeMo Guardrails 库） | 全部 AI 推理：研判 Agent（图编排骨架）、NL→查询、**guardrail 检测 API**（ai-policy 的模型类检测调这里） | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离——部署时独立容器（同镜像 SPX_ROLES=agent） |
+| 3 | `agent-runtime` | 自研 | Python（内嵌 NeMo Guardrails 库） | AI 推理业务逻辑：研判 Agent（图编排骨架）、NL→查询、**guardrail 检测 API**（ai-policy 的模型类检测调这里）。**模型调用本身经 `llm-gateway`** | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离——部署时独立容器 |
 | 4 | `soar` | 自研 | Python | **通用 workflow/playbook 引擎宿主**（orchestrator 库）、预案库、审批状态机（持久化暂停）、高危动作执行、按上游原生 ID 回写；通知（邮件/IM/工单）是 governed action | 安全边界：Agent 提议 / SOAR 执行的权限分界 |
 | 5 | `ai-policy` | 自研 | Python | AI 安全策略大脑（独立 PDP，SpiceDB/Cerbos 同款形态）：规则、ext_authz 决策、事件回流、管理 API。**检测分两层**：规则类（正则/关键词/schema）内存匹配走同步路径（亚毫秒）；模型类（语义级注入/越权）异步调 agent-runtime 的 guardrail API（NeMo 库内嵌于彼） | 独立 PDP 是行业标准形态；同步路径只有规则不阻塞客户流量 |
-| 6 | `iam` | 自研 | Python | 登录、SSO（OIDC/SAML）、RBAC/ABAC、多租户、API Token、SCIM | 身份是核心攻击面，被所有服务验签 |
-| 7 | `console` | 自研 | Python / FastAPI | 查询（热层同步/狩猎异步）、Case、三队列工作台、SSE、资产与连接器配置 | 长尾查询 + 高危操作边界 |
+| 6 | `iam` | 自研 | Go（Gin） | 账号、组织、密码、Session、自定义角色与授权、身份审计。已交付；MFA、SSO（OIDC/SAML）、SCIM、公开注册、对象 ACL 未实现 | 身份是核心攻击面，被所有服务验签；内置而非独立 IdP，小规模下拆开只有同步与一致性成本 |
+| 7 | `console` | 自研 | Go（Gin） | 安全运营业务后端：案件、三队列工作台、运营查询与必要的跨域只读汇总。当前仅提供组织访问上下文与带持续授权检查的 SSE；案件与工作台尚未实现 | 安全运营业务归属 + 高危操作边界；不作为全平台 API 的强制中转站 |
 | 8 | `web` | 自研 | TypeScript / Next.js | 前端 | 技术栈强制 |
 | 9 | `scheduler` | 自研 | Python | 全部**平台级**定时任务的唯一入口：情报拉取、报表、蜜标巡检、供应链扫描 | **基础设施组件（cron 哲学：简单、稳定、永不失败）**：任务代码内声明 + DB 持久化 + 分布式锁单实例；与 playbook 的 schedule 触发器分层——用户业务流定时归 orchestrator，平台心跳归这里，基础设施不依赖业务引擎 |
-| 10 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：用户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
-| 11 | `postgres` | **开源** | PostgreSQL 16 | 主存储 | — |
-| 12 | `redis` | **开源** | Redis 7 | 队列（Streams）、去重窗口、限流 | 去重要带 TTL 的高频读写 |
-| 13 | `object-storage` | **开源** | MinIO / S3 兼容 / 本地 FS | raw payload、Parquet 归档 | raw 永不进主表 |
+| 10 | `llm-gateway` | 自研 | Go（内嵌 Bifrost `core` SDK） | 平台自身的模型出口：供应商凭据的唯一持有者、模型清单自助管理、别名到真实模型的解析、重试与降级、用量归因 | 安全边界（持有全部供应商密钥）+ 故障隔离（LLM 会超时）+ 独立变更（供应商适配最频繁）+ 技术栈强制（多语言调用方需要 HTTP 边界） |
+| 11 | `ai-gateway` | **开源** | agentgateway（Rust） | 哑数据面：用户 AI 流量（LLM+MCP）的 inline 治理，决策回调 #5 | 只依赖 xDS + ext_authz 两个稳定协议，升级不被绑定 |
+| 12 | `postgres` | **开源** | PostgreSQL 16 | 业务主存储：身份、组织、告警、案件、调查台账、配置、审计 | 需要事务与外键的业务对象 |
+| 13 | `redis` | **开源** | Redis 7 | 去重窗口、限流、会话缓存 | 需要 TTL 的高频读写 |
+| 14 | `kafka` | **开源** | Kafka 4.2.2（KRaft，无需 ZooKeeper） | 削峰与回放：采集到关联之间的缓冲 | 峰值流量需要落盘而非占内存；消费方故障后要能重放 |
+| 15 | `clickhouse` | **开源** | ClickHouse 26.8 LTS | 大流量遥测查询：原始日志、归一化事件、狩猎与分析 | 列存 + 时间分区，支撑 AI 的并发多条件跨时间查询 |
+| 16 | `object-storage` | **开源** | MinIO / S3 兼容 / 本地 FS | raw payload、Parquet 归档 | raw 永不进主表 |
 
-**两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），agent-runtime 内嵌的 LiteLLM SDK 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
+### 1.2 每个模块的技术架构
 
-**语言版图**：当前 Web 使用 TypeScript/React，IAM 与 Console 使用 Go，根 Go module 统一管理服务及共享包。后续 AI 能力可按实际生态选择 Python；跨语言依赖通过公开契约隔离，不因语言选择增加不存在的服务或生成多套协议真源。workflow/playbook 等后续服务的选择由各自需求方案确认。
+十一个模块分三类：**已交付的三个 Go/Web**、**规划中的六个 Python**、**一个开源数据面**。下面只写"用什么技术、连什么存储、跟谁说话"，不写字段和接口细节。
 
-**组件 / 角色 / 镜像**：组件（代码域）→ 角色（部署单元，`SPX_ROLES` 决定；agent 因 LLM 故障隔离部署为独立容器，同镜像同语言）→ 镜像（交付物，**自研仅 2 个**：`secplexus` Python 全角色 / `secplexus-web`）
+```
+                        ┌──────────── 已交付 ────────────┐
+  浏览器 ──▶ web(Next) ─┬─▶ iam(Go) ──┬─▶ PostgreSQL
+                        │             └─▶ Redis
+                        └─▶ console(Go) ──▶ iam（服务凭证+用户上下文）
+
+                        ┌──────────── 规划中 ────────────┐
+  数据源 ──▶ collector(Py) ──▶ Kafka ──▶ correlator(Py) ──┬─▶ PostgreSQL（告警）
+                                                          └─▶ ClickHouse（遥测）
+                              correlator ──▶ agent-runtime(Py) ──▶ llm-gateway(Go) ──▶ 供应商
+                              agent-runtime ──▶ soar(Py) ──▶ 上游系统回写
+                              scheduler(Py) ──定时──▶ 各模块
+  用户AI流量 ──▶ ai-gateway(开源) ──回调──▶ ai-policy(Py)
+```
+
+#### 已交付
+
+| 模块 | 技术栈 | 存储 | 对外接口 | 依赖谁 |
+|---|---|---|---|---|
+| `iam` | Go 1.27 + Gin 1.12；GORM 1.31 做 ORM、pgx v5 做驱动；SCS 管 Session；Argon2id 存密码；Cobra 管命令；Goose 管迁移 | PostgreSQL（自己的表 + 会话）<br>Redis（限流） | `/api/v1/iam/*`：用户接口走 Cookie + CSRF；服务接口走服务凭证 | 无（它是最底层） |
+| `console` | Go + Gin；**没有数据库** | 无自有存储 | `/api/v1/console/*`：全部请求先向 IAM 换授权结论 | `iam`（经 `iamclient`） |
+| `web` | Next 16 + React 19；next-intl 双语；TanStack Query 取数；Zod + RHF 管表单；Axios 请求；Tailwind 4 + shadcn | 无（浏览器端状态） | 页面 + 同源窄代理 `/api/v1/{module}/*` | `iam`、`console`（服务端转发） |
+
+**为什么 `console` 没有数据库**：它当前只做"验证组织访问 + 授权后的 SSE"。等案件和工作台真正实现时，再按模块自己的表加。AGENTS 里写死了这条：模块拥有自己的配置、启动和表——不预先建空库占位。
+
+**为什么 `iam` 用 GORM 而不是手写 SQL**：授权判定要在事务里同时读会话、组织、成员和权限四张表，手写会有大量重复的字段映射。GORM 的泛型投影和回调事务省掉这部分；底层仍是 pgx 连接池，迁移仍用 Goose 显式执行，不做自动建表。
+
+#### 规划中（Python 六件）
+
+这六个服务**还没有代码**，技术栈只定到"语言 + 关键库"这一层：
+
+| 模块 | 语言/关键库 | 存储 | 跟谁说话 |
+|---|---|---|---|
+| `collector` | Python | 对象存储（raw）<br>Kafka（产出） | 对外收数据；对内发 Kafka |
+| `correlator` | Python | PostgreSQL（告警/事件视图）<br>ClickHouse（遥测）<br>Redis（去重窗口） | 消费 Kafka；产出告警 |
+| `agent-runtime` | Python + NeMo Guardrails | PostgreSQL（Ledger） | 调 `llm-gateway`；读告警 |
+| `soar` | Python + orchestrator 库 | PostgreSQL（预案、审批状态） | 执行处置；回写上游 |
+| `ai-policy` | Python | 内存规则 + Redis | 被 `ai-gateway` 回调；异步调 `agent-runtime` |
+| `scheduler` | Python | PostgreSQL（任务表 + 分布式锁） | 定时触发各模块 |
+
+#### 开源数据面
+
+| 组件 | 它干什么 | 我们不做什么 |
+|---|---|---|
+| `ai-gateway`（agentgateway，Rust） | 拦用户的 AI 流量，问 `ai-policy` 要不要放行 | 不自研流量转发；只依赖 xDS + ext_authz 两个协议 |
+| `llm-gateway`（自研 Go，内嵌 Bifrost `core`） | 我们自己调模型的唯一出口 | 不用 Bifrost 的 `bifrost-http`（它带自己的身份体系） |
+
+#### 一条贯穿全局的规矩
+
+**模块之间只通过 HTTP 契约或消息队列通信，不读对方的表、不导入对方的 internal 包。** 已交付的两个 Go 服务就是这样：`console` 只拿 `iamclient`，不碰 IAM 的表和内部实现。
+
+**两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），`llm-gateway` 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
+
+**语言版图**：当前 Web 使用 TypeScript/React，IAM、Console 与规划的 llm-gateway 使用 Go，根 Go module 统一管理服务及共享包。后续 AI 能力可按实际生态选择 Python；跨语言依赖通过公开契约隔离，不因语言选择增加不存在的服务或生成多套协议真源。Python 模块调用模型统一经 llm-gateway 的 HTTP 接口，不内嵌 Go 库，也不各自持有供应商凭据。workflow/playbook 等后续服务的选择由各自需求方案确认。
+
+**组件 / 角色 / 镜像**：每个模块是一个独立的部署单元，独立启动（Go 模块由 `ARG APP` 参数化构建，共用一个 Dockerfile；Web 独立执行 `next build`）。**不使用"一个镜像 + 角色开关启动所有服务"的多角色模式**——那会让故障隔离和独立扩容失效。当前交付的 Go 模块为 `iam`、`console`，规划中的 `llm-gateway` 同样通过 `ARG APP=llm-gateway` 构建，不新增 Dockerfile
 
 ## 2. 数据流：以数据流入为主轴
 
@@ -66,7 +124,7 @@
   │    OCSF 归一化 · 形状判别 · L0/L1 校验                  │
   │    raw payload → 对象存储（永不进主表）                  │
   └────────────────────────┬────────────────────────────┘
-                           │ Redis Stream（org:entity 分区保序）
+                           │ Kafka（org:entity 作 partition key，保序）
   ┌────────────────────────▼────────────────────────────┐
   │ ② correlator —— 降噪 · 关联                            │
   │    D1 去重 → D2 窗口折叠 → D3 跨源关联 → 攻击链滚动聚合    │
@@ -100,8 +158,32 @@
 三条设计要点：
 
 1. **两条数据源的汇合点在 ①**——`ai-policy` 拦下的注入事件回流 `collector`，从此和 EDR 告警走完全相同的链路。"防护对象 = 运营对象"在架构上就这一条线。
-2. **跨阶段连接全靠队列不靠调用**——①→② 走 Redis Stream，②→③ 走 Case 事件；任何一级慢了或挂了，上游照常摄入，恢复后接着跑。
+2. **跨阶段连接全靠队列不靠调用**——①→② 走 Kafka，②→③ 走 Case 事件；任何一级慢了或挂了，上游照常摄入，恢复后接着跑。
 3. **`worker` 和 `agent` 必须分进程不是洁癖**——LLM 卡住会阻塞去重；且两者扩容维度完全不同（CPU 密集 vs 网络等待密集）。
+
+### 2.1 模型出口：所有调模型的动作都经过 llm-gateway
+
+```
+  agent-runtime ─┐
+  ai-policy     ─┼──▶ llmclient（类型化客户端）──▶ llm-gateway ──▶ 供应商
+  console       ─┘        用角色别名                 唯一持有密钥
+  （未来模块）   ─┘      triage/investigate           重试·降级·用量
+
+  管理面：web ──▶ llm-gateway  /api/v1/llm-gateway/providers（增删改查+测试连通）
+```
+
+**为什么必须有这一层**：
+
+| 问题 | 各自直连供应商的后果 |
+|---|---|
+| 密钥管理 | 密钥散落在 N 个部署单元，轮换要改 N 次，审计看不到全貌 |
+| 策略一致性 | 超时、重试、降级每个模块各写一遍，必然漂移 |
+| 成本归因 | 回答不了"哪个组织、哪个功能花了多少 token" |
+| 换供应商 | 每个调用方都要改代码 |
+
+**为什么不用现成的网关服务**：LiteLLM 是 Python 代理，存在内存增长与升级迁移风险；Bifrost 的 `bifrost-http` 会引入它自己的身份体系，与我们的 IAM 重复。我们只嵌入 Bifrost 的 `core` 库——它没有身份概念，`schemas.Account` 三个方法交由我们从自己的表读取，因此**不会形成第二套账户体系**。证据见 [04 §7](04-research-references.md)。
+
+**与 ai-gateway 的区别**：`ai-gateway` 管**用户**的 AI 流量（防护对象，要被检测）；`llm-gateway` 管**我们自己**调模型的流量（内部出口）。方向相反，不能共用。
 
 ## 3. 数据模型
 
@@ -171,7 +253,9 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 
 **为什么叫"组织"不叫"租户"**：我们的隔离场景是一家公司内部的部门级数据控制，不是 SaaS 多客户——"租户"（tenant）强烈暗示后者。业界同场景的命名：TheHive 用 organisation、Grafana 用 organization、GitHub 用 organization、Zitadel 的 organization 是一等概念【官方文档】。字段统一 `org_id`。
 
-**组织模型**：平铺 org + org 内用户组（部门内细分用组建模，不做树形嵌套——嵌套继承的可见性规则是复杂度黑洞）。一个用户可属多个 org，每个 org 一个角色。MSSP 场景天然兼容：客户公司 = org，MSSP 运营方 = 特权 org（TheHive/Zitadel 同构）。
+**组织模型**：平铺 org（不做树形嵌套——嵌套继承的可见性规则是复杂度黑洞）。一个用户可属多个 org，在**每个 org 内可持有多个角色**（例如同时是"管理员"和"审计员"），权限取这些角色的并集。MSSP 场景天然兼容：客户公司 = org，MSSP 运营方 = 特权 org（TheHive/Zitadel 同构）。
+
+多角色是刻意的：现实中同一个人常身兼多职，单角色会逼出"为每种组合建一个角色"的组合爆炸。实现上 `memberships`（人与组织的关系）和 `membership_roles`（人与角色的绑定）分表，正是为此。
 
 **三层数据可见性**：
 
@@ -220,7 +304,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 |---|---|---|
 | 上下文总线 | iam 中间件验签 → RequestContext{user_id, org_id, roles, permissions} 注入 | 业务代码只写 `Depends(get_ctx)`，不碰认证实现 |
 | 数据访问总线 | 每个事务自动 SET LOCAL + 自动 org 过滤 | 新表只要带 org_id 列并注册，隔离自动生效 |
-| 事件总线 | Redis Streams，org_id 是消息头 | 新事件带 org 头，消费者按上下文处理 |
+| 事件总线 | Kafka，org_id 作 partition key | 新事件带 org 头，消费者按上下文处理 |
 
 **自举**：安装脚本创建 bootstrap admin 并打印一次性密码（对接部署篇的"安装即验收"）。内建 iam 通过标准协议（OIDC/SAML/SCIM）对接任意外部 IdP——对接的是标准，不是我们的私有实现；未来想换 Zitadel/Keycloak 做完整企业 IdP 时即插即用（方案 B 始终保留为升级路径）。
 
@@ -295,7 +379,8 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 
 | 数据 | 角色 | 保留 |
 |---|---|---|
-| 归一化告警 | 大脑的输入 | **工作记忆：默认 90 天滚动窗口（可配），按天分区过期自动清理**。要考古？跳回用户自己的 SIEM 查，我们保留跳转链接。案件的完整性不依赖告警行存活——证据快照自包含（见 §3.1 第 3 条） |
+| 归一化告警（PostgreSQL） | 大脑的输入 | **工作记忆：默认 90 天滚动窗口（可配），按天分区过期自动清理**。要考古？跳回用户自己的 SIEM 查，我们保留跳转链接。案件的完整性不依赖告警行存活——证据快照自包含（见 §3.1 第 3 条） |
+| 原始日志 / 归一化事件（ClickHouse） | 大脑的原料，含用户直接投递的日志 | 按天分区 TTL 滚动过期；量由用户决定，不是我们的资产 |
 | raw payload | 归一化回放依据 | 7–30 天可配 |
 | 事件视图 | 研判分组 | TTL 滚动，可重建（不变） |
 | **案件 Case** | 大脑的产出 | **永久** |
@@ -303,7 +388,73 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 | **机构记忆 / 影子决策** | 大脑的经验 | **永久** |
 | **实体档案 entities** | 大脑的知识（IP/账号/主机的画像与关系，研判上下文底座） | **永久**（画像可从新告警持续刷新） |
 
-算账：10 万条/天 × ~1KB（raw 不进主表后）× 90 天 ≈ **9–27GB**——PG 单库时间分区绰绰有余，**冷热分层的讨论在这个模型下整体不再需要**。说明：行业均值约 3,000–4,500 条/天（04 §5.1），10 万/天是我们的设计容量——单租户峰值余量 30 倍，多源大客户也覆盖（该容量估算需在实现时通过索引、分区和真实负载验证。若未来真的规模超限——单租户 >100 万条/天或多租户 SaaS——"冷层可查但降级 + 本地缓存层"的业界全景与证据见 04 §3 备查）。
+### 6.2 存储分工：PostgreSQL 存业务对象，ClickHouse 存遥测
+
+**一句话**：会改的东西放 PostgreSQL，只会追加的东西放 ClickHouse。
+
+```
+                      写一次，之后不停被改
+   告警 / 案件 / 台账 ────────────────────▶  PostgreSQL
+   （状态、指派、优先级、关联案件）             事务 + 外键 + 行级更新
+                                              量小、可改、要一致
+
+                      只追加，永不修改
+   原始日志 / 归一化事件 ──────────────────▶  ClickHouse
+   （狩猎、分析、AI 多条件跨时间查询）           列存 + 时间分区
+                                              量大、只读、要好查
+
+   削峰缓冲 ───────────────────────────────▶  Kafka
+   （峰值不占内存，消费方挂了能重放）
+
+   去重 / 限流 / 会话 ─────────────────────▶  Redis
+   （要毫秒级 + 自动过期）
+
+   大对象 ─────────────────────────────────▶  对象存储
+   （raw 永不进主表）
+```
+
+判断依据只有两条：**这个对象会不会被改？量的增长是几倍还是几个数量级？**
+
+| 存储 | 存什么 | 判断依据 |
+|---|---|---|
+| **PostgreSQL** | 身份、组织、权限、**告警**（含状态/指派/优先级/案件关联）、案件、调查台账、机构记忆、实体档案、规则与配置、审计 | 需要事务、外键、行级更新；量级在千万到亿级可承受 |
+| **ClickHouse** | 原始日志、归一化事件、狩猎与分析所需的大流量遥测 | 只追加、不修改；单次查询要跨时间范围扫多条件、并发高 |
+| **Redis** | 去重窗口、限流计数、会话缓存 | 需要 TTL 的高频读写 |
+| **对象存储** | raw payload、Parquet 归档 | 大对象，永不进主表 |
+| **Kafka** | 采集到关联、关联到研判之间的流转 | 削峰（峰值不占内存）、消费方故障后可重放 |
+
+#### 为什么告警放 PostgreSQL
+
+| 理由 | 具体说明 |
+|---|---|
+| **告警要改** | 状态流转（new→triaged→investigating→resolved）、指派、优先级、关联案件——这些都是行更新 |
+| **改状态和写审计必须原子** | AiSOC 的代码注释原文："the alert change and the record of it land together or not at all"。ClickHouse 没有事务 |
+| **要外键** | `case_id` 指向案件、`assignee_id` 指向用户。ClickHouse 没有外键 |
+| **要行级权限** | 组织隔离在 PG 可以用 RLS 兜底；ClickHouse 没有 RLS |
+
+**别的方案为什么不行**：
+
+| 方案 | 为什么不行 |
+|---|---|
+| 告警也放 ClickHouse，用轻量 UPDATE | ClickHouse 的 UPDATE 是异步生成 patch part，高频单行改会产生大量 patch，merge 压力大；且没有事务和外键，"改状态+写审计"无法原子 |
+| 告警只追加新版本（Matano 式） | 查询时每条告警要取最新版本，复杂度转移到了每次读；且同样没有事务 |
+| 全放 PG，不引入 ClickHouse | 用户可能直接投递原始日志（我们无法约束输入形态），日志量比告警大 2 个数量级，PG 扛不住 |
+
+**证据**：nano（README 原文 "ClickHouse stores the logs. Postgres holds metadata like rules, alerts, users, dashboards, audit"）、SigNoz（关系库 "exclusively for storing metadata and control-plane information"）、AiSOC（告警在 PG 且频繁 UPDATE，见 `services/api/app/api/v1/endpoints/alerts.py`）三个项目同一分工。详见 [04 §3.1](04-research-references.md)。
+
+**告警放 PG 不丢查询能力**：告警表按 `org_id` + 时间建索引和分区，AI 的"多条件 + 跨时间范围"查询在 PG 上一样能跑。真正需要 ClickHouse 的是"原始日志级别"的量，不是降噪后的告警。
+
+**ClickHouse 的适用前提**：用户的输入不一定是告警，也可能直接是原始日志，我们无法约束。原始日志由 ClickHouse 承载；平台自身不做厂商数据的第二档案馆，遥测按工作窗口滚动过期。
+
+算账（告警在 PG，遥测在 CK）：
+
+| 数据 | 估算 |
+|---|---|
+| 归一化告警 | 降噪后 10 万条/天 × ~1KB × 90 天 ≈ **9–27GB** |
+| 原始日志（若用户提供） | 按实际量单独评估，走 ClickHouse，按天分区 TTL |
+| 行业均值参考 | 约 3,000–4,500 条告警/天（04 §5.1），10 万/天是我们的设计容量 |
+
+说明：以上为设计容量，需在实现时通过索引、分区和真实负载验证。若告警量增长到 PostgreSQL 无法承受（单租户 > 100 万条/天），首先引入的是 Panther 式的拆分——告警核心状态留在 PG、告警内容外置到 ClickHouse——而不是把整张告警表迁走。
 
 现在必须做对的三件事（否则以后要重写）：
 
@@ -311,7 +462,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 2. **查询接口可路由**——语义层字段 → 后端 SQL 的编译层，不散落裸 SQL
 3. **狩猎从第一天就是异步的**——`POST /hunt → 轮询`，即使现在只要 200ms
 
-### 6.2 检索：不自研发语言
+### 6.3 检索：不自研发语言
 
 三家国内厂商（阿里 SPL、腾讯 CQL、火山检索语法）全部收敛到同一个结构：**`过滤条件 | SQL`**——过滤用索引，聚合用 SQL-92，管道符连接【官方文档；火山部分基于搜索摘要，见 04 §8】。这个形态用户已有肌肉记忆。
 
@@ -322,37 +473,55 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 
 查询执行层要求单条 SELECT、表白名单、AST 级组织过滤和行数上限，不能仅依赖调用参数自报组织。模型查询契约还需满足：**模型拿到的 schema 里根本没有任何字段能携带 SQL/SPL/自由文本**，CI 断言 schema 而不是断言代码——"schema 才是真正约束模型的东西"。
 
-## 7. 两个共享库（不是服务）
+## 7. 共享包（库，不是服务）
 
-| 库 | 内容 | 为什么是库 |
+判断标准：**被多个模块引用 + 不独立对外提供服务 = 库**。服务化只会增加网络开销和版本漂移。
+
+**已交付（Go，`src/packages/go/`）**：
+
+| 包 | 内容 | 为什么是库 |
 |---|---|---|
-| `contracts` | OCSF 模型、枚举、API 契约、查询 IR、RequestContext——**一个 Python 包直接 import，天然单一事实源**（单语言最大红利：零跨语言生成设施） | 全部角色共用，服务化只有网络开销和版本漂移 |
+| `result` | 统一结果码与 HTTP 状态映射 | 跨模块契约，错误码必须只有一处定义 |
+| `httpx` | 请求绑定与通用中间件 | 所有 Gin 服务共用，各自实现必然漂移 |
+| `logging` | 结构化日志 | 日志格式要全平台一致才能关联排查 |
+| `configuration` | YAML + 环境变量加载与校验 | 配置解析规则只能有一份 |
+| `cache` | Redis 客户端与类型化 key 模板 | key 前缀集中定义，避免散落拼接 |
+| `iamclient` | IAM 授权接口的客户端 | 调用方不该碰 IAM 私有实现或表 |
+
+**规划中（随对应服务落地）**：
+
+| 包 | 内容 | 为什么是库 |
+|---|---|---|
+| `llmclient` | llm-gateway 的客户端 | 与 `iamclient` 同款：类型化请求、错误映射、不暴露 Bifrost 类型 |
+| `contracts` | OCSF 模型、枚举、查询 IR、RequestContext | 全部服务共用，服务化只有网络开销 |
 | `connectors` | 厂商连接器 + 归一化 profile + 回归样本 | 只被 collector 引用，独立版本化 |
-| `orchestrator` | workflow 引擎：**10 类节点**（python/tool/llm/http/branch/loop/parallel/wait/approval + subworkflow）、持久化审批暂停、幂等键、Python 节点子进程隔离 | correlator/agent/soar 复用；长时间运行的 Python 节点需评估内存与故障隔离；处置动作（block_ip/isolate_host 等）不是节点类型，是 tool 节点调用的工具——否则每接一个厂商就要改引擎 |
+| `orchestrator` | workflow 引擎：10 类节点、持久化审批暂停、幂等键 | correlator/agent/soar 复用；处置动作是 tool 节点调用的工具，不是节点类型——否则每接一个厂商就要改引擎 |
 | `audit` | 追加式哈希链审计 | 审计必须内嵌在每个写入点，不能是旁路服务 |
 
-## 9. 工程标准（每个组件强制，CI 检查）
+边界：**跨语言依赖通过公开契约隔离**。Python 服务调模型走 `llm-gateway` 的 HTTP 接口（经 `llmclient` 的对应实现或直接 HTTP），不内嵌 Go 库；不因语言选择生出多套协议真源。
+
+## 8. 工程标准（每个组件强制，CI 检查）
 
 | # | 标准 | 条款 |
 |---|---|---|
 | 1 | **队列消费语义** | 至少一次投递 + 消费幂等键 + 指数退避重试 + DLQ 死信——写死为事件总线协议，不是各消费者自己发挥 |
-| 2 | **可观测** | **structlog** 结构化日志 + **OpenTelemetry 全链路 trace**：请求 → 队列 → 工具调用 → LLM 调用（每次 LLM 调用一个 span，模型/耗时/token 直接可见） |
+| 2 | **可观测** | 结构化日志（Go 用 `log/slog` 经 `logging` 包，Python 用 structlog）+ **OpenTelemetry 全链路 trace**：请求 → 队列 → 工具调用 → LLM 调用（每次 LLM 调用一个 span，模型/耗时/token 直接可见） |
 | 3 | **健康检查与优雅停机** | 每个角色强制 `/healthz` `/readyz`；SIGTERM 优雅排水（处理完在途消息再退）；K8s preStop 对齐 |
-| 4 | **RLS 自动断言** | org 隔离表集中注册，迁移自动建 policy；CI 查 information_schema——有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器） |
+| 4 | **组织隔离可验证** | org 隔离表集中注册；PG 侧用 RLS policy，应用侧用强制 org 过滤；CI 查 information_schema——有 org_id 列却无 policy 的表 = 构建失败（机器查人，不是人管机器） |
 | 5 | **声明式种子** | 预置角色矩阵等种子数据是代码常量，启动幂等同步（不许手改库） |
 | 6 | **错误码注册表** | 错误码集中定义一处，API 文档自动带出；禁止散落字符串 |
-| 7 | **数据库迁移** | Alembic 迁移单侧持有，迁移文件即版本历史 |
+| 7 | **数据库迁移** | 每个模块自有 `migrations/` 目录，迁移文件即版本历史。Go 用 goose（`github.com/pressly/goose/v3`），服务提供 `migrate` 子命令；Compose 用一次性迁移任务在服务启动前完成 |
 | 8 | **设计原则** | **正确性由机器保证，不靠人的记忆**：policy 自动建、种子自动同步、隔离自动断言——一切"手动维护/人肉纪律"的方案不进入本系统 |
 
-> 注：Go 方案曾要求的 proto/OpenAPI 三端生成与 gen/ 零手改校验，在单语言下**天然不需要**——contracts 共享包就是单一事实源，这是回归 Python 全栈的最大复杂度削减。
+> 注：只有共享结果码与权限常量是**生成**的（`scripts/generate-catalogs.mjs` 从 `result` 与 IAM 权限目录生成 Go 与 Web 的常量），其余契约以模块自有 DTO 为准，不做 proto/OpenAPI 三端生成——不为多语言生成设施付出成本，需要时再单独评估。
 
-## 10. 当前规划的资源边界
+## 9. 当前规划的资源边界
 
 | 维度 | 历史全景草案中的规划 |
 |---|---|
 | 部署 | 按实际运行角色组合，容器数随部署形态确定 |
-| 存储 | PostgreSQL、Redis及对象存储 |
-| 队列 | Redis Streams，达到容量边界后再评估替代 |
+| 存储 | PostgreSQL（业务对象，含告警）、ClickHouse（原始日志与遥测）、Redis（去重/限流/会话）、对象存储（raw 归档） |
+| 队列 | Kafka 4.2.2（KRaft，无需 ZooKeeper），承担削峰与回放 |
 | 原则 | 数据质量与隔离优先，按真实负载控制组件数量 |
 
 本节为平台全景规划；当前三模块的实现边界以模块文档和需求计划为准。

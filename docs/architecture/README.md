@@ -1,6 +1,6 @@
 # SecPlexus 架构文档
 
-> **版本说明（2026-10-28）**：本文保留此前的平台全景草案，未实现的技术与部署描述不代表仓库现状。Web 已整体替换为 Next.js + React + shadcn，IAM 产品页面在新增文件中重建；IAM/Console使用Gin，IAM通过类型化凭证用例、Argon2id/SCS/CSRF接入真实PG会话与组织授权，Console通过统一API及服务凭证接入鉴权，应用统一HTTP，外部HTTPS由反向代理处理。当前框架接入见[Gin重构计划](../plans/gin-service-refactor/plan.md)；三模块的身份、会话、权限与存储设计以 [IAM README](../../src/apps/iam/README.md) 和 [IAM Spec/Plan](../plans/user-authentication-and-access-control/plan.md) 为准。下文 Python 全后端、统一 Python 镜像及与新方案冲突的 JWT/多租户实现设想不再约束这三个模块；其他服务待单独设计。
+> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块以各模块 README（[IAM](../../src/apps/iam/README.md)、[Console](../../src/apps/console/README.md)、[Web](../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，职责边界见 [02 §2.1](02-technical-architecture.md)。下文尚未实现的服务只描述规划，不代表已交付能力。
 
 
 > AI 原生安全运营平台 —— 告警运营、漏洞运营、大模型护栏、智能体安全，编织成一张互联的安全网络。
@@ -24,8 +24,9 @@
 ├─────────────────────────────────────────────────────────────────────────┤
 │                          技术架构（怎么实现）                              │
 │                                                                         │
-│   8 个自研组件（Python 全栈）+ 2 个自研镜像，PG 单库 + 90 天工作记忆，      │
-│   检索走"过滤|SQL"，AI 可靠性六约束，工程标准八条（OTel/DLQ/RLS 断言）       │
+│   10 个自研组件（Python×6 规划 + Go×3 + Web）+ 6 个开源，               │
+│   PG 存业务对象 / CK 存遥测 / Kafka 削峰 / Redis 去重限流，             │
+│   模型调用统一走 llm-gateway，工程标准八条（OTel/DLQ/隔离断言）         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                          部署架构（怎么交付）                              │
 │                                                                         │

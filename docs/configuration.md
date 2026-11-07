@@ -19,7 +19,7 @@
 
 同一数据库中的表仍由对应模块管理。Console当前通过IAM接口取得身份信息，没有数据库查询，因此不添加无用的db配置。
 
-需要让IAM使用独立连接时，使用`SPX_IAM_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/SSLMODE`覆盖共享变量，或在没有相应环境变量时修改模块YAML字面值。Redis同理使用`SPX_IAM_REDIS_HOST/PORT/USER/PASSWORD/DB`。Console没有DB/cache配置。
+全平台共用一套 PostgreSQL 和一套 Redis，各模块直接读取同一组 `SPX_POSTGRES_*` / `SPX_REDIS_*`，不再有模块级连接覆盖。需要在同一实例上区分数据，用表名和 key 前缀，不引入第二套连接配置。Console没有DB/cache配置。
 
 完整DSN只作为高级覆盖`SPX_POSTGRES_URL`保留，用于特殊驱动参数；根示例不要求填写它。
 
@@ -62,20 +62,20 @@ SPX_WEB_ORIGIN=
 
 Compose 使用相同字段，通过容器服务名连接；公开映射端口由根配置推导。已有静态部署文件随契约同步，本轮不构建/部署容器。
 
-## 环境变量与模块覆盖
+## 环境变量
 
 ```yaml
 db:
-  host: "${SPX_IAM_POSTGRES_HOST-${SPX_POSTGRES_HOST-127.0.0.1}}"
-  port: "${SPX_IAM_POSTGRES_PORT-${SPX_POSTGRES_PORT-5432}}"
-  name: "${SPX_IAM_POSTGRES_DATABASE-${SPX_POSTGRES_DATABASE-secplexus}}"
-  user: "${SPX_IAM_POSTGRES_USER-${SPX_POSTGRES_USER-secplexus}}"
-  password: "${SPX_IAM_POSTGRES_PASSWORD-${SPX_POSTGRES_PASSWORD-secplexus}}"
+  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
+  port: "${SPX_POSTGRES_PORT-5432}"
+  name: "${SPX_POSTGRES_DATABASE-secplexus}"
+  user: "${SPX_POSTGRES_USER-secplexus}"
+  password: "${SPX_POSTGRES_PASSWORD-secplexus}"
 ```
 
-根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**模块专用环境 > 共享环境 > YAML字面值**；模块 YAML 是默认值的唯一来源，不维护另一份 Viper 默认表。显式空值保留，随后进行类型及业务配置校验。仅 YAML 字段声明的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
+根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**进程环境 > 根.env > YAML字面值**；模块 YAML 是默认值的唯一来源，不维护另一份 Viper 默认表。显式空值保留，随后进行类型及业务配置校验。仅 YAML 字段声明的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
 
-完整DSN字段`SPX_IAM_POSTGRES_URL`优先于`SPX_POSTGRES_URL`，`SPX_IAM_REDIS_URL`优先于`SPX_REDIS_URL`；配置了非空URL时不再组合分项字段。模块环境显式设空URL可恢复分项组合。`SSLMODE` 与 PostgreSQL 驱动的 `sslmode` 语义一致。
+完整DSN字段`SPX_POSTGRES_URL` / `SPX_REDIS_URL`优先于分项字段；配置了非空URL时不再组合分项字段。`SSLMODE` 与 PostgreSQL 驱动的 `sslmode` 语义一致。
 
 YAML 使用标准参数表达式 `${NAME-default}`（未设置才后备）或 `${NAME:-default}`（未设置或空值后备）。变量名称、优先级与默认值都在字段旁声明；环境标量由 mapstructure 官方 Hook 转换为整数、布尔、列表和时长。未知字段、重复键、额外文档、非法类型与超过64KiB配置在加载边界拒绝，错误不输出秘密值。修改配置后重启。服务调用方是以服务ID为键的`service_clients`映射；凭证和action白名单属于同一配置项，不能以数组顺序猜测调用方。
 
@@ -134,7 +134,7 @@ Web独立运行使用Next.js原生.env.example→.env.local；NEXT_PUBLIC_*不�
 | `SPX_WEB_ORIGIN` | 可空，本机推导 `http://localhost:<Web端口>` | 用服务器 IP、域名或 Nginx HTTPS 访问时配置真实入口，供 IAM 校验来源及设置 Cookie |
 | `SPX_POSTGRES_*`、`SPX_REDIS_*` | 见根模板；对应实例、库及账号必须已存在 | 使用已有远程基础设施时统一修改；不自动创建外部账号 |
 | 模块 `BIND_HOST/BIND_PORT` | YAML 默认监听 `0.0.0.0`，端口沿用公共服务端口；Web 可选 `SPX_WEB_BIND_HOST` | 只绑定某张网卡、回环地址或本机监听端口不同于连接端口时 |
-| 模块专用 DB/Redis 变量、完整 DSN、日志及认证策略 | 字段旁 YAML 声明；高级项无需复制到根模板 | 确实需要模块独立连接、驱动额外参数或调整策略时 |
+| 完整 DSN、日志及认证策略 | 字段旁 YAML 声明；高级项无需复制到根模板 | 需要驱动额外参数或调整运行策略时 |
 
 修改 `.env`、进程变量或 YAML 后重启受影响服务；Next 运行时配置也需重启。修改 IAM 可信来源需重启 IAM；修改服务连接位置需重启对应服务及其调用方。配置管理员身份/密码变更需同步重启全部 IAM 副本。Go 开发热更新只监听代码与 SQL，不把 YAML 变更当作已自动生效。
 
@@ -179,16 +179,16 @@ Web 独立运行时，将本模块 `.env.example` 复制为 `.env.local`，使�
 
 Next 窄代理不透传 X-Forwarded-For、X-Real-IP 或 Forwarded，Gin 只信任显式配置的代理。来源限流当前计数代理连接来源；真实公网来源链仍属于部署前置条件，本轮不开展 Nginx 部署或可信多跳验收。运行日志排查见 [运行日志与错误定位](observability.md)。
 
-## 声明式环境覆盖与默认值
+## 声明式环境变量与默认值
 
 ```yaml
 db:
-  host: "${SPX_IAM_POSTGRES_HOST-${SPX_POSTGRES_HOST-127.0.0.1}}"
-  port: "${SPX_IAM_POSTGRES_PORT-${SPX_POSTGRES_PORT-5432}}"
-  sslmode: "${SPX_IAM_POSTGRES_SSLMODE-${SPX_POSTGRES_SSLMODE-disable}}"
+  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
+  port: "${SPX_POSTGRES_PORT-5432}"
+  sslmode: "${SPX_POSTGRES_SSLMODE-disable}"
 ```
 
-打开文件就能看到模块环境、共享环境和默认值的顺序。未设置某一环境变量时继续后备；`${NAME-default}` 保留显式空值，`${NAME:-default}` 在空值时也后备。密码、服务凭证等仍按业务规则校验，不能因为用了变量展开就绕过必填或格式要求。
+打开文件就能看到环境变量名与其默认值，一层展开即可读完。未设置某一环境变量时使用默认值；`${NAME-default}` 保留显式空值，`${NAME:-default}` 在空值时也后备。密码、服务凭证等仍按业务规则校验，不能因为用了变量展开就绕过必填或格式要求。
 
 共享加载器先解析唯一 YAML 文档，再使用成熟的 `mvdan.cc/sh/v3` 参数展开组件逐个处理标量；没有启动 Shell，也没有配置命令执行器。环境值中的引号、换行、冒号及 `${...}` 按字面传入，不回写 YAML、不进行第二次表达式解释。Viper/mapstructure 继续负责严格解码和类型转换；配置校验保持模块边界。删除模块 Go 环境绑定文件，不再维护第二份映射或默认表。
 
