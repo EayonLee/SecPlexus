@@ -51,7 +51,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 
 	// 先更新用户行再撤销会话，保持与登录/会话提交一致的加锁顺序。
 	var demoted []struct{ ID uuid.UUID }
-	if err = tx.WithContext(ctx).Raw(`UPDATE iam.users SET is_super_admin=false,auth_version=auth_version+1,updated_at=now() WHERE is_super_admin AND id<>? RETURNING id`, user.ID).Scan(&demoted).Error; err != nil {
+	if err = tx.WithContext(ctx).Raw(`UPDATE iam.users SET is_super_admin=false,auth_epoch=auth_epoch+1,updated_at=now() WHERE is_super_admin AND id<>? RETURNING id`, user.ID).Scan(&demoted).Error; err != nil {
 		return uuid.Nil, err
 	}
 	for _, previous := range demoted {
@@ -67,7 +67,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 	}
 	if err = tx.WithContext(ctx).Table("iam.users").Where("id = ?", user.ID).Updates(map[string]any{
 		"username": username, "display_name": username, "email": nil, "status": "active", "is_super_admin": true,
-		"auth_version": gorm.Expr("auth_version+1"), "updated_at": gorm.Expr("now()"),
+		"auth_epoch": gorm.Expr("auth_epoch+1"), "updated_at": gorm.Expr("now()"),
 	}).Error; err != nil {
 		return uuid.Nil, err
 	}

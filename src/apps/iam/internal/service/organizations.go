@@ -70,7 +70,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, orgID string, input Or
 				return err
 			}
 
-			if version != input.AuthzVersion {
+			if version != input.AuthzEpoch {
 				return repository.ErrConflict
 			}
 

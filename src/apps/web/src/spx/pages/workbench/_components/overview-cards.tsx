@@ -134,7 +134,7 @@ export function OverviewCards() {
           <CardTitle>{t("revenueGrowth")}</CardTitle>
           <CardDescription>{t("yearToDate")}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex-1">
           <ChartContainer config={revenueChartConfig} className="h-24 w-full">
             <LineChart
               data={revenueChartData}

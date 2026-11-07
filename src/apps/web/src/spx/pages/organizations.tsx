@@ -122,7 +122,7 @@ export function OrganizationsPage() {
         <FormDialog
           title={t("editOrg")}
           schema={zUpdateOrganizationBody}
-          defaultValues={{ name: dialog.name, status: dialog.status, authz_version: dialog.authz_version }}
+          defaultValues={{ name: dialog.name, status: dialog.status, authz_epoch: dialog.authz_epoch }}
           onClose={() => setDialog(undefined)}
           onSubmit={async (body) => {
             await edit.mutateAsync({ id: dialog.id, body });

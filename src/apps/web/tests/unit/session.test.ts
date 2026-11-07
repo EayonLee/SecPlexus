@@ -32,7 +32,7 @@ beforeEach(() => {
         username: "member",
         display_name: "Member",
         is_super_admin: false,
-        auth_version: "1",
+        auth_epoch: "1",
         authenticated_at: "2026-10-28T00:00:00Z",
       },
     },

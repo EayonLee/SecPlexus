@@ -9,9 +9,9 @@ import { toast } from "sonner";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { zChangePasswordBody } from "@/spx/api/iam/schemas";
 
@@ -38,26 +38,37 @@ export function AccountPage() {
   });
   const busy = passwordForm.formState.isSubmitting;
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("account")}</h1>
-      <Separator />
-      <section className="flex max-w-2xl flex-col gap-4">
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="account-username">{t("username")}</FieldLabel>
+    <div className="@container/main flex flex-col gap-4 md:gap-6">
+      <header>
+        <h1 className="font-semibold text-2xl tracking-tight">{t("account")}</h1>
+      </header>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>{t("username")}</CardTitle>
+            <CardDescription>
+              {t("accountId")}: {auth.principal?.user_id}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <Input id="account-username" value={auth.principal?.username ?? ""} readOnly />
-          </Field>
-        </FieldGroup>
-        <p className="text-muted-foreground text-xs whitespace-nowrap">
-          {t("accountId")}: {auth.principal?.user_id}
-        </p>
-      </section>
-      <section className="flex max-w-2xl flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <h2 className="text-lg font-medium">{t("passwordAndLogin")}</h2>
-          <Separator />
-        </div>
-        <div className="flex flex-col gap-6">
+          </CardContent>
+        </Card>
+
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle>{t("account")}</CardTitle>
+            <CardDescription>@{auth.principal?.username}</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("passwordAndLogin")}</CardTitle>
+        </CardHeader>
+        <CardContent>
           {auth.principal?.is_super_admin ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -144,8 +155,8 @@ export function AccountPage() {
               </fieldset>
             </form>
           )}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }

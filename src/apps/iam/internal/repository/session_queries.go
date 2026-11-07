@@ -42,7 +42,7 @@ func RevokeRotatedSession(ctx context.Context, db *gorm.DB, oldID uuid.UUID, val
 // InsertSession 写入绑定令牌摘要的逻辑会话，期限由认证用例确定。
 func InsertSession(ctx context.Context, db *gorm.DB, newID uuid.UUID, userID uuid.UUID, value string, authVersion int64, authenticated time.Time, reauthenticated *time.Time, absolute time.Time, idle time.Time, now time.Time, ip any, userAgent string) error {
 	return db.WithContext(ctx).Exec(
-		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_version,state,authenticated_at,reauthenticated_at,absolute_expires_at,idle_expires_at,last_seen_at,client_ip,user_agent) VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11)`,
+		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,reauthenticated_at,absolute_expires_at,idle_expires_at,last_seen_at,client_ip,user_agent) VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11)`,
 		newID,
 		userID,
 		value,

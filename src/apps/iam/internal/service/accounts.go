@@ -104,7 +104,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 			}
 
 			metadata["status"] = input.Status
-			if target.AuthVersion != input.AuthVersion {
+			if target.AuthEpoch != input.AuthEpoch {
 				return repository.ErrConflict
 			}
 
@@ -146,7 +146,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 				return err
 			}
 
-			if err = repository.BumpUserAuthVersion(ctx, tx, id); err != nil {
+			if err = repository.BumpUserAuthEpoch(ctx, tx, id); err != nil {
 				return err
 			}
 

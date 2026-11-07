@@ -98,7 +98,7 @@ func (s *Handler) UpdateCurrentOrganization(c *gin.Context) {
 		return
 	}
 
-	if err := s.Service.UpdateOrganization(r.Context(), orgId, service.OrganizationUpdate{Name: input.Name, AuthzVersion: input.AuthzVersion}, false, middleware.RequestID(r)); err != nil {
+	if err := s.Service.UpdateOrganization(r.Context(), orgId, service.OrganizationUpdate{Name: input.Name, AuthzEpoch: input.AuthzEpoch}, false, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -191,9 +191,9 @@ func (s *Handler) DeleteMember(c *gin.Context) {
 	}
 	w := c.Writer
 	r := c.Request
-	version := params.AuthzVersion
+	version := params.AuthzEpoch
 
-	if err := s.Service.UpdateMember(r.Context(), orgId, id, service.MemberUpdate{AuthzVersion: version}, true, middleware.RequestID(r)); err != nil {
+	if err := s.Service.UpdateMember(r.Context(), orgId, id, service.MemberUpdate{AuthzEpoch: version}, true, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}

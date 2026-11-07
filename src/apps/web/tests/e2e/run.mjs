@@ -146,8 +146,6 @@ try {
     SPX_WEB_ORIGIN: publicURL,
     SPX_POSTGRES_URL: databaseURL,
     SPX_REDIS_URL: redisURL,
-    SPX_IAM_POSTGRES_URL: databaseURL,
-    SPX_IAM_REDIS_URL: redisURL,
     SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
     SPX_IAM_BOOTSTRAP_PASSWORD: password,
     SPX_IAM_CSRF_KEY: csrf,

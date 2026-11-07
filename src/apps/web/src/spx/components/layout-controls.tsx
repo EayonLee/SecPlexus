@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fontOptions } from "@/lib/fonts/registry";
 import { PREFERENCE_REGISTRY } from "@/lib/preferences/preferences-config";
-import { THEME_PRESET_OPTIONS } from "@/lib/preferences/theme";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export function LayoutControls() {
@@ -27,19 +26,12 @@ export function LayoutControls() {
 
   const {
     theme_mode: themeMode,
-    theme_preset: themePreset,
     content_layout: contentLayout,
     navbar_style: navbarStyle,
     sidebar_variant: variant,
     sidebar_collapsible: collapsible,
     font,
   } = values;
-
-  const onThemePresetChange = (value: string) => {
-    const preset = PREFERENCE_REGISTRY.theme_preset.values.find((preset) => preset === value);
-    if (!preset) return;
-    setPreference("theme_preset", preset);
-  };
 
   const onThemeModeChange = (value: string) => {
     const mode = PREFERENCE_REGISTRY.theme_mode.values.find((mode) => mode === value);
@@ -91,30 +83,6 @@ export function LayoutControls() {
             <p className="text-muted-foreground text-xs">{t("description")}</p>
           </div>
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("themePreset")}</Label>
-              <Select value={themePreset} onValueChange={onThemePresetChange}>
-                <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder={t("preset")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {THEME_PRESET_OPTIONS.map((preset) => (
-                      <SelectItem key={preset.value} className="text-xs" value={preset.value}>
-                        <span
-                          className="size-2.5 rounded-full"
-                          style={{
-                            backgroundColor: resolvedThemeMode === "dark" ? preset.primary.dark : preset.primary.light,
-                          }}
-                        />
-                        {t(`presets.${preset.value}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-1">
               <Label className="text-xs font-medium">{t("fonts")}</Label>
               <Select value={font} onValueChange={onFontChange}>

@@ -21,10 +21,10 @@ test("create and update expose their actual required fields", () => {
   expect(zUpdateRoleBody.safeParse({ name: "Review", status: "active", version: "1", code: "forbidden" }).success).toBe(
     false,
   );
-  expect(zUpdateOrganizationBody.safeParse({ name: "Ops", authz_version: "1" }).success).toBe(false);
-  expect(zUpdateCurrentOrganizationBody.safeParse({ name: "Ops", authz_version: "1" }).success).toBe(true);
+  expect(zUpdateOrganizationBody.safeParse({ name: "Ops", authz_epoch: "1" }).success).toBe(false);
+  expect(zUpdateCurrentOrganizationBody.safeParse({ name: "Ops", authz_epoch: "1" }).success).toBe(true);
   expect(
-    zUpdateCurrentOrganizationBody.safeParse({ name: "Ops", authz_version: "1", status: "suspended" }).success,
+    zUpdateCurrentOrganizationBody.safeParse({ name: "Ops", authz_epoch: "1", status: "suspended" }).success,
   ).toBe(false);
 });
 
@@ -36,10 +36,10 @@ test("preview and save reject duplicate permissions and oversized role sets", ()
     { length: 51 },
     (_, index) => `09aa1d46-7c4b-493a-aef4-${String(index).padStart(12, "0")}`,
   );
-  expect(zSetMemberRolesBody.safeParse({ role_ids, authz_version: "1" }).success).toBe(false);
-  expect(zPreviewPermissionBody.safeParse({ membership_id: id, role_ids, authz_version: "1" }).success).toBe(false);
+  expect(zSetMemberRolesBody.safeParse({ role_ids, authz_epoch: "1" }).success).toBe(false);
+  expect(zPreviewPermissionBody.safeParse({ membership_id: id, role_ids, authz_epoch: "1" }).success).toBe(false);
   expect(zSetRolePermissionsBody.safeParse({ permissions: [], version: "1" }).success).toBe(true);
-  expect(zSetMemberRolesBody.safeParse({ role_ids: [], authz_version: "1" }).success).toBe(true);
+  expect(zSetMemberRolesBody.safeParse({ role_ids: [], authz_epoch: "1" }).success).toBe(true);
 });
 
 test("organization names and identifiers have separate Unicode-aware rules", () => {
@@ -48,7 +48,7 @@ test("organization names and identifiers have separate Unicode-aware rules", () 
   expect(zCreateOrganizationBody.safeParse({ ...body, name: "😀".repeat(30) }).success).toBe(true);
   for (const name of ["中".repeat(31), "Ops\nTeam", "Ops\u0085Team", " "]) {
     expect(zCreateOrganizationBody.safeParse({ ...body, name }).success).toBe(false);
-    expect(zUpdateCurrentOrganizationBody.safeParse({ name, authz_version: "1" }).success).toBe(false);
+    expect(zUpdateCurrentOrganizationBody.safeParse({ name, authz_epoch: "1" }).success).toBe(false);
   }
   for (const slug of ["a".repeat(31), "1soc", "soc_", "SOC", "ab"]) {
     expect(zCreateOrganizationBody.safeParse({ ...body, slug }).success).toBe(false);

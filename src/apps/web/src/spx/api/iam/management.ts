@@ -87,7 +87,7 @@ export const deleteMember = ({ orgId, id, version }: { orgId: string; id: string
     {
       method: "DELETE",
       url: `/api/v1/iam/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(id)}`,
-      params: { authz_version: version },
+      params: { authz_epoch: version },
     },
     z.void(),
     204,

@@ -2,7 +2,7 @@
 
 > 已实现Go IAM、真实PG会话和组织授权，统一Web管理中心已接入。当前交付范围与验证证据见实施计划；MFA、SSO、公开注册和对象ACL不在本版范围。
 
-[需求规格](../../../docs/plans/user-authentication-and-access-control/spec.md) · [实施计划、审计与参考代码](../../../docs/plans/user-authentication-and-access-control/plan.md)
+[技术架构](../../../docs/architecture/02-technical-architecture.md) · [配置指南](../../../docs/configuration.md) · [测试指南](../../../docs/testing.md)
 
 ## 1. 产品与服务边界
 
@@ -61,7 +61,7 @@ PG是身份、角色、授权、Session真源；Redis只存分布式限流等短
 
 ### 2.3 唯一授权入口及求值语义
 
-所有服务通过类型化`Authorize(subject, action, org_id, resource, request_context)`求值。路由的action/目标组织提取由服务端声明，不能由浏览器选择。允许结果含allowed、decision_id、Principal和结构化scope；拒绝使用统一HTTP错误契约。组织authz_version由本人组织列表及权限概要返回，供编辑并发控制使用。
+所有服务通过类型化`Authorize(subject, action, org_id, resource, request_context)`求值。路由的action/目标组织提取由服务端声明，不能由浏览器选择。允许结果含allowed、decision_id、Principal和结构化scope；拒绝使用统一HTTP错误契约。组织authz_epoch由本人组织列表及权限概要返回，供编辑并发控制使用。
 
 ```mermaid
 flowchart TD
@@ -92,7 +92,7 @@ flowchart TD
 - 组织管理员通过其系统角色grants管理本组织普通成员、自定义角色及授权；被委派的普通成员也可在持有对应members/roles actions及转授上限内管理，不按角色名称特判；将成员升级/降级为系统org_admin仅超级管理员可做。不能从其他组织的role_id获得权限。
 - 可委派集合统一为“操作者当前有效组织权限 ∩ 目录delegable=true权限”；不存在因持有角色管理权限就自动持有全部业务权限的规则。自定义委派管理员持有iam.roles.manage/assign时，也只能操作此集合内的自定义角色。既有角色和提交的新角色权限都须在其可委派上限内；manage不自动等于assign，assign不等于编辑角色。
 - 角色改名、编辑说明不改变权限；权限替换使用完整集合+version乐观锁，冲突409。停用角色立即停止其授权；在用角色删除409，先明确解绑/替换并展示影响人数，不能静默级联清掉权限。
-- 角色/绑定/成员/账号状态变更与审计同事务，递增组织authz_version。首版每次决策读PG，只做请求内合并，不跨请求缓存允许结果；不存在Redis故障后继续用旧权限15秒的降级。
+- 角色/绑定/成员/账号状态变更与审计同事务，递增组织authz_epoch。首版每次决策读PG，只做请求内合并，不跨请求缓存允许结果；不存在Redis故障后继续用旧权限15秒的降级。
 - 为保证授权时操作者尚有授予资格及最后管理员保护，管理员写用例使用统一事务边界：取得固定IAM管理写advisory事务锁→按UUID顺序锁涉及用户→按UUID顺序锁涉及组织→重新验证操作者Session版本/当前权限→校验目标→提交变更/审计。首版串行化低频管理写，比在多个入口遗漏竞态更简单；登录/普通业务读不持该锁。未来仅在压测证明瓶颈后再细化锁。
 - 配置指定唯一有效超级管理员，其账号和密码禁止平台/运维重置入口修改；每个active组织至少保留一位有效org_admin；判定含用户状态、成员状态和系统角色绑定。全局停用用户须检查其所有受影响组织，不给另一个入口绕过规则。
 - 系统角色grants清空/替换请求同样拒绝；自定义角色清空grants则成功并使其业务权限归零。系统角色不可编辑、停用或删除；普通自定义角色不能授予平台权限、修改超级管理员标识、跳过审批或重置他人的全局密码。
@@ -107,7 +107,7 @@ Gin承接统一HTTP入口，路由在 internal/router 原生注册。中间件�
 
 Gin使用原生路由、代理IP、错误收集及Recovery，不再保留Chi或Authboss适配栈。HTTP Handler通过Gin Binding/validator绑定并校验结构，再调用业务用例；不重新构造登录JSON请求。SCS的LoadAndSave不能直接保证提交失败后正文不继续写出，因此仅IAM非流式响应保留提交屏障：缓存失败或panic时不发送认证Cookie/成功正文，并补偿撤销新逻辑会话。Console SSE不经过此屏障。
 
-版本以根`go.mod/go.sum`和[框架能力记录](../../../docs/plans/gin-service-refactor/framework-capabilities.md)为准。GORM的泛型投影、回调事务、批量关联与错误翻译和现有pgx池共用连接；Goose Provider执行显式迁移。`serve`和`status`先只读确认版本表已初始化，不因状态查询隐式建表。密码保存含参数的PHC格式，比较前限制输入及哈希参数资源。
+版本以根`go.mod/go.sum`为准。GORM的泛型投影、回调事务、批量关联与错误翻译和现有pgx池共用连接；Goose Provider执行显式迁移。`serve`和`status`先只读确认版本表已初始化，不因状态查询隐式建表。密码保存含参数的PHC格式，比较前限制输入及哈希参数资源。
 
 ```mermaid
 sequenceDiagram
@@ -132,12 +132,12 @@ sequenceDiagram
 
 首版使用SCS官方PG Store，不再先写一整套自定义CtxStore/generation引擎。保留两张各司其职的表：`scs_sessions`是库的序列化存储，`user_sessions`是可枚举、可撤销的逻辑授权记录。逻辑会话才是身份有效性的依据，不能只看SCS里是否有uid。
 
-- SCS显式启用Store键哈希（HashTokenInStore=true，固定版本验证）；token_hash按该版本的SHA-256/base64url格式映射。SCS中保存user_sessions.id，逻辑行绑定user_id、Token摘要和验证时auth_version。每次授权同时检查绑定、active状态、用户状态/版本、SCS实际expiry与逻辑idle/absolute。
+- SCS显式启用Store键哈希（HashTokenInStore=true，固定版本验证）；token_hash按该版本的SHA-256/base64url格式映射。SCS中保存user_sessions.id，逻辑行绑定user_id、Token摘要和验证时auth_epoch。每次授权同时检查绑定、active状态、用户状态/版本、SCS实际expiry与逻辑idle/absolute。
 - IAM的idle默认30分钟、absolute默认8小时，两个期限由user_sessions统一负责；SCS IdleTimeout=0、Lifetime作为存储期限，不另做一套空闲判断。每次有效授权用条件UPDATE检查原idle/absolute仍有效、账号版本及state，再将idle_expires_at推进到min(DB判定时刻+idle,absolute)，使用取得行锁后的数据库实际时钟校验期限，idle/last_seen单调更新；包括后台轮询，不做前台活动识别或activity接口。SCS加载/延迟保存本身不能推进逻辑idle；过期后旧请求写回字节也无法延长身份。SCS RenewToken不改逻辑absolute。
 - 登录/重新认证轮换时创建新逻辑会话、撤销旧逻辑会话，不复用旧逻辑ID；重新认证提交必须条件确认旧逻辑会话及Token绑定仍有效，两个并发重新认证最多一个消费旧逻辑会话，旧请求失败不清新Cookie。重新认证继承原authenticated_at/absolute，并单独更新reauthenticated_at；近期认证按后者或原登录时间判断。旧请求即使把旧SCS存储行写回，其中绑定的旧逻辑会话仍已撤销，不能恢复认证。验收关注身份不可复活，不要求第三方存储绝无垃圾行。
-- 密码验证读取user.auth_version及密码快照；建逻辑会话时锁用户并比较同一版本、当前状态和密码是否仍有效。重置/停用竞态失败必须重新登录，不能读取新版本替旧密码请求签发会话。
+- 密码验证读取user.auth_epoch及密码快照；建逻辑会话时锁用户并比较同一版本、当前状态和密码是否仍有效。重置/停用竞态失败必须重新登录，不能读取新版本替旧密码请求签发会话。
 - 逻辑会话/成功审计可在一事务，SCS实际保存与响应Cookie不伪称跨步骤原子。保存失败返回503，不发送成功Cookie，并撤销已建逻辑行；失败补偿未完成时孤立行也不具备可用凭证，按期限清理。传输层缓冲响应，确认SCS保存后才发送成功头及Cookie；相关失败路径有真实数据库集成测试。
-- 退出先提交逻辑撤销，再Destroy SCS；Destroy失败也不能再次授权。改密/重置/全局停用递增auth_version并撤销会话。普通统计更新不能把state改回active。
+- 退出先提交逻辑撤销，再Destroy SCS；Destroy失败也不能再次授权。改密/重置/全局停用递增auth_epoch并撤销会话。普通统计更新不能把state改回active。
 
 Cookie按配置的公共URL协议确定：HTTPS使用`__Host-spx_session`、Secure、Path=/、HttpOnly、SameSite=Lax、无Domain；本机HTTP使用`spx_session`并保留HttpOnly等约束，不用环境模式决定连接或安全行为。认证响应no-store。CSRF可有辅助Cookie，但不是另一认证系统；登录/轮换后更新CSRF材料。浏览器不存JWT或refresh token。
 
@@ -179,12 +179,12 @@ erDiagram
 
 | 表 | 全部字段/类型 | 约束与索引 |
 |---|---|---|
-| users | id uuid PK; username text; username_normalized text; display_name text; email text?; status text; is_super_admin boolean default false; auth_version bigint default 1; C/U | UNIQUE(username_normalized)；status=active/disabled；用户名3..64、ASCII字母开头且仅字母数字_.-，规范化去首尾空格并小写；展示名1..100、邮箱<=320；版本>0 |
+| users | id uuid PK; username text; username_normalized text; display_name text; email text?; status text; is_super_admin boolean default false; auth_epoch bigint default 1; C/U | UNIQUE(username_normalized)；status=active/disabled；用户名3..64、ASCII字母开头且仅字母数字_.-，规范化去首尾空格并小写；展示名1..100、邮箱<=320；版本>0 |
 | password_credentials | user_id uuid PK/FK users; password_hash text; changed_at timestamptz; failed_attempts integer default 0; locked_until timestamptz?; U | 次数>=0；哈希仅仓储/认证可见；改密/次数递增原子化 |
-| organizations | id uuid PK; slug text; name text; status text; authz_version bigint default 1; C/U | UNIQUE(slug)；slug3..63小写字母数字连字符且首尾字母数字；名称1..100；status=active/suspended，版本>0 |
+| organizations | id uuid PK; slug text; name text; status text; authz_epoch bigint default 1; C/U | UNIQUE(slug)；slug3..63小写字母数字连字符且首尾字母数字；名称1..100；status=active/suspended，版本>0 |
 | memberships | id uuid PK; org_id uuid FK organizations; user_id uuid FK users; status text; C/U | UNIQUE(org_id,user_id)、UNIQUE(org_id,id)；status=active/disabled；索引(user_id,status)；不存一个会与绑定表冲突的role字符串 |
 | roles | id uuid PK; org_id uuid FK; code text; name text; description text; kind text; status text; version bigint default 1; created_by uuid? FK users; C/U | UNIQUE(org_id,code)、UNIQUE(org_id,id)；kind=system/custom，status=active/disabled；code3..64小写标识符，name1..100，说明<=1000；custom禁止保留code；系统org_admin/member不可编辑/删除/停用；code创建后不可改，仅custom的显示name可改 |
-| permissions | key text PK; module text; resource_type text; action text; description text; scope text; risk_level text; delegable boolean; requires_recent_auth boolean; status text; C/U | key<=128；scope=platform/organization，risk=normal/sensitive/high，status=active/deprecated/retired；目录由发布维护，管理API只读；platform项不能加入组织自定义角色 |
+| permissions | permission_key text PK; module text; resource_type text; action text; description text; scope text; risk_level text; delegable boolean; requires_recent_auth boolean; status text; C/U | permission_key<=128；scope=platform/organization，risk=normal/sensitive/high，status=active/deprecated/retired；目录由发布维护，管理API只读；platform项不能加入组织自定义角色 |
 | role_permissions | org_id uuid; role_id uuid; permission_key text FK permissions; created_at timestamptz | PK(role_id,permission_key)；复合FK(org_id,role_id)→roles；索引(permission_key,role_id)；只允许organization权限，retired拒绝求值，deprecated兼容期维持既有授权但禁止新授予 |
 | membership_roles | org_id uuid; membership_id uuid; role_id uuid; created_by uuid FK users; created_at timestamptz | PK(membership_id,role_id)；复合FK(org_id,membership_id)→memberships、(org_id,role_id)→roles；索引(org_id,role_id)；无跨组织绑定 |
 
@@ -194,7 +194,7 @@ erDiagram
 
 | 表 | 全部字段/类型 | 约束与索引 |
 |---|---|---|
-| user_sessions | id uuid PK; user_id uuid FK users; token_hash text; auth_version bigint; state text; authenticated_at timestamptz; reauthenticated_at timestamptz?; absolute_expires_at timestamptz; idle_expires_at timestamptz; last_seen_at timestamptz; revoked_at timestamptz?; revoke_reason text?; client_ip inet?; user_agent text; created_at timestamptz | UNIQUE(token_hash)；state=active/revoked；版本>0、absolute>authenticated、idle<=absolute；索引(user_id,state)、(absolute_expires_at)；UA<=512，原因<=100；过期由期限判定，无需另跑状态机才能失效 |
+| user_sessions | id uuid PK; user_id uuid FK users; token_hash text; auth_epoch bigint; state text; authenticated_at timestamptz; reauthenticated_at timestamptz?; absolute_expires_at timestamptz; idle_expires_at timestamptz; last_seen_at timestamptz; revoked_at timestamptz?; revoke_reason text?; client_ip inet?; user_agent text; created_at timestamptz | UNIQUE(token_hash)；state=active/revoked；版本>0、absolute>authenticated、idle<=absolute；索引(user_id,state)、(absolute_expires_at)；UA<=512，原因<=100；过期由期限判定，无需另跑状态机才能失效 |
 | scs_sessions | token text PK; data bytea; expiry timestamptz | 官方Store表的token字段实际为配置后的Store键摘要；索引(expiry)；具体表名/SQL以P0验证的固定版本为准，不擅自增加Store不维护的字段 |
 | audit_events | id uuid PK; occurred_at timestamptz; org_id uuid?; actor_type text; actor_id uuid?; actor_name text?; action text; target_type text; target_id uuid?; outcome text; reason_code text?; request_id text; decision_id uuid?; metadata jsonb default '{}'; created_at timestamptz | actor_type=user/system/deployment_operator；outcome=success/denied/failure；索引(org_id,occurred_at,id)、(actor_id,occurred_at)、(request_id)；metadata白名单、<=8KiB；不存密码/Cookie/原始请求体 |
 
@@ -243,18 +243,18 @@ HTTP 行为以原生 Go DTO、Gin 路由和用例为准，由真实 HTTP 测试�
 | 路径/动作 | 边界 |
 |---|---|
 | GET auth/context；POST auth/login、logout、reauthenticate | CSRF上下文、登录、退出及近期认证；无register/forgot/activity占位端点 |
-| GET me、me/organizations；GET me/permissions?org_id=... | me返回本人摘要及platform_actions（普通用户为空）；指定组织权限接口返回organization actions和authz_version，无组织成员资格时拒绝（超级管理员显式目标组织除外） |
+| GET me、me/organizations；GET me/permissions?org_id=... | me返回本人摘要及platform_actions（普通用户为空）；指定组织权限接口返回organization actions和authz_epoch，无组织成员资格时拒绝（超级管理员显式目标组织除外） |
 | PATCH me | 仅本人、完整登录+CSRF，只允许display_name/email联系信息，不修改用户名/角色/密码/验证标记 |
 | GET/PATCH orgs/{org_id} | 分别iam.organizations.read/manage；PATCH仅name等本组织展示信息，需近期认证；生命周期status仅平台组织管理接口可改 |
 | POST me/password | 本人改密；配置托管管理员不允许自助改密 |
 | GET/POST users；GET/PATCH users/{id}；POST users/{id}/reset-password | 仅超级管理员管理全局账号；DTO明确允许字段，不能通用更新任意列 |
-| GET/POST organizations；PATCH organizations/{id} | 超级管理员，创建含指定组织管理员；不能绕过最后管理员规则 |
+| GET/POST organizations；PATCH organizations/{id} | 超级管理员，创建含指定组织管理员；不能绕过最后管理员规则。与下面 `orgs/{org_id}` 的区别：`organizations` 是**平台级组织目录**（建组织、改组状态、看全部组织），`orgs/{org_id}` 是**组织内的日常操作**（本组织资料、成员、角色、审计），前者只有超级管理员能用，后者由组织内权限控制 |
 | GET orgs/{org_id}/members；POST同路径；PATCH/DELETE同路径/{membership_id} | 读/管理普通成员需要对应action；持iam.members.manage的组织操作者POST只创建全新普通账号+本组织成员，不接管已有账号；超级管理员另可按user_id加入已有账号 |
 | GET/POST orgs/{org_id}/roles；GET/PATCH/DELETE同路径/{role_id} | 自定义角色CRUD，系统角色只读；PATCH元数据带version；在用删除409 |
 | GET permissions?org_id=... | 返回可见/可委派权限目录与分组、风险、说明，平台权限不进入组织勾选项 |
 | GET orgs/{org_id}/roles/{role_id}/members | iam.roles.read与iam.members.read均满足，同组织分页返回；只有角色读取权时不泄露成员个人资料 |
 | PUT orgs/{org_id}/roles/{role_id}/permissions | 全量替换grants+预期version；同事务权限上限校验、审计和版本更新 |
-| PUT orgs/{org_id}/members/{membership_id}/roles | 全量替换角色集+预期authz_version；系统org_admin仅超级管理员能增删；默认业务权限为空，不把清空理解为恢复默认 |
+| PUT orgs/{org_id}/members/{membership_id}/roles | 全量替换角色集+预期authz_epoch；系统org_admin仅超级管理员能增删；默认业务权限为空，不把清空理解为恢复默认 |
 | POST orgs/{org_id}/permission-preview | 校验同组织、管理权限及候选角色，返回成员有效权限和变化/影响人数；需iam.roles.read、iam.members.read和相应manage/assign；只读评估不落库，不可探测其他组织用户 |
 | GET orgs/{org_id}/audit-events；GET audit-events | 本组织审计action/平台审计；跨组织访问需超级管理员并明确目标，不返回隐式混合列表 |
 | POST /api/v1/iam/authorize | 每服务凭证及action白名单；认证、CSRF、组织授权统一决策；调用方不能伪造subject_id来免凭证认证 |
@@ -352,7 +352,7 @@ make公开入口仍dev/build/stop；应用启动与基础组件生命周期分�
 ## 10. 迁移与运维
 
 模块独立启动、入口HTTPS、数据库准备及Compose方式见[配置指南](../../../docs/configuration.md)。
-当前结构版本为 2，新增迁移移除已废弃的密码状态列，保留已有凭据和用户数据。已执行迁移不修改。Goose迁移版本记录在`public.iam_goose_db_version`；`iam` schema包含上述11张表。
+当前结构版本为 7。`00005` 把 `permissions.key` 改名为 `permission_key`（SQL 保留字）并重建依赖它的触发器函数；`00006` 把 `auth_version`/`authz_version` 改名为 `auth_epoch`/`authz_epoch`（两者只差一个字母，含义完全不同，易改错）；`00007` 为审计清理补 `occurred_at` 索引。已执行迁移不修改。Goose迁移版本记录在`public.iam_goose_db_version`；`iam` schema包含上述11张表。
 迁移、运行及维护读取同一db连接，不创建独立数据库用户。serve检查schema版本和初始化状态，不再拒绝该账号拥有DDL权限；应用层鉴权、审计事务及管理员保护继续生效。
 
 ```sh

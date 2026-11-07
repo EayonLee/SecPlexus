@@ -8,8 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 )
 
 // Queries 将数据操作绑定到调用方的连接或事务；方法不会切回根连接。
@@ -25,7 +23,7 @@ type LoginUser struct {
 	DisplayName    string             // 界面显示名称。
 	Status         string             // 当前启用状态。
 	IsSuperAdmin   bool               // 是否具备平台管理员身份。
-	AuthVersion    int64              // 身份版本；变化后旧会话失效。
+	AuthEpoch      int64              // 身份版本；变化后旧会话失效。
 	PasswordHash   string             // 仅供内部校验的密码哈希，禁止写入响应和日志。
 	FailedAttempts int32              // 连续失败次数。
 	LockedUntil    pgtype.Timestamptz // 账户锁定截止时间。
@@ -35,7 +33,7 @@ type LoginUser struct {
 func (q *Queries) GetLoginUser(ctx context.Context, username string) (LoginUser, error) {
 	var user LoginUser
 	err := q.db.WithContext(ctx).Table("iam.users AS u").
-		Select("u.id,u.username,u.display_name,u.status,u.is_super_admin,u.auth_version,c.password_hash,c.failed_attempts,c.locked_until").
+		Select("u.id,u.username,u.display_name,u.status,u.is_super_admin,u.auth_epoch,c.password_hash,c.failed_attempts,c.locked_until").
 		Joins("JOIN iam.password_credentials c ON c.user_id=u.id").
 		Where("u.username_normalized = ?", username).Take(&user).Error
 	return user, err
@@ -51,7 +49,7 @@ type Session struct {
 	ID                uuid.UUID          // 资源标识。
 	UserID            uuid.UUID          // 会话所属用户。
 	TokenHash         string             // 会话令牌摘要，不包含原始凭据。
-	AuthVersion       int64              // 身份版本；变化后旧会话失效。
+	AuthEpoch         int64              // 身份版本；变化后旧会话失效。
 	State             string             // 会话状态，active 或 revoked。
 	AuthenticatedAt   time.Time          // 首次认证时间。
 	ReauthenticatedAt pgtype.Timestamptz // 最近一次密码确认时间。
@@ -71,7 +69,7 @@ func (q *Queries) LockSession(ctx context.Context, id uuid.UUID) (Session, error
 type TouchSessionParams struct {
 	ID          uuid.UUID       // 资源标识。
 	TokenHash   string          // 会话令牌摘要，不包含原始凭据。
-	AuthVersion int64           // 身份版本；变化后旧会话失效。
+	AuthEpoch   int64           // 身份版本；变化后旧会话失效。
 	IdleTimeout pgtype.Interval // 允许空闲的时间间隔。
 }
 
@@ -80,7 +78,7 @@ func (q *Queries) TouchSession(ctx context.Context, input TouchSessionParams) (S
 	var session Session
 	response := q.db.WithContext(ctx).Table("iam.user_sessions").Model(&session).
 		Clauses(clause.Returning{}).
-		Where("id = ? AND token_hash = ? AND state = 'active' AND auth_version = ? AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()", input.ID, input.TokenHash, input.AuthVersion).
+		Where("id = ? AND token_hash = ? AND state = 'active' AND auth_epoch = ? AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()", input.ID, input.TokenHash, input.AuthEpoch).
 		Updates(map[string]any{
 			"idle_expires_at": gorm.Expr("LEAST(absolute_expires_at,GREATEST(idle_expires_at,clock_timestamp()+?::interval))", input.IdleTimeout),
 			"last_seen_at":    gorm.Expr("GREATEST(last_seen_at,clock_timestamp())"),
@@ -112,11 +110,6 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, input RevokeUserSessio
 		}).Error
 }
 
-// GetOrganization 读取组织状态与权限版本。
-func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (model.APIOrganization, error) {
-	return gorm.G[model.APIOrganization](q.db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Where("id = ?", id).Take(ctx)
-}
-
 // GetOrganizationPermissionsParams 标识组织和用户范围。
 type GetOrganizationPermissionsParams struct {
 	OrgID  uuid.UUID // 组织范围；为空时表示平台范围。
@@ -126,11 +119,11 @@ type GetOrganizationPermissionsParams struct {
 // GetOrganizationPermissions 查询有效成员通过有效角色获得的权限。
 func (q *Queries) GetOrganizationPermissions(ctx context.Context, input GetOrganizationPermissionsParams) ([]string, error) {
 	items := []string{}
-	err := q.db.WithContext(ctx).Table("iam.memberships AS m").Distinct("p.key").
+	err := q.db.WithContext(ctx).Table("iam.memberships AS m").Distinct("p.permission_key").
 		Joins("JOIN iam.membership_roles mr ON mr.org_id=m.org_id AND mr.membership_id=m.id").
 		Joins("JOIN iam.roles r ON r.org_id=mr.org_id AND r.id=mr.role_id AND r.status='active'").
 		Joins("JOIN iam.role_permissions rp ON rp.org_id=r.org_id AND rp.role_id=r.id").
-		Joins("JOIN iam.permissions p ON p.key=rp.permission_key AND p.status IN ('active','deprecated')").
-		Where("m.org_id = ? AND m.user_id = ? AND m.status='active'", input.OrgID, input.UserID).Pluck("p.key", &items).Error
+		Joins("JOIN iam.permissions p ON p.permission_key=rp.permission_key AND p.status IN ('active','deprecated')").
+		Where("m.org_id = ? AND m.user_id = ? AND m.status='active'", input.OrgID, input.UserID).Pluck("p.permission_key", &items).Error
 	return items, err
 }

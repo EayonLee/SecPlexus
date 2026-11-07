@@ -7,6 +7,7 @@ import {
   JetBrains_Mono,
   Lora,
   Merriweather,
+  Montserrat,
   Noto_Sans,
   Noto_Serif,
   Nunito_Sans,
@@ -23,6 +24,12 @@ import { GeistPixelSquare } from "geist/font/pixel";
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+});
+
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-montserrat",
 });
 
 const notoSans = Noto_Sans({
@@ -108,6 +115,10 @@ const playfairDisplay = Playfair_Display({
 });
 
 export const fontRegistry = {
+  montserrat: {
+    label: "Montserrat",
+    font: montserrat,
+  },
   geist: {
     label: "Geist",
     font: geist,

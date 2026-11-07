@@ -37,5 +37,5 @@ func UserJSON(ctx context.Context, db *gorm.DB, id string, data *[]byte) error {
 
 // VisibleOrganizations 读取当前用户可见的有效组织。
 func VisibleOrganizations(ctx context.Context, db *gorm.DB, userID uuid.UUID, isSuperAdmin bool) (*sql.Rows, error) {
-	return db.WithContext(ctx).Raw(`SELECT o.id::text,o.slug,o.name,o.authz_version::text FROM iam.organizations o WHERE o.status='active' AND ($2::boolean OR EXISTS(SELECT 1 FROM iam.memberships m WHERE m.org_id=o.id AND m.user_id=$1 AND m.status='active')) ORDER BY o.created_at,o.id LIMIT 500`, userID, isSuperAdmin).Rows()
+	return db.WithContext(ctx).Raw(`SELECT o.id::text,o.slug,o.name,o.authz_epoch::text FROM iam.organizations o WHERE o.status='active' AND ($2::boolean OR EXISTS(SELECT 1 FROM iam.memberships m WHERE m.org_id=o.id AND m.user_id=$1 AND m.status='active')) ORDER BY o.created_at,o.id LIMIT 500`, userID, isSuperAdmin).Rows()
 }

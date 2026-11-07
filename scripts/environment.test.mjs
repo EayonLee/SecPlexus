@@ -93,10 +93,11 @@ test('Web does not receive the IAM trusted-origin configuration', () => {
   assert.deepEqual(webEnvironment({ SPX_WEB_ORIGIN: 'https://sec.example.com', SPX_CONSOLE_IAM_TOKEN: 'server-only' }), {});
 });
 
-test('module connection overrides reach IAM only and stay outside Web and Console', () => {
-  const environment = {SPX_IAM_POSTGRES_HOST:'isolated-db',SPX_IAM_POSTGRES_PASSWORD:'test-only',SPX_IAM_REDIS_URL:'isolated-cache',SPX_POSTGRES_HOST:'shared-db',SPX_WEB_BIND_HOST:'127.0.0.1'};
-  assert.deepEqual(moduleEnvironment(environment,'iam'),{SPX_IAM_POSTGRES_HOST:'isolated-db',SPX_IAM_POSTGRES_PASSWORD:'test-only',SPX_IAM_REDIS_URL:'isolated-cache',SPX_POSTGRES_HOST:'shared-db'});
-  assert.deepEqual(moduleEnvironment(environment,'console'),{});
+test('module-scoped variables reach only their own module and stay outside Web and Console', () => {
+  const environment = {SPX_POSTGRES_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only',SPX_CONSOLE_LOG_LEVEL:'debug',SPX_WEB_BIND_HOST:'127.0.0.1'};
+  assert.deepEqual(moduleEnvironment(environment,'iam'),{SPX_POSTGRES_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only'});
+  // Console 没有数据库/缓存配置，因此共享连接变量只到 IAM。
+  assert.deepEqual(moduleEnvironment(environment,'console'),{SPX_CONSOLE_LOG_LEVEL:'debug'});
   assert.deepEqual(webEnvironment(environment),{SPX_WEB_BIND_HOST:'127.0.0.1'});
 });
 

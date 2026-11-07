@@ -4,7 +4,7 @@ import "time"
 
 // Principal 是 IAM 认证后向受信服务返回的身份投影。
 type Principal struct {
-	AuthVersion       int64      `json:"auth_version,string"` // 字符串编码避免浏览器整数精度丢失。
+	AuthEpoch         int64      `json:"auth_epoch,string"` // 字符串编码避免浏览器整数精度丢失。
 	AuthenticatedAt   time.Time  `json:"authenticated_at"`
 	DisplayName       string     `json:"display_name"`
 	IsSuperAdmin      bool       `json:"is_super_admin"`

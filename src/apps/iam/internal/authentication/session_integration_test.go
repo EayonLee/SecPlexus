@@ -138,7 +138,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal("account rotation left previous identity usable")
 	}
 	// 凭据版本改变后，旧密码快照不能创建新会话。
-	if _, err = store.Pool.Exec(ctx, `UPDATE iam.users SET auth_version=auth_version+1 WHERE id=$1`, user.ID); err != nil {
+	if _, err = store.Pool.Exec(ctx, `UPDATE iam.users SET auth_epoch=auth_epoch+1 WHERE id=$1`, user.ID); err != nil {
 		t.Fatal(err)
 	}
 

@@ -58,7 +58,7 @@ Local rotating JSON logs use `logs/iam.log` and `logs/console.log`; containers u
 ## Repository layout
 
 ```text
-src/apps/       Application code (web, iam, console)
+src/apps/       Application code (web, iam, console; llm-gateway planned)
 src/packages/   Shared libraries, added as needed
 deploy/         Deployment configuration
 scripts/        Development and release scripts

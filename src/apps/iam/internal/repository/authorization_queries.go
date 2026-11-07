@@ -28,19 +28,14 @@ func EffectiveRoleGrants(ctx context.Context, db *gorm.DB, orgID string, userID 
 
 // MemberPreviewState 读取预览所需的用户、组织版本和成员有效状态。
 func MemberPreviewState(ctx context.Context, db *gorm.DB, orgID string, membershipID string, userID *uuid.UUID, version *int64, memberActive *bool, systemAdmin *bool) error {
-	return db.WithContext(ctx).Raw(`SELECT m.user_id,o.authz_version,m.status='active' AND u.status='active' AND o.status='active',u.is_super_admin FROM iam.memberships m JOIN iam.organizations o ON o.id=m.org_id JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.id=$2`, orgID, membershipID).Row().Scan(userID, version, memberActive, systemAdmin)
+	return db.WithContext(ctx).Raw(`SELECT m.user_id,o.authz_epoch,m.status='active' AND u.status='active' AND o.status='active',u.is_super_admin FROM iam.memberships m JOIN iam.organizations o ON o.id=m.org_id JOIN iam.users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.id=$2`, orgID, membershipID).Row().Scan(userID, version, memberActive, systemAdmin)
 }
 
 // ReadPermission 读取权限定义和近期认证约束。
 func ReadPermission(ctx context.Context, db *gorm.DB, action string) (authorization.Permission, error) {
 	var permission authorization.Permission
-	err := db.WithContext(ctx).Table("iam.permissions").Where("key = ?", action).Take(&permission).Error
+	err := db.WithContext(ctx).Table("iam.permissions").Where("permission_key = ?", action).Take(&permission).Error
 	return permission, err
-}
-
-// ActiveMembership 检查用户是否为组织的有效成员。
-func ActiveMembership(ctx context.Context, db *gorm.DB, org uuid.UUID, userID uuid.UUID, value *bool) error {
-	return db.WithContext(ctx).Raw(`SELECT EXISTS(SELECT 1 FROM iam.memberships WHERE org_id=$1 AND user_id=$2 AND status='active')`, org, userID).Row().Scan(value)
 }
 
 // LockOrganization 在管理事务内锁定组织。
@@ -48,7 +43,28 @@ func LockOrganization(ctx context.Context, db *gorm.DB, orgID string, lockedID *
 	return db.WithContext(ctx).Raw(`SELECT id FROM iam.organizations WHERE id=$1 FOR UPDATE`, orgID).Row().Scan(lockedID)
 }
 
-// BumpOrganizationVersion 递增组织权限版本，使其他请求及时重算权限。
-func BumpOrganizationVersion(ctx context.Context, db *gorm.DB, parsed uuid.UUID) error {
-	return db.WithContext(ctx).Exec(`UPDATE iam.organizations SET authz_version=authz_version+1,updated_at=now() WHERE id=$1`, parsed).Error
+// BumpOrganizationAuthzEpoch 递增组织权限版本，使其他请求及时重算权限。
+func BumpOrganizationAuthzEpoch(ctx context.Context, db *gorm.DB, parsed uuid.UUID) error {
+	return db.WithContext(ctx).Exec(`UPDATE iam.organizations SET authz_epoch=authz_epoch+1,updated_at=now() WHERE id=$1`, parsed).Error
+}
+
+// OrgAuthSnapshot 一次读取授权判定所需的组织状态、成员有效性和有效权限集。
+// 合并查询的理由：授权判定在每个受保护请求上都会执行，原来分三次往返
+// （读组织、读成员、五表 join 读权限），同一事务内三次 RTT 是纯开销。
+func OrgAuthSnapshot(ctx context.Context, db *gorm.DB, org uuid.UUID, userID uuid.UUID, orgActive *bool, memberActive *bool, permissions *[]string) error {
+	return db.WithContext(ctx).Raw(`
+		SELECT
+			o.status = 'active',
+			EXISTS(SELECT 1 FROM iam.memberships m WHERE m.org_id = o.id AND m.user_id = $2 AND m.status = 'active'),
+			COALESCE(ARRAY(
+				SELECT DISTINCT p.permission_key
+				FROM iam.memberships m
+				JOIN iam.membership_roles mr ON mr.org_id = m.org_id AND mr.membership_id = m.id
+				JOIN iam.roles r ON r.org_id = mr.org_id AND r.id = mr.role_id AND r.status = 'active'
+				JOIN iam.role_permissions rp ON rp.org_id = r.org_id AND rp.role_id = r.id
+				JOIN iam.permissions p ON p.permission_key = rp.permission_key AND p.status IN ('active','deprecated')
+				WHERE m.org_id = o.id AND m.user_id = $2 AND m.status = 'active'
+			), '{}')
+		FROM iam.organizations o
+		WHERE o.id = $1`, org, userID).Row().Scan(orgActive, memberActive, permissions)
 }

@@ -95,14 +95,23 @@ func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = store.Seed(ctx, "admin", "secplexus"); err != nil {
-		t.Fatal(err)
-	}
-
-	before, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	// v1 阶段的列名还是 auth_version；Seed 面向迁移完成后的 schema，不能用来构造历史数据。
+	// 这里直接写入"升级前就存在的管理员"，正是本用例要验证的起点。
+	beforeID := uuid.New()
+	beforeHash, err := (identity.PasswordHasher{}).GenerateHash("secplexus")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.users(id,username,username_normalized,display_name,status,is_super_admin,auth_version) VALUES($1,'admin','admin','admin','active',true,1)`, beforeID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.password_credentials(user_id,password_hash) VALUES($1,$2)`, beforeID, beforeHash); err != nil {
+		t.Fatal(err)
+	}
+
+	before := repository.LoginUser{ID: beforeID, PasswordHash: beforeHash}
 
 	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
 		t.Fatal(err)
@@ -177,9 +186,7 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Seed(ctx, "status-admin", "isolated migration status password"); err != nil {
-		t.Fatal(err)
-	}
+	// 此处不写入管理员：迁移后的"尚未初始化"正是后面要断言的中间态。
 	if err := store.VerifySchema(ctx); err == nil {
 		t.Fatal("pending migrations accepted for serving")
 	}

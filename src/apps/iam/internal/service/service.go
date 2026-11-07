@@ -89,31 +89,21 @@ func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Prin
 			return iamclient.AuthorizedScope{}, authorization.ErrDenied
 		}
 
-		organization, err := repository.NewQueries(tx).GetOrganization(ctx, org)
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
-			return iamclient.AuthorizedScope{}, authorization.ErrDenied
-		}
-
-		if err != nil {
-			return iamclient.AuthorizedScope{}, err
-		}
-
-		snapshot.OrganizationID = org.String()
-		snapshot.OrganizationActive = organization.Status == "active"
 		userID, err := uuid.Parse(p.UserID)
 		if err != nil {
 			return iamclient.AuthorizedScope{}, repository.ErrUnauthenticated
 		}
 
-		if err = repository.ActiveMembership(ctx, tx, org, userID, &snapshot.MembershipActive); err != nil {
+		if err = repository.OrgAuthSnapshot(ctx, tx, org, userID,
+			&snapshot.OrganizationActive, &snapshot.MembershipActive, &snapshot.Permissions); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+				return iamclient.AuthorizedScope{}, authorization.ErrDenied
+			}
+
 			return iamclient.AuthorizedScope{}, err
 		}
 
-		snapshot.Permissions, err = repository.NewQueries(tx).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: org,
-			UserID: userID})
-		if err != nil {
-			return iamclient.AuthorizedScope{}, err
-		}
+		snapshot.OrganizationID = org.String()
 	}
 
 	var now time.Time
@@ -226,7 +216,7 @@ func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetTy
 			}
 
 			org = &parsed
-			if err = repository.BumpOrganizationVersion(ctx, tx, parsed); err != nil {
+			if err = repository.BumpOrganizationAuthzEpoch(ctx, tx, parsed); err != nil {
 				return err
 			}
 		}

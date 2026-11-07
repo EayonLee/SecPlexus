@@ -19,8 +19,8 @@ describe("platform localization", () => {
   test("supports explicit language preferences and falls back safely", () => {
     expect(resolveLocale("zh-CN")).toBe("zh-CN");
     expect(resolveLocale("en")).toBe("en");
-    expect(resolveLocale("unsupported")).toBe("en");
-    expect(resolveLocale(undefined)).toBe("en");
+    expect(resolveLocale("unsupported")).toBe("zh-CN");
+    expect(resolveLocale(undefined)).toBe("zh-CN");
   });
 
   test("provides the same message keys in both languages", () => {

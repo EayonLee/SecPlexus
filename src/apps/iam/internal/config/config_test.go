@@ -94,36 +94,18 @@ func TestPasswordsRemainLiteralInConnectionURLs(t *testing.T) {
 	}
 }
 
-func TestSharedDatabaseDefaultsAndExplicitModuleOverride(t *testing.T) {
-	file := configFile(t)
+func TestSharedDatabaseConnection(t *testing.T) {
 	t.Setenv("SPX_POSTGRES_HOST", "shared-database")
 	t.Setenv("SPX_POSTGRES_DATABASE", "platform")
 	t.Setenv("SPX_POSTGRES_USER", "platform_user")
 	t.Setenv("SPX_POSTGRES_PASSWORD", "platform password")
-	cfg, err := Load(file)
+	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if cfg.DB.Host != "shared-database" || cfg.DB.Name != "platform" || cfg.DB.User != "platform_user" {
-		t.Fatal("module did not inherit global PostgreSQL settings")
-	}
-
-	data, _ := os.ReadFile(file)
-	replaced := strings.Replace(string(data), "db:\n  host: \"127.0.0.1\"", "db:\n  host: \"module-database\"", 1)
-	t.Setenv("SPX_IAM_POSTGRES_HOST", "module-database")
-	t.Setenv("SPX_IAM_POSTGRES_USER", "module_user")
-	if err = os.WriteFile(file, []byte(replaced), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err = Load(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.DB.Host != "module-database" || cfg.DB.User != "module_user" || cfg.DB.Name != "platform" {
-		t.Fatal("module override was overwritten by global settings")
+		t.Fatal("数据库连接未从全局 PostgreSQL 设置读取")
 	}
 }
 

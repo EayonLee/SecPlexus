@@ -80,7 +80,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			return response, authorization.ErrDenied
 		}
 
-		if input.AuthzVersion != version {
+		if input.AuthzEpoch != version {
 			return response, repository.ErrConflict
 		}
 

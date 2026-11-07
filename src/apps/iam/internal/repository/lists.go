@@ -55,7 +55,7 @@ func ListUsers(ctx context.Context, db *gorm.DB, limit, offset int, query string
 		return nil, err
 	}
 
-	items, err := gorm.G[model.APIUser](db).Table("iam.users").Select("id,username,display_name,email,status,is_super_admin,auth_version").Where("? = '' OR username_normalized LIKE lower(?)||'%' OR display_name ILIKE '%'||?||'%'", query, query, query).Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	items, err := gorm.G[model.APIUser](db).Table("iam.users").Select("id,username,display_name,email,status,is_super_admin,auth_epoch").Where("? = '' OR username_normalized LIKE lower(?)||'%' OR display_name ILIKE '%'||?||'%'", query, query, query).Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func ListOrganizations(ctx context.Context, db *gorm.DB, limit, offset int) (map
 		return nil, err
 	}
 
-	items, err := gorm.G[model.APIOrganization](db).Table("iam.organizations").Select("id,slug,name,status,authz_version").Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
+	items, err := gorm.G[model.APIOrganization](db).Table("iam.organizations").Select("id,slug,name,status,authz_epoch").Order("created_at,id").Limit(limit).Offset(offset).Find(ctx)
 	if err != nil {
 		return nil, err
 	}

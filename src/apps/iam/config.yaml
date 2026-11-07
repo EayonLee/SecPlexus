@@ -1,62 +1,128 @@
-# 统一 HTTP 监听；HTTPS 由外部入口处理。环境变量覆盖 YAML，默认值仅在本文件维护。
+# IAM 模块配置。
+#
+# 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
+# 每项写作 ${环境变量名-默认值}：环境变量未设置时用默认值；写 ${X:-默认} 表示空值也算未设置。
+# 密钥类（密码、token、CSRF key）只通过环境变量或私有 .env 注入，不写进本文件的默认值。
+
+# ---- HTTP 监听 ----
+# HTTPS 由反向代理终止，本服务只监听明文 HTTP。
 app:
+  # 监听地址。0.0.0.0 = 所有网卡；127.0.0.1 = 只允许本机访问（前面有反向代理时用这个）。
   host: "${SPX_IAM_BIND_HOST-0.0.0.0}"
+  # 监听端口。BIND_PORT 是本进程实际绑定的端口；未设置时回退到 SPX_IAM_PORT（调用方连接的目标端口）。
+  # 两者分开是为了：容器内监听固定端口，而宿主机/其他服务连接的端口可以不同。
   port: "${SPX_IAM_BIND_PORT-${SPX_IAM_PORT-8081}}"
-  # 只信任明确配置的反向代理网段；多个网段用逗号分隔。
+  # 只信任这些网段传来的反向代理头（X-Forwarded-For 等），多个用逗号分隔。
+  # 留空 = 不信任任何代理头，直接取连接来源 IP。前面有 Nginx 时填它的网段，否则限流和审计记录的 IP 是错的。
   trusted_proxy_cidrs: "${SPX_IAM_TRUSTED_PROXY_CIDRS-}"
 
-# PostgreSQL默认连接全局配置；需要独立连接时修改本模块字段即可。
-# 运行、迁移和维护使用同一连接，账号需有本项目的建表和迁移权限。
+# ---- PostgreSQL ----
+# 全平台共用一个 PG 实例、一个库、一个账号。运行、迁移、维护都用这同一组连接。
+# 区分数据靠 schema（iam.）和表名，不靠第二套连接。
+# 该账号需要有建表和迁移权限（迁移由独立的 migrate 命令执行，不给 HTTP 进程 DDL 权限之外的东西）。
 db:
-  host: "${SPX_IAM_POSTGRES_HOST-${SPX_POSTGRES_HOST-127.0.0.1}}"
-  port: "${SPX_IAM_POSTGRES_PORT-${SPX_POSTGRES_PORT-5432}}"
-  name: "${SPX_IAM_POSTGRES_DATABASE-${SPX_POSTGRES_DATABASE-secplexus}}"
-  user: "${SPX_IAM_POSTGRES_USER-${SPX_POSTGRES_USER-secplexus}}"
-  password: "${SPX_IAM_POSTGRES_PASSWORD-${SPX_POSTGRES_PASSWORD-secplexus}}"
-  sslmode: "${SPX_IAM_POSTGRES_SSLMODE-${SPX_POSTGRES_SSLMODE-disable}}"
-  # 完整DSN仅用于需要额外驱动参数的连接；通常填写上面的字段即可。
-  url: "${SPX_IAM_POSTGRES_URL-${SPX_POSTGRES_URL-}}"
+  # 数据库地址。连本机就留默认；连其他机器填 IP 或域名。
+  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
+  # 数据库端口，PG 默认 5432。
+  port: "${SPX_POSTGRES_PORT-5432}"
+  # 数据库名。默认 secplexus，全平台所有模块共用一个库。
+  name: "${SPX_POSTGRES_DATABASE-secplexus}"
+  # 数据库账号。需要能建表、建索引、执行迁移。
+  user: "${SPX_POSTGRES_USER-secplexus}"
+  # 数据库密码。生产环境必须通过环境变量或 .env 覆盖。
+  password: "${SPX_POSTGRES_PASSWORD-secplexus}"
+  # TLS 模式。本机直连用 disable；跨机器/云数据库按对方要求设 require 或 verify-full。
+  sslmode: "${SPX_POSTGRES_SSLMODE-disable}"
+  # 完整连接串。只在需要上面这些字段表达不了的额外驱动参数时才填；填了它就替代上面的分项字段。
+  url: "${SPX_POSTGRES_URL-}"
 
-# Redis共用全局连接，通过前缀和模块/业务模板区分key。
+# ---- Redis ----
+# 全平台共用一个 Redis，用 key 前缀（spx:iam:...）区分模块，不靠第二个实例。
+# IAM 主要用它做登录限流；限流计数丢了会让暴力破解防护短暂失效，所以 Redis 挂了登录写操作要拒绝（不是放行）。
 cache:
-  host: "${SPX_IAM_REDIS_HOST-${SPX_REDIS_HOST-127.0.0.1}}"
-  port: "${SPX_IAM_REDIS_PORT-${SPX_REDIS_PORT-6379}}"
-  # 外部 Redis 需预先建立对应 ACL 用户；自带 Compose 会按同一配置创建。
-  user: "${SPX_IAM_REDIS_USER-${SPX_REDIS_USER-default}}"
-  password: "${SPX_IAM_REDIS_PASSWORD-${SPX_REDIS_PASSWORD-secplexus}}"
-  db: "${SPX_IAM_REDIS_DB-${SPX_REDIS_DB-0}}"
-  url: "${SPX_IAM_REDIS_URL-${SPX_REDIS_URL-}}"
+  # Redis 地址。
+  host: "${SPX_REDIS_HOST-127.0.0.1}"
+  # Redis 端口，默认 6379。
+  port: "${SPX_REDIS_PORT-6379}"
+  # Redis ACL 用户名。Redis 6+ 默认用户名是 default；外部 Redis 需预先建好这个用户并授权。
+  user: "${SPX_REDIS_USER-default}"
+  # Redis 密码。
+  password: "${SPX_REDIS_PASSWORD-secplexus}"
+  # Redis 逻辑库编号（0-15）。不同平台部署可以用不同库号隔离，但同一部署内所有模块用同一个。
+  db: "${SPX_REDIS_DB-0}"
+  # 完整 Redis 连接串（redis://用户:密码@主机:端口/库号）。填了就替代上面的分项字段。
+  url: "${SPX_REDIS_URL-}"
 
-# 各调用服务独立认证，只能请求声明的权限检查；不能代替用户身份。
+# ---- 服务间调用凭证 ----
+# 每个调用方（console 等）有独立 token，且只能请求这里列出的 action。
+# token 同时充当两件事：证明"我是某个内部服务"，以及限定"我能问哪些权限问题"。
+# 它不能替代用户身份——IAM 校验完服务凭证后，还要再校验调用方带来的用户 Cookie。
 service_clients:
   console:
+    # console 调用 IAM 用的凭证，至少要 32 字节。两边必须配成同一个值。
     token: "${SPX_CONSOLE_IAM_TOKEN-}"
+    # console 被允许请求的 action 白名单。不在这个列表里的 action 一律拒绝。
     actions: [iam.organizations.read]
 
-# 账号与登录策略。密码、密钥和调用凭证通过环境变量或私有.env填写。
+# ---- 账号与登录策略 ----
 auth:
+  # 浏览器访问本平台的公开地址，用于校验 CSRF/Origin 和决定 Cookie 的 Secure 属性。
+  # 用 https 开头 → Cookie 加 Secure 和 __Host- 前缀。通过域名或 IP 访问时必须改成实际地址。
   web_origin: "${SPX_WEB_ORIGIN:-http://localhost:${SPX_WEB_PORT-5173}}"
+  # CSRF 签名密钥，必须正好 32 字节（例如 openssl rand -hex 16）。必填，换值会让所有已签发的 CSRF token 失效。
   csrf_key: "${SPX_IAM_CSRF_KEY-}"
+  # 会话空闲超时：多久没操作就失效。默认 30 分钟。
+  # 调大 = 用户少登录，但电脑忘锁时风险窗口更长。
   session_idle_timeout: "${SPX_IAM_SESSION_IDLE_TIMEOUT-30m}"
+  # 会话绝对超时：从登录那一刻算，无论怎么操作到点就失效。默认 8 小时（一个工作日）。
+  # 必须 >= 空闲超时，且不超过 168h（7 天）。
   session_absolute_timeout: "${SPX_IAM_SESSION_ABSOLUTE_TIMEOUT-8h}"
+  # 近期认证窗口：标记为"高风险"的操作（改权限、改组织状态、重置密码等）要求在这个时间内重新输过密码。
+  # 默认 30 分钟。调大 = 少打扰，但他人借用已登录的浏览器时风险更高。
   reauth_window: "${SPX_IAM_REAUTH_WINDOW-30m}"
+  # 同一账号连续登录失败多少次后锁定。默认 5 次。
   login_max_failures: "${SPX_IAM_LOGIN_MAX_FAILURES-5}"
+  # 锁定时长。默认 15 分钟。到期自动解锁，不需要人工干预。
   login_lock_duration: "${SPX_IAM_LOGIN_LOCK_DURATION-15m}"
-# 唯一超级管理员的身份与凭据；平台与运维重置接口均不可修改。
+
+# ---- 唯一超级管理员 ----
+# 由配置指定，不能在应用页面里创建、删除或改密码。改这里要重启所有副本，且所有副本必须一致。
 bootstrap:
+  # 超级管理员用户名。首次启动时创建；之后改名会创建新账号并收回旧账号的超管身份。
   username: "${SPX_IAM_BOOTSTRAP_USERNAME-admin}"
-  # 持续权威凭据；配置变化会同步哈希并撤销旧会话，所有副本须一致。
+  # 超级管理员密码，8-128 个字符。
+  # 这是"持续权威凭据"：改这个值并重启 → 密码被更新、旧会话全部撤销。明文不会出现在响应或日志里。
   password: "${SPX_IAM_BOOTSTRAP_PASSWORD-secplexus}"
+
+# ---- 数据保留期 ----
+# 过期数据由 `iam maintain` 命令分批清理（每次每表最多 1000 条），需要由部署侧定时调度。
+# 调这些值只影响"多久之后可以清理"，不改变已有数据。
 retention:
-  audit_days: "${SPX_IAM_AUDIT_RETENTION_DAYS-180}"
+  # 审计记录保留天数。默认 365 天。
+  # 为什么不能太短：《网络安全法》第二十一条要求网络日志留存不少于六个月，180 天正好是法定下限、没有余量；
+  # 审计类数据业界建议保留一年以上，便于跨年度事件回溯和年度对比。
+  # 注意：清理是物理删除，删掉之后无法追溯"谁在什么时候改了什么"。
+  audit_days: "${SPX_IAM_AUDIT_RETENTION_DAYS-365}"
+  # 已失效会话记录的保留天数。默认 30 天。
+  # 只影响审计排查用的会话历史；会话是否有效由 absolute_expires_at 判定，不依赖这行数据存在。
+  # 调小可以省空间，但排障时看不到更早的登录记录。
   session_days: "${SPX_IAM_SESSION_RETENTION_DAYS-30}"
 
-# 源码/二进制默认写根logs目录。容器可把file设为空，仅保留stdout。
+# ---- 日志 ----
+# 结构化 JSON 日志。容器部署建议 file 留空、只走 stdout，由容器运行时做轮转。
 logging:
+  # 日志级别：debug / info / warn / error。生产用 info，排查问题临时改 debug。
   level: "${SPX_IAM_LOG_LEVEL-info}"
+  # 是否同时输出到 stdout。容器部署必须 true（否则日志丢失）。
   stdout: "${SPX_IAM_LOG_STDOUT-true}"
+  # 日志文件路径。容器里设为空字符串，只保留 stdout。
+  # 多个副本不能写同一个文件——会互相覆盖，每个副本要给不同路径或不写文件。
   file: "${SPX_IAM_LOG_FILE-logs/iam.log}"
+  # 单个日志文件的最大体积（MB），超过就切分。仅在写文件时生效。
   max_size_mb: "${SPX_IAM_LOG_MAX_SIZE_MB-50}"
+  # 保留多少个历史日志文件。仅在写文件时生效。
   max_backups: "${SPX_IAM_LOG_MAX_BACKUPS-5}"
+  # 历史日志最长保留天数，超过就删除。仅在写文件时生效。
   max_age_days: "${SPX_IAM_LOG_MAX_AGE_DAYS-14}"
+  # 是否压缩历史日志。仅在写文件时生效。
   compress: "${SPX_IAM_LOG_COMPRESS-true}"

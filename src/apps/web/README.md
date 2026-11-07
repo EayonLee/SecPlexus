@@ -39,7 +39,7 @@ Root builds use the same filtered environment, falling back to non-secret exampl
 
 For independent Web development, copy [.env.example](.env.example) to `.env.local`, configure the public API origins, and run `pnpm dev` here. This uses Next.js native environment loading and the default port 3000. Keep IAM's public origin consistent with the browser entry. Never place secrets in `NEXT_PUBLIC_*`.
 
-Production uses `next build` followed by `next start`, including server components and API routes. It is not a static export. The Web Dockerfile runs Next.js as an unprivileged Node user. See [configuration](../../../docs/configuration.md), [testing](../../../docs/testing.md), and the [replacement plan](../../../docs/plans/replace-web-template/plan.md).
+Production uses `next build` followed by `next start`, including server components and API routes. It is not a static export. The Web Dockerfile runs Next.js as an unprivileged Node user. See [configuration](../../../docs/configuration.md) and [testing](../../../docs/testing.md).
 
 ## Contracts and skills
 
@@ -93,7 +93,7 @@ IAM lists use Query and the existing TanStack Table with controlled server pagin
 
 ## 可信入口与协议边界
 
-直接使用根 `pnpm dev` / `pnpm preview`。根 `.env` 控制公开 origin 和监听地址，后端地址由实际 Go 配置推导；不需要安装独立入口或配置内部 Web 端口。详见[配置说明](../../../docs/configuration.md#nextjs-web)。
+直接使用根 `pnpm dev` / `pnpm preview`。根 `.env` 控制公开 origin 和监听地址，后端地址由实际 Go 配置推导；不需要安装独立入口或配置内部 Web 端口。详见[配置说明](../../../docs/configuration.md)。
 
 本机链路为浏览器 → Next → IAM/Console。Next 不透传客户端来源头；当前来源限流按代理连接来源计数，多人公网真实来源隔离尚未实现。Cookie/CSRF、Allow/Retry-After、多 Set-Cookie 与 SSE 保留各自协议，IAM API 不绕行 Console。
 
@@ -104,7 +104,7 @@ Axios 负责传输、JSON、超时和取消，平台拦截器按模块 API 声�
 
 The avatar menu exposes Settings and System. Settings has separate Profile and Account routes under the same application shell. Device management is not exposed. System has three task sections: Members & access, Organization management and Audit logs. Capability-filtered tabs retain the existing management deep links and distinguish organization membership from platform account administration; merging navigation never grants access.
 
-The read-only system security overview and its unused API/permission were removed. Session policy, authentication, authorization and personal security controls remain. Organization and form pickers use the existing shadcn Select; toolbar actions use ghost buttons. Semantic status badges share success, danger, warning and information colors across both themes, with visible text. Categories remain neutral. This iteration targets desktop browsers; it does not add mobile-specific layouts or tests. See the [settings plan](../../../docs/plans/settings-experience/spec.md).
+The read-only system security overview and its unused API/permission were removed. Session policy, authentication, authorization and personal security controls remain. Organization and form pickers use the existing shadcn Select; toolbar actions use ghost buttons. Semantic status badges share success, danger, warning and information colors across both themes, with visible text. Categories remain neutral. This iteration targets desktop browsers; it does not add mobile-specific layouts or tests.
 
 
 The single system administrator is configuration-managed. Its identity, profile, status, membership and password cannot be changed through the application or operator password-reset command. Personal settings shows a read-only explanation; account/member lists omit mutation actions for that user. Other accounts keep their normal password and membership workflows. IAM applies its existing bootstrap username/password configuration during explicit initialization and startup, rotating identity versions only when configuration changes. No UI can grant or remove the system administrator identity.

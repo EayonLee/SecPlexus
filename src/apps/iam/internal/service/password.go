@@ -65,7 +65,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	if fresh.UserID != p.UserID || fresh.AuthVersion != current.AuthVersion {
+	if fresh.UserID != p.UserID || fresh.AuthEpoch != current.AuthEpoch {
 		return repository.ErrUnauthenticated
 	}
 
@@ -74,7 +74,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	if err = repository.BumpUserAuthVersion(ctx, tx, userID); err != nil {
+	if err = repository.BumpUserAuthEpoch(ctx, tx, userID); err != nil {
 		return err
 	}
 

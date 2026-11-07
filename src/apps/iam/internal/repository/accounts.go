@@ -33,7 +33,7 @@ func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName stri
 	updates := map[string]any{
 		"display_name": displayName,
 		"status":       status,
-		"auth_version": gorm.Expr("auth_version+1"),
+		"auth_epoch":   gorm.Expr("auth_epoch+1"),
 		"updated_at":   gorm.Expr("now()"),
 	}
 	if email.IsValue() {
@@ -43,11 +43,11 @@ func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName stri
 	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(updates).Error
 }
 
-// BumpUserAuthVersion 增加身份版本，使旧会话失效。
-func BumpUserAuthVersion(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
+// BumpUserAuthEpoch 增加身份版本，使旧会话失效。
+func BumpUserAuthEpoch(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
 	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
-		"auth_version": gorm.Expr("auth_version+1"),
-		"updated_at":   gorm.Expr("now()"),
+		"auth_epoch": gorm.Expr("auth_epoch+1"),
+		"updated_at": gorm.Expr("now()"),
 	}).Error
 }
 

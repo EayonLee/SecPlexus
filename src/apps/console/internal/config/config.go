@@ -53,7 +53,7 @@ func Load(filename string) (Config, error) {
 	}
 
 	if c.IAM.Host == "0.0.0.0" || c.IAM.Host == "::" {
-		return c, errors.New("iam.host (SPX_CONSOLE_IAM_HOST / SPX_IAM_HOST) cannot be a wildcard")
+		return c, errors.New("iam.host (SPX_IAM_HOST) cannot be a wildcard")
 	}
 	c.IAM.BaseURL = (&url.URL{Scheme: "http", Host: net.JoinHostPort(c.IAM.Host, strconv.Itoa(c.IAM.Port))}).String()
 	if err := iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, false); err != nil {

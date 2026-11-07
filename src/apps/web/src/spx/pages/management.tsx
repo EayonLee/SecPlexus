@@ -103,7 +103,7 @@ function OverviewPage() {
   return (
     <div className="flex max-w-3xl flex-col gap-8">
       {canManage ? (
-        <OrganizationNameForm key={data.authz_version} organization={data} />
+        <OrganizationNameForm key={data.authz_epoch} organization={data} />
       ) : (
         <Field className="max-w-xl">
           <FieldLabel htmlFor="organization-name">{t("orgName")}</FieldLabel>
@@ -175,7 +175,7 @@ function OrganizationNameForm({ organization }: { organization: ApiOrganization 
   });
   const form = useForm<z.infer<typeof zUpdateCurrentOrganizationBody>>({
     resolver: zodResolver(zUpdateCurrentOrganizationBody),
-    defaultValues: { name: organization.name, authz_version: organization.authz_version },
+    defaultValues: { name: organization.name, authz_epoch: organization.authz_epoch },
   });
   return (
     <form

@@ -19,7 +19,7 @@
 
 新增业务沿这条链路扩展实际所属模块。Console拥有安全运营业务及必要的运营汇总，不复制IAM CRUD或成为所有模块的强制网关。成熟框架承担通用机制，项目保留权限、状态、并发版本、审计及响应策略。
 
-本次设计参考gin-vue-admin的Gin分组、中间件和集中装配思路，未复制其业务、数据库可编辑API目录、自动改库或代码生成后台。研究版本及取舍见[框架能力记录](../plans/gin-service-refactor/framework-capabilities.md)。
+本次设计参考gin-vue-admin的Gin分组、中间件和集中装配思路，未复制其业务、数据库可编辑API目录、自动改库或代码生成后台。
 
 管理变更后的缓存策略统一在[managementChanged](../../src/apps/web/src/spx/iam/management.ts)：Mutation 的成功回调先刷新身份，再通过 Query 失效当前客户端全部可重取投影（含非活动分页、角色目录和审计），避免只 refetch 当前表格。角色分配目录使用原生 Query 与身份/授权版本缓存键；角色信息表单中的本地副本只用于编辑。含密码的创建/重置操作直接调用 模块 API，成功后复用同一失效策略，凭据不进入 MutationCache。
 

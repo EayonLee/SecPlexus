@@ -118,7 +118,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		return iamclient.Principal{}, sessionError(err)
 	}
 
-	if session.UserID != user.ID || session.AuthVersion != user.AuthVersion || session.TokenHash != TokenHash(token) {
+	if session.UserID != user.ID || session.AuthEpoch != user.AuthEpoch || session.TokenHash != TokenHash(token) {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
@@ -134,7 +134,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 	session, err = q.TouchSession(ctx, repository.TouchSessionParams{
 		ID:          id,
 		TokenHash:   session.TokenHash,
-		AuthVersion: user.AuthVersion,
+		AuthEpoch:   user.AuthEpoch,
 		IdleTimeout: interval(s.Config.Auth.SessionIdleTimeout),
 	})
 	if err != nil {
@@ -147,7 +147,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		Username:        user.Username,
 		DisplayName:     user.DisplayName,
 		IsSuperAdmin:    user.IsSuperAdmin,
-		AuthVersion:     user.AuthVersion,
+		AuthEpoch:       user.AuthEpoch,
 		AuthenticatedAt: session.AuthenticatedAt,
 	}
 	if session.ReauthenticatedAt.Valid {
@@ -196,7 +196,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		return iamclient.Principal{}, sessionError(err)
 	}
 
-	if locked.Status != "active" || locked.AuthVersion != user.AuthVersion {
+	if locked.Status != "active" || locked.AuthEpoch != user.AuthEpoch {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
@@ -218,7 +218,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	var reauthenticated *time.Time
 	if reauthenticate {
 		previous, err := q.LockSession(ctx, oldID)
-		if err != nil || previous.State != "active" || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthVersion != locked.AuthVersion || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
+		if err != nil || previous.State != "active" || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
 			return iamclient.Principal{}, repository.ErrUnauthenticated
 		}
 
@@ -247,7 +247,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		ip = clientIP
 	}
 
-	if err = repository.InsertSession(ctx, tx, newID, user.ID, TokenHash(token), user.AuthVersion, authenticated, reauthenticated, absolute, idle, now, ip, userAgent); err != nil {
+	if err = repository.InsertSession(ctx, tx, newID, user.ID, TokenHash(token), user.AuthEpoch, authenticated, reauthenticated, absolute, idle, now, ip, userAgent); err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -277,7 +277,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		Username:          user.Username,
 		DisplayName:       user.DisplayName,
 		IsSuperAdmin:      user.IsSuperAdmin,
-		AuthVersion:       user.AuthVersion,
+		AuthEpoch:         user.AuthEpoch,
 		AuthenticatedAt:   authenticated,
 		ReauthenticatedAt: reauthenticated,
 	}, nil

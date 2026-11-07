@@ -76,7 +76,7 @@ type Auth struct {
 	SessionAbsoluteTimeout time.Duration `yaml:"session_absolute_timeout"` // 会话最长有效时间。
 	ReauthWindow           time.Duration `yaml:"reauth_window"`            // 二次认证有效时间。
 	LoginMaxFailures       int           `yaml:"login_max_failures"`       // 允许的连续登录失败次数。
-	LoginLockDuration      time.Duration `yaml:"login_lock_duration"`      // 登录失败后的锁定时间。
+	LoginLockDuration      time.Duration `yaml:"login_lock_duration"`      // 登录失败后的失败锁定时间。
 }
 
 // Config 包含 IAM 启动、基础组件和身份管理所需的配置。
