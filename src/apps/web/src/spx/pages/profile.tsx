@@ -6,7 +6,7 @@ import { Building2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
@@ -15,50 +15,66 @@ import { useIdentity } from "../iam/session";
 export function ProfilePage() {
   const t = useTranslations("Account");
   const auth = useIdentity();
+  const initial = auth.principal?.display_name.slice(0, 1) ?? "";
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("profile")}</h1>
-      <Separator />
-      <div className="grid grid-cols-[minmax(0,1fr)_180px] gap-16">
-        <div className="flex max-w-2xl flex-col gap-8">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="profile-name">{t("displayName")}</FieldLabel>
+    <div className="@container/main flex flex-col gap-4 md:gap-6">
+      <header>
+        <h1 className="font-semibold text-2xl tracking-tight">{t("profile")}</h1>
+      </header>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("displayName")}</CardTitle>
+              <CardDescription>{t("profileIdentity")}</CardDescription>
+            </CardHeader>
+            <CardContent>
               <Input id="profile-name" value={auth.principal?.display_name ?? ""} readOnly />
-            </Field>
-          </FieldGroup>
-          <section className="flex flex-col gap-3">
-            <h2 className="text-base font-medium">{t("organizations")}</h2>
-            <Separator />
-            {auth.organizations.length ? (
-              <ul className="divide-y">
-                {auth.organizations.map((org) => (
-                  <li key={org.id}>
-                    <Link
-                      href={`/dashboard?org_id=${encodeURIComponent(org.id)}`}
-                      className="flex items-center gap-3 py-3 text-sm underline-offset-4 hover:underline"
-                    >
-                      <Building2 className="text-muted-foreground size-4" />
-                      {org.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-muted-foreground text-sm whitespace-nowrap">{t("noOrganizations")}</p>
-            )}
-          </section>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("organizations")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {auth.organizations.length ? (
+                <ul className="flex flex-col">
+                  {auth.organizations.map((org, index) => (
+                    <li key={org.id}>
+                      {index > 0 ? <Separator /> : null}
+                      <Link
+                        href={`/dashboard?org_id=${encodeURIComponent(org.id)}`}
+                        className="hover:bg-muted/50 flex items-center gap-3 rounded-md py-3 text-sm underline-offset-4 transition-colors hover:underline"
+                      >
+                        <Building2 className="text-muted-foreground size-4" />
+                        {org.name}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground text-sm">{t("noOrganizations")}</p>
+              )}
+            </CardContent>
+          </Card>
         </div>
-        <aside className="flex flex-col items-start gap-4">
-          <h2 className="text-sm font-medium">{t("profileIdentity")}</h2>
-          <Avatar className="size-32">
-            <AvatarFallback className="text-3xl">{auth.principal?.display_name.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col gap-1">
-            <p className="font-medium">{auth.principal?.display_name}</p>
-            <p className="text-muted-foreground text-sm">@{auth.principal?.username}</p>
-          </div>
-        </aside>
+
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle>{t("profileIdentity")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-4 text-center">
+            <Avatar className="size-24">
+              <AvatarFallback className="text-2xl">{initial}</AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col gap-1">
+              <p className="font-medium">{auth.principal?.display_name}</p>
+              <p className="text-muted-foreground text-sm">@{auth.principal?.username}</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

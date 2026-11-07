@@ -11,9 +11,9 @@ export default function Page() {
 
   const { recentLeadsData } = useCRMData();
   return (
-    <div className="flex flex-col gap-4 md:gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+    <div className="@container/main flex flex-col gap-4 md:gap-6">
+      <header className="flex flex-col gap-1">
+        <h1 className="font-semibold text-2xl tracking-tight">{t("title")}</h1>
         <p className="text-muted-foreground text-sm">{t("sampleNotice")}</p>
       </header>
       <OverviewCards />

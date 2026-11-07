@@ -114,7 +114,7 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
   const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
   await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
     role_ids: [role.id],
-    authz_version: organization.authz_version,
+    authz_epoch: organization.authz_epoch,
   });
   await browserLogin(page, username, initial);
   await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
@@ -274,7 +274,7 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
       const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
       await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
         role_ids: [assignedRole],
-        authz_version: organization.authz_version,
+        authz_epoch: organization.authz_epoch,
       });
     }
     const setup = await request.newContext({ baseURL });
@@ -338,7 +338,7 @@ test("长连接在组织权限撤销后停止访问", async ({ page }) => {
   const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
   await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
     role_ids: [role.id],
-    authz_version: organization.authz_version,
+    authz_epoch: organization.authz_epoch,
   });
   const setup = await request.newContext({ baseURL });
   await mutate(setup, "post", "/api/v1/iam/auth/login", { username, password: initial }, 200);
@@ -571,7 +571,7 @@ test("成员组合框通过服务器搜索和滚动加载后续候选", async ({
       await mutate(admin, "patch", `/api/v1/iam/users/${created.id}`, {
         display_name,
         status: "disabled",
-        auth_version: "1",
+        auth_epoch: "1",
       });
     }
   }

@@ -123,7 +123,11 @@ export async function refreshIdentity(
       acceptIdentity({ ...data, status: "authenticated" });
   } catch (error) {
     if (started !== requestScope().version || (error instanceof DOMException && error.name === "AbortError")) return;
-    if (error instanceof APIError && error.status === 401) return;
+    // 401 的含义是"未登录"，必须落到 anonymous；若停留在 unknown，登录页会把表单保持禁用，用户无法输入。
+    if (error instanceof APIError && error.status === 401) {
+      if (started === requestScope().version && request === identityRequest) clear("anonymous");
+      return;
+    }
     if (error instanceof APIError && error.status === 403 && orgID) {
       try {
         const data = await me();

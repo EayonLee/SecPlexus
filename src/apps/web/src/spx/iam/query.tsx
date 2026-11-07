@@ -21,8 +21,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
 export function identityScope(auth: AuthState) {
   return [
     auth.principal?.session_id,
-    auth.principal?.auth_version,
+    auth.principal?.auth_epoch,
     auth.org_id,
-    auth.organizations.find((org) => org.id === auth.org_id)?.authz_version,
+    auth.organizations.find((org) => org.id === auth.org_id)?.authz_epoch,
   ] as const;
 }

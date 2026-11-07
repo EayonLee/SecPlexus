@@ -2,11 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Theme preset styles: these override CSS variables based on the selected data-theme-preset */
-@import "../styles/presets/brutalist.css";
-@import "../styles/presets/soft-pop.css";
-@import "../styles/presets/tangerine.css";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -55,79 +50,105 @@
   --font-sans: var(--font-sans);
 }
 
-/* Default theme styles (used when no data-theme-preset is set or when 'default' is selected).
-These serve as the fallback; there is no separate default.css file. */
+/* Meta 设计系统令牌（项目根 DESIGN.md）。
+ * 只换取值、不改令牌名，既有 shadcn 组件无需修改。
+ * 取值严格取自 DESIGN.md 的 colors:，暗色沿用 shadcn 的中性灰阶（Meta 未发布暗色令牌，
+ * 见 DESIGN.md "Known Gaps"），保持中性不带色相偏色。 */
 :root {
-  --radius: 0.625rem;
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.75rem;
 
-  /* fonts */
-  --font-sans: var(--font-geist);
+  /* Canvas White / Deep Ink */
+  --background: #ffffff;
+  --foreground: #0a1317;
+  --card: #ffffff;
+  --card-foreground: #0a1317;
+  --popover: #ffffff;
+  --popover-foreground: #0a1317;
+
+  /* Cobalt Primary，白字 5.39:1 */
+  --primary: #0064e0;
+  --primary-foreground: #ffffff;
+  /* Soft Cloud，用作次级/静音底 */
+  --secondary: #f1f4f7;
+  --secondary-foreground: #1c1e21;
+  --muted: #f1f4f7;
+  /* Steel */
+  --muted-foreground: #5d6c7b;
+  --accent: #f1f4f7;
+  --accent-foreground: #0a1317;
+  /* Critical */
+  --destructive: #e41e3f;
+
+  /* Hairline Soft / Hairline */
+  --border: #dee3e9;
+  --input: #ced0d4;
+  /* 实色环：组件用 ring-ring/50 再折半，实色折半后仍有 3.18:1（WCAG 1.4.11）。 */
+  --ring: #1876f2;
+
+  /* DESIGN.md 未定义图表色阶。这里全部取 Meta 品牌色本体（钴蓝家族 + 中性），
+     不引入自造深 navy；每档在 #FFFFFF 上 >= 3:1。 */
+  --chart-1: #0064e0;
+  --chart-2: #1876f2;
+  --chart-3: #0091ff;
+  /* 非品牌档位只用中性灰阶，禁止近黑：#FFFFFF 上需 >= 3:1，
+     #8a8a8a = 3.45:1，#6b6b6b = 5.33:1。 */
+  --chart-4: #8a8a8a;
+  --chart-5: #6b6b6b;
+
+  /* 侧栏与画布同色，靠发丝线分隔 */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0a1317;
+  --sidebar-primary: #0064e0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f4f7;
+  --sidebar-accent-foreground: #0a1317;
+  --sidebar-border: #dee3e9;
+  --sidebar-ring: #1876f2;
+
+  --font-sans: var(--font-montserrat);
   --font-mono: var(--font-geist-mono);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* 中性暗阶：纯灰 #0a0a0a → #171717 → #262626，不带任何色相（官方未发布暗色令牌）。 */
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+
+  /* {colors.primary} 与 {colors.on-primary} 是规范固定值：白字 5.39:1，
+     钴蓝在 #0a0a0a 上 3.68:1（组件阈值 3:1 达标），因此不改造文字色。 */
+  --primary: #0064e0;
+  --primary-foreground: #ffffff;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  /* Critical Strong #f0284a 在暗底 4.82:1 */
+  --destructive: #f0284a;
+
+  --border: #262626;
+  --input: #333333;
+  --ring: #0091ff;
+
+  --chart-1: #0091ff;
+  --chart-2: #4dabff;
+  --chart-3: #0064e0;
+  --chart-4: #a3a3a3;
+  --chart-5: #d4d4d4;
+
+  --sidebar: #0a0a0a;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #0091ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #262626;
+  --sidebar-ring: #0091ff;
 }
 
 @layer base {
@@ -145,38 +166,9 @@ These serve as the fallback; there is no separate default.css file. */
 }
 
 @layer utilities {
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xs {
-    box-shadow: var(--shadow-2xs);
+  html[data-font="montserrat"] body {
+    --font-sans: var(--font-montserrat);
   }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xs {
-    box-shadow: var(--shadow-xs);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-sm {
-    box-shadow: var(--shadow-sm);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow {
-    box-shadow: var(--shadow);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-md {
-    box-shadow: var(--shadow-md);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-lg {
-    box-shadow: var(--shadow-lg);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xl {
-    box-shadow: var(--shadow-xl);
-  }
-
-  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xl {
-    box-shadow: var(--shadow-2xl);
-  }
-
   html[data-font="inter"] body {
     --font-sans: var(--font-inter);
   }
@@ -304,14 +296,17 @@ html:has([data-landing-page]) {
   }
 }
 
-/* Shared status semantics stay legible across the template presets. */
+/*
+ * 状态色独立于强调色，取 DESIGN.md 的 {colors.success} / {colors.attention} /
+ * {colors.meta-link} 家族，并按 WCAG AA 下压到可读区间（原始值在浅底上最低只有 2.01:1）。
+ */
 :root {
-  --status-success: oklch(0.45 0.12 155);
-  --status-warning: oklch(0.47 0.11 65);
-  --status-info: oklch(0.46 0.16 255);
+  --status-success: #17703a;
+  --status-warning: #8a5a00;
+  --status-info: #0b5cad;
 }
 .dark {
-  --status-success: oklch(0.8 0.14 155);
-  --status-warning: oklch(0.82 0.13 80);
-  --status-info: oklch(0.79 0.12 255);
+  --status-success: #5fd37a;
+  --status-warning: #f7b928;
+  --status-info: #7ab4ff;
 }

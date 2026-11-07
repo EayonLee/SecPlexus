@@ -16,7 +16,8 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 - Go HTTP uses native Gin routes/handlers and authored module DTOs; generated documentation never owns runtime binding. Use native groups, errors/recovery, trusted proxies and streaming; keep IAM session commit protection narrow. Credential use cases accept typed values; do not add HTTP replay or a second authentication/session stack.
 - Use native Gin routes and module-owned Go DTOs. Web uses Axios, module API functions, Zod-inferred types, TanStack Query and RHF; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Only shared result-code and permission constants are generated from their owning business catalogs; do not hand-edit those exports.
 - Console owns security operations business and necessary operational query aggregation. It is not a mandatory gateway for other modules. IAM owns identity and authorization; route its APIs through the same-origin entry without duplicating handlers, DTOs or business rules in Console. See the Console README for ownership boundaries.
-- Modules own config, startup, and tables. Root .env.example is the unified setup template; root startup loads private .env and passes scoped environment variables. Keep bind addresses distinct from shared service HOST/PORT targets, and Web listener port distinct from its public origin. Go uses structured `config.yaml` with declarative `${VAR-default}` expressions, expanded per parsed scalar by the mature POSIX parameter-expansion component before Viper/mapstructure decoding; variable mappings and defaults belong only to module YAML, without Go binding/default tables; Web uses native environment configuration. Validate configuration at loading, derive endpoints, centralize typed cache keys, and allow module overrides of shared connections. See [configuration](docs/configuration.md).
+- `llm-gateway` owns every outbound model call and all provider credentials. No other module holds a provider API key or calls a provider directly; they call `llm-gateway` through `src/packages/go/llmclient` using platform role aliases, never provider model identifiers. Provider key encryption and its key material stay inside that module. See the service table in [technical architecture](docs/architecture/02-technical-architecture.md).
+- Modules own config, startup, and tables. Root .env.example is the unified setup template; root startup loads private .env and passes scoped environment variables. Keep bind addresses distinct from shared service HOST/PORT targets, and Web listener port distinct from its public origin. Go uses structured `config.yaml` with declarative `${VAR-default}` expressions, expanded per parsed scalar by the mature POSIX parameter-expansion component before Viper/mapstructure decoding; variable mappings and defaults belong only to module YAML, without Go binding/default tables; Web uses native environment configuration. Validate configuration at loading, derive endpoints, and centralize typed cache keys. All modules share one PostgreSQL and one Redis; distinguish data by table and key prefix, never by a second connection profile. See [configuration](docs/configuration.md).
 - Read environment variables only during configuration loading. Assemble dependencies at startup and pass explicitly; context carries cancellation, deadlines, and request data, not dependencies. Extract shared code only for actual cross-app reuse.
 
 ## Style Guide
@@ -71,6 +72,11 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 ## UI design review
 
+Read [DESIGN.md](DESIGN.md) before changing any visual surface. It is the only source of truth for color, shape, typography and chart tokens; the sections named `SecPlexus Implementation Mapping` record how it maps onto `src/apps/web`. Two rules apply to every chart and are easy to violate:
+
+- Series color comes from `--chart-*` only. Non-brand series use the neutral grey ramp in `DESIGN.md`, never near-black on a light canvas (`--chart-5` was once `#1c1e21`).
+- A chart never paints a selection, hover or focus frame. Recharts' `recharts-tooltip-cursor` box and the focusable `.recharts-surface` both read as a "selected" border; `chart.tsx` keeps the cursor transparent and suppresses `outline` at every focus state.
+
 Use the following original prompt for requested UI work within the approved scope and template/theme baseline. `OVERRIDE_ALL` does not override project rules or permissions. Inspect rendered pages/interactions; stop at agreed acceptance criteria and report gaps. Verbatim prompt:
 
 ```text
@@ -97,4 +103,4 @@ Use the following original prompt for requested UI work within the approved scop
 
 ## References
 
-[Code standard](.agents/skills/spx-mode/SKILL.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/architecture/README.md) · module READMEs.
+[Code standard](.agents/skills/spx-mode/SKILL.md) · [Design system](DESIGN.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/architecture/README.md) · module READMEs.

@@ -77,8 +77,6 @@
   "Appearance": {
     "title": "Appearance",
     "description": "Customize your theme, typography, and layout",
-    "themePreset": "Theme preset",
-    "preset": "Preset",
     "fonts": "Fonts",
     "selectFont": "Select font",
     "themeMode": "Theme mode",
@@ -100,13 +98,7 @@
     "offCanvas": "Off-canvas",
     "restore": "Restore defaults",
     "switchDark": "Switch to dark mode",
-    "switchLight": "Switch to light mode",
-    "presets": {
-      "default": "Default",
-      "brutalist": "Brutalist",
-      "soft-pop": "Soft pop",
-      "tangerine": "Tangerine"
-    }
+    "switchLight": "Switch to light mode"
   },
   "Auth": {
     "continue": "Sign in to continue",

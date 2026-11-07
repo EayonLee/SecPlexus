@@ -48,13 +48,13 @@ export function LoginPage() {
       <div className="absolute top-4 right-4">
         <LanguageSwitcher />
       </div>
-      <div className="bg-primary hidden lg:block lg:w-1/3">
+      <div className="bg-foreground text-background dark:bg-card dark:text-foreground hidden lg:block lg:w-1/3">
         <div className="flex h-full flex-col items-center justify-center p-12 text-center">
           <div className="flex flex-col gap-6">
-            <Command className="text-primary-foreground mx-auto size-12" />
+            <Command className="mx-auto size-12" />
             <div className="flex flex-col gap-2">
-              <h1 className="text-primary-foreground text-5xl font-light">SecPlexus</h1>
-              <p className="text-primary-foreground/80 text-xl">{t("continue")}</p>
+              <h1 className="text-5xl font-light">SecPlexus</h1>
+              <p className="opacity-80 text-xl">{t("continue")}</p>
             </div>
           </div>
         </div>

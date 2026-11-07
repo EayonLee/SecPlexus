@@ -29,7 +29,7 @@ const server = createServer((request, response) => {
             username: "member",
             display_name: "Member",
             is_super_admin: true,
-            auth_version: "1",
+            auth_epoch: "1",
             authenticated_at: "2026-10-29T08:30:00Z",
           },
           organizations: [],
@@ -66,7 +66,7 @@ test("a management mutation invalidates all cached pages and related projections
   });
   await mutation.execute({
     id: "target",
-    body: { display_name: "Changed", status: "active", auth_version: "1" },
+    body: { display_name: "Changed", status: "active", auth_epoch: "1" },
   });
   for (const key of keys) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
   expect(useIdentity.getState().status).toBe("authenticated");

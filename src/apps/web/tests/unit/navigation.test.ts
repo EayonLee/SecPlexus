@@ -7,7 +7,7 @@ const identity: ApiMe = {
   principal: {
     user_id: "u",
     session_id: "s",
-    auth_version: "1",
+    auth_epoch: "1",
     username: "member",
     display_name: "Member",
     is_super_admin: false,

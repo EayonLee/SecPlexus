@@ -10,7 +10,7 @@ test("date-time validation accepts RFC 3339 offsets returned by PostgreSQL", () 
     username: "member",
     display_name: "Member",
     is_super_admin: false,
-    auth_version: "1",
+    auth_epoch: "1",
     authenticated_at: "2026-10-29T08:30:00+08:00",
   };
   expect(zApiPrincipal.safeParse(principal).success).toBe(true);

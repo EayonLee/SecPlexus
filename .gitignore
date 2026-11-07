@@ -20,6 +20,8 @@ logs/
 certs/
 /backups/
 .desloppify/
+.omo/
+.impeccable/
 *.pid
 *.pid.lock
 *.log

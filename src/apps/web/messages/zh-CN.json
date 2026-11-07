@@ -77,8 +77,6 @@
   "Appearance": {
     "title": "主题设置",
     "description": "自定义主题、字体与页面布局",
-    "themePreset": "主题预设",
-    "preset": "选择主题",
     "fonts": "字体",
     "selectFont": "选择字体",
     "themeMode": "外观模式",
@@ -100,13 +98,7 @@
     "offCanvas": "完全收起",
     "restore": "恢复默认设置",
     "switchDark": "切换到深色模式",
-    "switchLight": "切换到浅色模式",
-    "presets": {
-      "default": "默认",
-      "brutalist": "硬朗",
-      "soft-pop": "柔彩",
-      "tangerine": "暖橙"
-    }
+    "switchLight": "切换到浅色模式"
   },
   "Auth": {
     "continue": "登录以继续",

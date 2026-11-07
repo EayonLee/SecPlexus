@@ -35,7 +35,7 @@ export const zApiMember = z.object({
 });
 
 export const zApiOrganization = z.object({
-  authz_version: z.string(),
+  authz_epoch: z.string(),
   id: z.string(),
   name: z.string(),
   slug: z.string(),
@@ -69,7 +69,7 @@ export const zApiPreview = z.object({
 });
 
 export const zApiPrincipal = z.object({
-  auth_version: z.string(),
+  auth_epoch: z.string(),
   authenticated_at: z.iso.datetime({ offset: true }),
   display_name: z.string(),
   is_super_admin: z.boolean(),
@@ -105,7 +105,7 @@ export const zApiRole = z.object({
 });
 
 export const zApiUser = z.object({
-  auth_version: z.string(),
+  auth_epoch: z.string(),
   display_name: z.string(),
   email: z.string().nullable(),
   id: z.string(),
@@ -149,7 +149,7 @@ export const zUpdateUserBody = z
     display_name: z.string().min(1).max(100),
     email: z.string().optional(),
     status: z.enum(["active", "disabled"]),
-    auth_version: z.string().regex(/^[1-9][0-9]*$/),
+    auth_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
@@ -178,14 +178,14 @@ export const zUpdateOrganizationBody = z
   .object({
     name: organizationName,
     status: z.enum(["active", "suspended"]),
-    authz_version: z.string().regex(/^[1-9][0-9]*$/),
+    authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
 export const zUpdateCurrentOrganizationBody = z
   .object({
     name: organizationName,
-    authz_version: z.string().regex(/^[1-9][0-9]*$/),
+    authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
@@ -205,7 +205,7 @@ export const zCreateMemberBody = z
 export const zUpdateMemberBody = z
   .object({
     status: z.enum(["active", "disabled"]),
-    authz_version: z.string().regex(/^[1-9][0-9]*$/),
+    authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
@@ -247,7 +247,7 @@ const zApiRoleIds = z
 export const zSetMemberRolesBody = z
   .object({
     role_ids: zApiRoleIds,
-    authz_version: z.string().regex(/^[1-9][0-9]*$/),
+    authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
 
@@ -261,7 +261,7 @@ export const zPreviewPermissionBody = z
       .optional(),
     membership_id: z.uuid().optional(),
     role_ids: zApiRoleIds.optional(),
-    authz_version: z
+    authz_epoch: z
       .string()
       .regex(/^[1-9][0-9]*$/)
       .optional(),

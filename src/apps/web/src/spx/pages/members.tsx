@@ -61,7 +61,7 @@ export function MembersPage() {
   const remove = useMutation({ mutationFn: deleteMember, onSuccess: managementChanged });
   const assign = useMutation({ mutationFn: setMemberRoles, onSuccess: managementChanged });
   const [selected, setSelected] = useState<string[]>([]);
-  const version = auth.organizations.find((entry) => entry.id === org)?.authz_version;
+  const version = auth.organizations.find((entry) => entry.id === org)?.authz_epoch;
 
   return (
     <div className="flex flex-col gap-4">
@@ -124,7 +124,7 @@ export function MembersPage() {
                             id: member.id,
                             body: zUpdateMemberBody.parse({
                               status: member.status === "active" ? "disabled" : "active",
-                              authz_version: version,
+                              authz_epoch: version,
                             }),
                           });
                         })
@@ -242,7 +242,7 @@ export function MembersPage() {
             await assign.mutateAsync({
               orgId: org,
               id: assigning.id,
-              body: zSetMemberRolesBody.parse({ role_ids: selected, authz_version: version }),
+              body: zSetMemberRolesBody.parse({ role_ids: selected, authz_epoch: version }),
             });
           }}
         >

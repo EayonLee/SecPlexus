@@ -75,9 +75,9 @@ export function DataTable<T extends { id: string }>({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {state.error && <p role="alert">{errors(state.error)}</p>}
-      <div className="overflow-hidden border-y">
+      <div className="overflow-hidden rounded-md border">
         <Table>
-          <TableHeader>
+          <TableHeader className="bg-muted">
             <TableRow>
               {columns.map((column) => (
                 <TableHead key={column.title}>{column.title}</TableHead>

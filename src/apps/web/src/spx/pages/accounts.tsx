@@ -132,7 +132,7 @@ function AccountDialog({
           display_name: dialog.user.display_name,
           email: dialog.user.email ?? "",
           status: dialog.user.status,
-          auth_version: dialog.user.auth_version,
+          auth_epoch: dialog.user.auth_epoch,
         }}
         onClose={onClose}
         onSubmit={async (body) => {
