@@ -6,6 +6,8 @@
 
 | 计划 ID | 需求名称 | 范围 | 状态 | Spec | Plan |
 |---|---|---|---|---|---|
+| [timezone-and-user-preference](timezone-and-user-preference/spec.md) | 全平台时区统一与用户时区偏好 | 服务端固定 UTC；用户级时区偏好存库；显示按用户/浏览器回落 | 已实施 | [spec](timezone-and-user-preference/spec.md) | [plan](timezone-and-user-preference/plan.md) |
+| [test-strategy-and-coverage](test-strategy-and-coverage/spec.md) | 测试规范固化与存量测试补齐 | 改动类型与必需测试层判定表；存量无测试包补齐 | 规范已落地，存量部分完成 | [spec](test-strategy-and-coverage/spec.md) | [plan](test-strategy-and-coverage/plan.md) |
 
 ## 维护规则
 
