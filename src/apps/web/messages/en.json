@@ -137,7 +137,6 @@
     "account": "Account",
     "profileIdentity": "Member profile",
     "timeZone": "Time zone",
-    "timeZoneHint": "Affects how times are displayed. Stored data stays in UTC.",
     "timeZoneBrowser": "Follow browser",
     "timeZoneUtc": "UTC",
     "timeZoneSaved": "Time zone updated",

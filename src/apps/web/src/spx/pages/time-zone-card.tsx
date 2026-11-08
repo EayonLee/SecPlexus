@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Combobox,
   ComboboxContent,
@@ -89,7 +89,6 @@ export function TimeZoneCard() {
     <Card>
       <CardHeader>
         <CardTitle>{t("timeZone")}</CardTitle>
-        <CardDescription>{t("timeZoneHint")}</CardDescription>
       </CardHeader>
       <CardContent>
         <Combobox

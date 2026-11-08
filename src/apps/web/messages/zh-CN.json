@@ -137,7 +137,6 @@
     "account": "账号",
     "profileIdentity": "成员资料",
     "timeZone": "时区",
-    "timeZoneHint": "只影响时间显示，存储始终保持 UTC。",
     "timeZoneBrowser": "跟随浏览器",
     "timeZoneUtc": "UTC",
     "timeZoneSaved": "时区已更新",
