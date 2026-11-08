@@ -55,7 +55,7 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 - Create one short-lived branch per change from the latest `main`; keep review fixes on the same PR branch and delete it after merge.
 - Commits/PRs: `type(scope): summary`; optional scope; types `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
 
-## Default Computer Use Delegation (User Preference)
+## Default Computer Use Delegation
 
 - When a task requires computer use (interacting with a computer or browser interface to inspect, click, type, and so on), the primary agent delegates it to a dedicated subagent by default; use the gpt-6.1-terra (GPT-6.1 Terra) model with xhigh reasoning effort.
 - Reuse the same Computer Use subagent as much as possible within a task to prevent multiple agents from competing for the same interface. The primary agent handles requirements, necessary context handoff, coordination, and acceptance of the result.
@@ -73,6 +73,16 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 - Use next-intl and the Web message catalogs (`en`, `zh-CN`) for UI text, metadata, accessibility labels and stable error/permission labels. Use typed message keys and ICU interpolation/plurals; do not branch on locale in components or concatenate translated sentence fragments.
 - Format dates, numbers, currencies and lists through the locale provider. Keep business identifiers, user-defined names and currency values unchanged. Maintain catalog parity and professional security/operations terminology; copy new template features into this localization model.
+
+## UI copy
+
+Prefer strong visual hierarchy and self-explanatory structure over text. Let layout, visual hierarchy, spacing and clear primary actions speak for themselves; avoid unnecessary secondary labels, explanatory text, supporting copy, descriptive text and redundant microcopy.
+
+- Do not add slogan-style text, instructional paragraphs or per-block help notes by default. When supplementary information is genuinely required, use an info icon with a tooltip instead of persistently visible secondary text.
+- Keep essential form labels and accessible names. A clean interface must not compromise accessibility.
+- Clear consequence warnings are mandatory for dangerous or irreversible actions: deletion, payment, or submitting permanent changes.
+- With explanatory text removed, first-time users must still understand where to click next and what will happen upon interaction.
+- When refactoring an existing interface, remove redundant labels and descriptions first. Refine layout and button copy only if clarity still suffers.
 
 ## UI design review
 
