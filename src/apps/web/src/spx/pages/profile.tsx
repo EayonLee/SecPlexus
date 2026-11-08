@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
 import { useIdentity } from "../iam/session";
+import { TimeZoneCard } from "./time-zone-card";
 
 export function ProfilePage() {
   const t = useTranslations("Account");
@@ -33,6 +34,8 @@ export function ProfilePage() {
               <Input id="profile-name" value={auth.principal?.display_name ?? ""} readOnly />
             </CardContent>
           </Card>
+
+          <TimeZoneCard />
 
           <Card>
             <CardHeader>

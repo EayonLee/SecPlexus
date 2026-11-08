@@ -654,3 +654,148 @@ test("身份确认保留原业务密码且不自动创建成员", async ({ page 
   await member.dispose();
   await api.dispose();
 });
+
+// 时区只影响显示：切换后同一记录的时间必须随之改变，且不依赖浏览器时区。
+test("展示时区可切换并在刷新与清除本地缓存后保持", async ({ page, context }) => {
+  await browserLogin(page, adminUsername, adminPassword);
+
+  await page.goto("/settings/profile");
+  const selector = page.getByRole("combobox", { name: "时区", exact: true });
+  await expect(selector).toBeVisible();
+
+  // 时区只影响显示：同一条审计记录在不同时区下渲染的时间必须不同。
+  // 切换时区本身会写入新审计，所以必须按 request_id 锁定同一条记录再比较。
+  const auditRows = async () => {
+    await page.goto("/management/platform/audit");
+    // 表格先渲染加载占位行；等到真实数据行（五个单元格且带请求 ID）出现再取值。
+    const dataRow = page
+      .locator("tbody tr")
+      .filter({ has: page.locator("td:nth-child(5):not(:empty)") })
+      .first();
+    await expect(dataRow).toBeVisible({ timeout: 20000 });
+    return page.locator("tbody tr").evaluateAll((rows) =>
+      rows
+        .map((row) => {
+          const cells = row.querySelectorAll("td");
+          return { time: (cells[0]?.textContent ?? "").trim(), requestID: (cells[4]?.textContent ?? "").trim() };
+        })
+        .filter((row) => row.requestID !== ""),
+    );
+  };
+
+  const setZone = async (label: string) => {
+    await page.goto("/settings/profile");
+    await selector.click();
+    // 时区候选按输入过滤后截断渲染，必须先输入才能在列表中命中靠后的时区。
+    if (label !== "UTC" && label !== "跟随浏览器") await selector.fill(label);
+    const saved = page.waitForResponse(
+      (response) => response.url().includes("/api/v1/iam/me") && response.request().method() === "PATCH",
+    );
+    await page.locator('[data-slot="combobox-item"]').filter({ hasText: label }).first().click();
+    expect((await saved).status(), `PATCH /iam/me for ${label}`).toBe(200);
+    await expect(page.getByRole("combobox", { name: "时区", exact: true })).toHaveValue(label);
+  };
+
+  const browserZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  expect(browserZone).not.toBe("UTC");
+
+  await setZone("UTC");
+  const utcRows = await auditRows();
+  expect(utcRows.length).toBeGreaterThan(0);
+  // 切换时区后最新一条就是本次写入，作为跨时区比较的锚点。
+  const anchor = utcRows[0];
+  expect(anchor.time).not.toBe("");
+
+  await setZone("Asia/Shanghai");
+
+  // 偏好镜像 cookie 由身份刷新同步，等待它与已保存偏好一致后再断言渲染。
+  await expect
+    .poll(() => page.evaluate(() => document.cookie.includes("spx-timezone-preference=Asia%2FShanghai")), {
+      timeout: 20000,
+    })
+    .toBe(true);
+  const savedZone = await page.evaluate(async () => ({
+    timezone: (await fetch("/api/v1/iam/me", { credentials: "include" }).then((response) => response.json())).data
+      ?.timezone,
+    cookie: document.cookie,
+  }));
+  expect(savedZone.timezone, "saved preference after choosing Asia/Shanghai").toBe("Asia/Shanghai");
+
+  const shanghaiAnchor = (await auditRows()).find((row) => row.requestID === anchor.requestID);
+  expect(shanghaiAnchor, `record ${anchor.requestID} missing after zone change`).toBeDefined();
+  expect(shanghaiAnchor?.time, `rendered with cookie ${savedZone.cookie}`).not.toBe(anchor.time);
+
+  // 刷新后仍按已保存的时区渲染同一条记录。
+  await page.reload();
+  const reloaded = (await auditRows()).find((row) => row.requestID === anchor.requestID);
+  expect(reloaded?.time).toBe(shanghaiAnchor?.time);
+
+  // 偏好真源是数据库：清掉本地镜像 cookie 后首屏仍按已保存时区渲染。
+  await context.clearCookies({ name: "spx-timezone-preference" });
+  await page.reload();
+  const restored = (await auditRows()).find((row) => row.requestID === anchor.requestID);
+  expect(restored?.time).toBe(shanghaiAnchor?.time);
+});
+
+// 组织边界必须由服务端裁决：在 A 组织有权限的成员，不能读取 B 组织的任何管理数据。
+test("跨组织访问被服务端拒绝而不是仅在前端隐藏", async ({ page }) => {
+  const admin = await adminClient();
+  const me = (await (await admin.get("/api/v1/iam/me")).json()).data;
+  const owned = me.organizations[0];
+  const suffix = randomBytes(4).toString("hex");
+
+  // 用管理员身份创建第二个组织，确认它确实存在但对其他成员不可访问。
+  const foreign = await mutate(
+    admin,
+    "post",
+    "/api/v1/iam/organizations",
+    { name: `边界组织 ${suffix}`, slug: `boundary-${suffix}`, admin_user_id: me.principal.user_id },
+    201,
+  );
+
+  // 新建一个只属于 A 组织的普通成员。
+  const username = `boundary_${suffix}`;
+  const password = "boundary member password";
+  const role = await mutate(
+    admin,
+    "post",
+    `/api/v1/iam/orgs/${owned.id}/roles`,
+    { code: `boundary_${suffix}`, name: "组织只读" },
+    201,
+  );
+  await mutate(admin, "put", `/api/v1/iam/orgs/${owned.id}/roles/${role.id}/permissions`, {
+    permissions: ["iam.organizations.read"],
+    version: "1",
+  });
+  const member = await mutate(
+    admin,
+    "post",
+    `/api/v1/iam/orgs/${owned.id}/members`,
+    { username, display_name: "边界成员", password },
+    201,
+  );
+  const organization = (await (await admin.get(`/api/v1/iam/orgs/${owned.id}`)).json()).data;
+  await mutate(admin, "put", `/api/v1/iam/orgs/${owned.id}/members/${member.id}/roles`, {
+    role_ids: [role.id],
+    authz_epoch: organization.authz_epoch,
+  });
+
+  await browserLogin(page, username, password);
+
+  // 自己组织的组织信息可读。
+  const ownRead = await page.request.get(`/api/v1/iam/orgs/${owned.id}`);
+  expect(ownRead.status()).toBe(200);
+
+  // 另一个组织的管理数据必须被拒绝，而不是返回空列表。
+  for (const path of [
+    `/api/v1/iam/orgs/${foreign.id}`,
+    `/api/v1/iam/orgs/${foreign.id}/members`,
+    `/api/v1/iam/orgs/${foreign.id}/roles`,
+    `/api/v1/iam/orgs/${foreign.id}/audit-events`,
+  ]) {
+    const response = await page.request.get(path, { headers: { Origin: baseURL } });
+    expect(response.status(), `GET ${path} as foreign member`).toBe(403);
+  }
+
+  await admin.dispose();
+});

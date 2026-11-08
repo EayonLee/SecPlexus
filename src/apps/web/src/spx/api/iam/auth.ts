@@ -5,6 +5,8 @@ import {
   zApicsrfContext,
   zApiLoginResponse,
   zApiMe,
+  type zApiProfileUpdateBody,
+  zApiProfileUpdateResponse,
   type zChangePasswordBody,
   type zLoginBody,
   type zReauthenticateBody,
@@ -20,3 +22,5 @@ export const changePassword = (body: z.infer<typeof zChangePasswordBody>) =>
   request({ method: "POST", url: "/api/v1/iam/me/password", data: body }, z.void(), 204);
 export const me = (orgId?: string, signal?: AbortSignal) =>
   request({ url: "/api/v1/iam/me", params: orgId ? { org_id: orgId } : undefined, signal }, zApiMe);
+export const updateProfile = (body: z.infer<typeof zApiProfileUpdateBody>) =>
+  request({ method: "PATCH", url: "/api/v1/iam/me", data: body }, zApiProfileUpdateResponse);

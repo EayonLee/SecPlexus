@@ -20,6 +20,7 @@ func RegisterUserRoutes(engine gin.IRouter, server *handler.Server) {
 	engine.POST("/api/v1/iam/auth/reauthenticate", server.Reauthenticate)
 	engine.POST("/api/v1/iam/auth/logout", server.Logout)
 	engine.GET("/api/v1/iam/me", server.Me)
+	engine.PATCH("/api/v1/iam/me", server.UpdateProfile)
 	engine.POST("/api/v1/iam/me/password", server.ChangePassword)
 	engine.GET("/api/v1/iam/users", server.ListUsers)
 	engine.POST("/api/v1/iam/users", server.CreateUser)

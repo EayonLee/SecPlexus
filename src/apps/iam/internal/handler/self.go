@@ -84,3 +84,32 @@ func (s *Server) Logout(c *gin.Context) {
 	s.Security.ClearCSRF(w)
 	result.NoContent(w)
 }
+
+// UpdateProfile 更新本人展示时区偏好，未提交该字段时保持不变。
+func (s *Server) UpdateProfile(c *gin.Context) {
+	w := c.Writer
+	r := c.Request
+	var input model.APIProfileUpdate
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
+
+	if input.TimeZone != nil {
+		if err := s.Service.UpdateTimeZone(r.Context(), *input.TimeZone, requestID(r)); err != nil {
+			httpx.Reject(c, err)
+			return
+		}
+
+		result.Success(w, gin.H{"timezone": *input.TimeZone})
+		return
+	}
+
+	identityView, err := s.Service.Identity(r.Context(), "")
+	if err != nil {
+		httpx.Reject(c, err)
+		return
+	}
+
+	result.Success(w, gin.H{"timezone": identityView["timezone"]})
+}

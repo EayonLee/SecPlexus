@@ -11,6 +11,7 @@ import { openGraphLocales } from "@/i18n/config";
 import { fontVars } from "@/lib/fonts/registry";
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { ThemeBootScript } from "@/scripts/theme-boot";
+import { TimeZoneBootScript } from "@/scripts/timezone-boot";
 import { PreferencesStoreProvider } from "@/stores/preferences/preferences-provider";
 
 import "./globals.css";
@@ -46,6 +47,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       <head>
         {/* Applies theme and layout preferences on load to avoid flicker and unnecessary server rerenders. */}
         <ThemeBootScript />
+        <TimeZoneBootScript />
       </head>
       <body className={`${fontVars} min-h-screen antialiased`}>
         <NextIntlClientProvider locale={locale} messages={messages}>

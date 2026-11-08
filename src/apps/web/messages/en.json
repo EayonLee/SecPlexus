@@ -114,7 +114,7 @@
     "username": "Username",
     "displayName": "Display name",
     "accountId": "Account ID",
-    "signedInAt": "Signed in at (UTC)",
+    "signedInAt": "Signed in at",
     "security": "Account security",
     "passwordMismatch": "The new passwords do not match",
     "passwordChanged": "Password updated — sign in again",
@@ -135,7 +135,14 @@
     "configurationManaged": "Managed by system configuration",
     "configurationPasswordHelp": "Change this password in IAM configuration",
     "account": "Account",
-    "profileIdentity": "Member profile"
+    "profileIdentity": "Member profile",
+    "timeZone": "Time zone",
+    "timeZoneHint": "Affects how times are displayed. Stored data stays in UTC.",
+    "timeZoneBrowser": "Follow browser",
+    "timeZoneUtc": "UTC",
+    "timeZoneSaved": "Time zone updated",
+    "timeZoneEmpty": "No matching time zone",
+    "timeZoneFailed": "Could not update time zone"
   },
   "Management": {
     "username": "Username",
@@ -163,7 +170,7 @@
     "orgNameSaved": "Organization details updated",
     "orgName": "Organization name",
     "saveOrg": "Save organization",
-    "time": "Time (UTC)",
+    "time": "Time",
     "actor": "Actor",
     "system": "System",
     "action": "Action",

@@ -114,7 +114,7 @@
     "username": "用户名",
     "displayName": "显示名称",
     "accountId": "账号 ID",
-    "signedInAt": "本次登录（UTC）",
+    "signedInAt": "登录时间",
     "security": "账号安全",
     "passwordMismatch": "两次输入的新密码不一致",
     "passwordChanged": "密码已更新，请重新登录",
@@ -135,7 +135,14 @@
     "configurationManaged": "密码由系统配置管理",
     "configurationPasswordHelp": "请在 IAM 配置中更新密码",
     "account": "账号",
-    "profileIdentity": "成员资料"
+    "profileIdentity": "成员资料",
+    "timeZone": "时区",
+    "timeZoneHint": "只影响时间显示，存储始终保持 UTC。",
+    "timeZoneBrowser": "跟随浏览器",
+    "timeZoneUtc": "UTC",
+    "timeZoneSaved": "时区已更新",
+    "timeZoneEmpty": "没有匹配的时区",
+    "timeZoneFailed": "时区更新失败"
   },
   "Management": {
     "username": "用户名",
@@ -163,7 +170,7 @@
     "orgNameSaved": "组织名称已更新",
     "orgName": "组织名称",
     "saveOrg": "保存组织信息",
-    "time": "时间（UTC）",
+    "time": "时间",
     "actor": "操作者",
     "system": "系统",
     "action": "操作",
