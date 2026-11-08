@@ -513,3 +513,128 @@ func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
 		t.Fatal("rejected input changed the role")
 	}
 }
+
+// TestProfileTimeZonePreference 固定服务端时区契约：只接受合法表达，
+// 写入后可读回，非法值拒绝，且不因该偏好撤销会话。
+func TestProfileTimeZonePreference(t *testing.T) {
+	f := newFixture(t, nil)
+	public, initial := f.public, f.initial
+
+	admin := newAPIClient(t, public.URL, public.URL)
+	admin.login(f.admin, initial)
+
+	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
+	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	orgPath := "/api/v1/iam/orgs/" + org
+
+	memberPassword := "isolated timezone password"
+	admin.request("POST", orgPath+"/members", map[string]string{"username": f.member, "display_name": "时区成员", "password": memberPassword}, 201)
+
+	client := newAPIClient(t, public.URL, public.URL)
+	client.login(f.member, memberPassword)
+
+	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != nil && got != "" {
+		t.Fatalf("fresh account timezone = %v, want empty", got)
+	}
+
+	sessionBefore := client.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["session_id"]
+
+	for _, value := range []string{"utc", "browser", "Asia/Shanghai", "America/Los_Angeles"} {
+		written := client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": value}, 200)
+		if written["timezone"] != value {
+			t.Fatalf("PATCH response timezone = %v, want %v", written["timezone"], value)
+		}
+
+		if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != value {
+			t.Fatalf("GET /me timezone = %v, want %v", got, value)
+		}
+	}
+
+	for _, value := range []string{"Not/AZone", "../../etc/passwd", "Shanghai"} {
+		client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": value}, 400)
+	}
+
+	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != "America/Los_Angeles" {
+		t.Fatalf("rejected values changed stored timezone to %v", got)
+	}
+
+	cleared := client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": ""}, 200)
+	if cleared["timezone"] != "" {
+		t.Fatalf("clearing timezone returned %v", cleared["timezone"])
+	}
+
+	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != nil && got != "" {
+		t.Fatalf("cleared timezone = %v, want empty", got)
+	}
+
+	if sessionAfter := client.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["session_id"]; sessionBefore != sessionAfter {
+		t.Fatal("timezone preference must not rotate the session")
+	}
+}
+
+// TestCrossOrganizationAccessIsDenied 固定长期安全契约：组织成员不能读写
+// 其它组织的资源，即使持有本组织的全部管理权限。
+func TestCrossOrganizationAccessIsDenied(t *testing.T) {
+	f := newFixture(t, nil)
+	admin := newAPIClient(t, f.public.URL, f.public.URL)
+	admin.login(f.admin, f.initial)
+	admin.login(f.admin, f.password)
+
+	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
+	homeOrg := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+
+	memberPassword := "cross org member password"
+	admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/members",
+		map[string]string{"username": f.member, "display_name": "跨组织成员", "password": memberPassword}, 201)
+
+	// 第二个组织由超级管理员创建，成员不属于它。
+	foreignAdmin := admin.request("POST", "/api/v1/iam/users",
+		map[string]any{"username": "foreign_admin_" + uuid.NewString()[:8], "display_name": "外部管理员", "password": "foreign admin password"}, 201)
+	foreign := admin.request("POST", "/api/v1/iam/organizations",
+		map[string]any{"slug": "foreign-" + uuid.NewString()[:8], "name": "外部组织",
+			"admin_user_id": foreignAdmin["id"]}, 201)
+	foreignOrg := foreign["id"].(string)
+	if foreignOrg == homeOrg {
+		t.Fatal("fixture produced identical organizations")
+	}
+
+	member := newAPIClient(t, f.public.URL, f.public.URL)
+	member.login(f.member, memberPassword)
+
+	// 读写外部组织的成员、角色与审计都必须拒绝，不能因为持有本组织权限而通过。
+	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/members", nil, 403)
+	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/roles", nil, 403)
+	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/audit-events", nil, 403)
+	member.request("PATCH", "/api/v1/iam/orgs/"+foreignOrg, map[string]any{"name": "被改名", "authz_epoch": "1"}, 403)
+	member.request("POST", "/api/v1/iam/orgs/"+foreignOrg+"/roles", map[string]any{"code": "sneaky", "name": "偷建"}, 403)
+
+	// 用外部组织 org_id 请求身份上下文同样被拒，说明边界在服务端而非菜单。
+	member.request("GET", "/api/v1/iam/me?org_id="+foreignOrg, nil, 403)
+
+	// 本组织仍有有效身份，排除「会话已失效」这一替代解释。
+	if got := member.request("GET", "/api/v1/iam/me", nil, 200); got["principal"].(map[string]any)["user_id"] == "" {
+		t.Fatal("member session became invalid during cross-organization checks")
+	}
+}
+
+// TestManagementBindingRejectsInvalidInputBeforeService 固定管理接口的输入边界：
+// 非法 body 与越界分页必须在触达业务用例之前被拒绝，返回 invalid_request 而不是 500。
+func TestManagementBindingRejectsInvalidInputBeforeService(t *testing.T) {
+	f := newFixture(t, nil)
+	admin := newAPIClient(t, f.public.URL, f.public.URL)
+	admin.login(f.admin, f.initial)
+	admin.login(f.admin, f.password)
+
+	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
+	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	base := "/api/v1/iam/orgs/" + org
+
+	admin.request("POST", base+"/roles", map[string]any{"code": "", "name": ""}, 400)
+	admin.request("PATCH", base+"/roles/00000000-0000-4000-8000-000000000000", map[string]any{"name": "Role", "status": "active"}, 400)
+	admin.request("PUT", base+"/roles/00000000-0000-4000-8000-000000000000/permissions", map[string]any{"permissions": []string{}, "version": "abc"}, 400)
+	admin.request("POST", "/api/v1/iam/organizations", map[string]any{"name": "", "slug": "", "admin_user_id": ""}, 400)
+	admin.request("GET", "/api/v1/iam/organizations?limit=1000", nil, 400)
+	admin.request("GET", "/api/v1/iam/audit-events?offset=-1", nil, 400)
+	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": ""}, 400)
+	admin.request("GET", "/api/v1/iam/orgs/not-a-uuid/members", nil, 400)
+}
