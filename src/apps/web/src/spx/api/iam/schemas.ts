@@ -89,6 +89,15 @@ export const zApiMe = z.object({
   organizations: z.array(zApiOrganization),
   platform_capabilities: z.array(z.string()),
   principal: zApiPrincipal,
+  timezone: z.string().nullish(),
+});
+
+export const zApiProfileUpdateBody = z.object({
+  timezone: z.string().max(64),
+});
+
+export const zApiProfileUpdateResponse = z.object({
+  timezone: z.string().nullish(),
 });
 
 export const zApiRole = z.object({

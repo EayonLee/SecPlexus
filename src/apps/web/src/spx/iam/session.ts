@@ -3,6 +3,7 @@
 import { AxiosHeaders } from "axios";
 import { create } from "zustand";
 
+import { timeZonePreferenceCookieValue } from "@/i18n/timezone-cookie";
 import { APIError, http } from "@/spx/api/client";
 import {
   authContext,
@@ -25,6 +26,14 @@ let csrfToken = "";
 let csrfPending: Promise<string> | undefined;
 let channel: BroadcastChannel | undefined;
 
+/** syncTimeZonePreferenceCookie 让服务端渲染期的时区镜像与已保存偏好一致。 */
+function syncTimeZonePreferenceCookie(value: string | null | undefined) {
+  if (typeof document === "undefined") return;
+
+  // biome-ignore lint/suspicious/noDocumentCookie: 服务端渲染期需要该镜像，偏好真源仍在数据库。
+  document.cookie = timeZonePreferenceCookieValue(value);
+}
+
 /** advance 取消旧范围请求和投影，不改变尚未失效的服务端身份。 */
 function advance() {
   advanceRequestScope();
@@ -36,6 +45,7 @@ function advance() {
 
 function clear(status: AuthState["status"] = "anonymous") {
   advance();
+  syncTimeZonePreferenceCookie(null);
   useIdentity.setState({ ...initialAuth, status }, true);
 }
 
@@ -49,6 +59,7 @@ function acceptIdentity(data: AuthState) {
       JSON.stringify(previous.platform_capabilities) !== JSON.stringify(data.platform_capabilities))
   )
     advance();
+  syncTimeZonePreferenceCookie(data.timezone);
   useIdentity.setState(data, true);
 }
 

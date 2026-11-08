@@ -19,6 +19,12 @@ type APIChangePasswordInput struct {
 	OldPassword string `json:"old_password" binding:"required"`
 }
 
+// APIProfileUpdate 绑定本人资料更新；时区留空表示清除偏好。
+// 指针用于区分“未提交该字段”和“显式清空”，未提交时保留原值。
+type APIProfileUpdate struct {
+	TimeZone *string `json:"timezone,omitempty" binding:"omitempty,max=64"`
+}
+
 // APICurrentOrganizationUpdate 绑定当前组织名称及并发版本。
 type APICurrentOrganizationUpdate struct {
 	AuthzEpoch int64            `json:"authz_epoch,string" binding:"required,min=1"`

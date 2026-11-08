@@ -50,6 +50,13 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 	}
 
 	result["organizations"] = organizations
+
+	timeZone, err := repository.UserTimeZone(ctx, s.Store.DB, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	result["timezone"] = timeZone
 	catalog, err := repository.Permissions(ctx, s.Store.DB)
 	if err != nil {
 		return nil, err
