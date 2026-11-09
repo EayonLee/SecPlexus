@@ -13,7 +13,7 @@
 
 ## PostgreSQL：默认一个实例、一个库、一组账号
 
-全局只维护`SPX_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/SSLMODE`。默认数据库账号/库名为 `secplexus`，密码为 `secplexus`。YAML 的参数声明将这组环境值应用到模块 db 字段；应用运行、迁移、维护都使用同一连接，不创建模块用户或另一套运维账号。
+全平台只维护`SPX_POSTGRES_HOST/PORT/DATABASE/USER/PASSWORD/SSLMODE`。默认数据库账号/库名为 `secplexus`，密码为 `secplexus`。YAML 的参数声明将这组环境值应用到模块 db 字段；应用运行、迁移、维护都使用同一连接，不创建模块用户或另一套运维账号。
 
 账号需要具备本项目schema和版本表的建表、迁移权限。应用层的鉴权与审计事务保持不变；不再依靠单独数据库账号限制HTTP进程的DDL权限。
 
@@ -23,11 +23,23 @@
 
 完整DSN只作为高级覆盖`SPX_POSTGRES_URL`保留，用于特殊驱动参数；根示例不要求填写它。
 
+### 数据库迁移：按模块拆分，三条纪律
+
+迁移 SQL 放在每个模块自己的 `migrations/` 目录（如 `src/apps/iam/migrations/`），随模块二进制经 `go:embed` 发布，由各自模块的 `migrate` 命令执行；不建中央迁移目录或中央迁移器。理由：模块是独立部署单元，Go 的 embed 规则也无法引用包目录之外的文件；GitHub 大型项目（Sourcegraph、Supabase、Temporal）的规律一致——迁移目录的拆分单位是可部署单元/数据库归属，不是「库在同一个实例」。
+
+所有模块共享一个 PostgreSQL，因此迁移必须遵守三条纪律：
+
+1. **版本表放自己 schema 里，命名 `<module>_goose_db_version`**（IAM 现行 `iam_goose_db_version` 即此约定）。一个模块的迁移失败只污染自己的版本历史，不影响其他模块部署。
+2. **统一使用 goose Provider + `WithSessionLocker`**。goose 的 advisory lock ID 是固定常量（`crc64("goose")`），所有模块的迁移天然互斥排队，避免并发 DDL；不要绕开锁自造并行迁移。
+3. **禁止跨 schema 外键**。模块 A 的迁移不得 `REFERENCES` 模块 B 的表——那会把两个模块的迁移顺序、回滚顺序和表生命周期绑死。跨模块引用存标识符，关系通过对方模块的 API 解析。此规则由 `pnpm catalogs:check` 中的 `scripts/migrations-check.mjs` 机器强制：跨 schema `REFERENCES` 或一个模块触碰多个 schema 都会使检查失败。
+
+根启动按固定顺序逐模块执行 `migrate`（见 `scripts/start.mjs`）；新增模块时在该处登记，且模块间不得有共享库对象的迁移依赖。
+
 ## Redis：统一连接与key模板
 
 连接使用`SPX_REDIS_HOST/PORT/USER/PASSWORD/DB`，默认密码为 `secplexus`。用户名默认 `default`（没有 root 账号），可通过 `cache.user` 或 `SPX_REDIS_USER` 修改。外部 Redis 应预先创建该 ACL 用户并授予应用所需权限；普通应用启动不会改外部用户。完整地址仍可通过 `SPX_REDIS_URL=redis://用户名:密码@主机:端口/库号` 指定，URL 中的特殊字符须编码；key 前缀固定为 spx，不提供配置覆盖。
 
-[cache/key](../src/packages/go/cache/key/iam.go)集中定义已实现的类型化模板，调用Format构建key，不在业务代码中散落字符串拼接：
+[cache/key](../../src/packages/go/cache/key/iam.go)集中定义已实现的类型化模板，调用Format构建key，不在业务代码中散落字符串拼接：
 
 ```text
 spx:iam:ratelimit:ip:<sha256>
@@ -73,7 +85,7 @@ db:
   password: "${SPX_POSTGRES_PASSWORD-secplexus}"
 ```
 
-根入口先按“进程环境 > 根.env”合并并过滤到所属模块。Go字段优先级为：**进程环境 > 根.env > YAML字面值**；模块 YAML 是默认值的唯一来源，不维护另一份 Viper 默认表。显式空值保留，随后进行类型及业务配置校验。仅 YAML 字段声明的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
+根入口先按“进程环境 > 根.env”合并并过滤到所属模块。根`.env`遵循 dotenv 语义（由 Node `node:util` 的`parseEnv`解析）：**未加引号时，值中的`#`及其后内容被当作注释丢弃**。含`#`、空格或其它特殊字符的值必须用单引号或双引号包裹，例如`SPX_IAM_BOOTSTRAP_PASSWORD="SecPlexus#2026"`；反斜杠转义`\#`不生效。校验错误会报出实际接收到的字符数以暴露此类截断，例如`bootstrap.password must contain a valid 12–128 character administrator password (got 9)`。Go字段优先级为：**进程环境 > 根.env > YAML字面值**；模块 YAML 是默认值的唯一来源，不维护另一份 Viper 默认表。显式空值保留，随后进行类型及业务配置校验。仅 YAML 字段声明的变量参与映射，不自动扫描任意环境键。模块独立运行不读取根.env。
 
 完整DSN字段`SPX_POSTGRES_URL` / `SPX_REDIS_URL`优先于分项字段；配置了非空URL时不再组合分项字段。`SSLMODE` 与 PostgreSQL 驱动的 `sslmode` 语义一致。
 

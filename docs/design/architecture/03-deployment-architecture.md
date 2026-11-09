@@ -11,7 +11,7 @@
                         └▶ Redis（限流、会话）
 
 ② 规划中：数据链路
-   collector ──▶ Kafka ──▶ correlator ──▶ PostgreSQL（告警/案件）
+   ingestor ──▶ Kafka ──▶ correlator ──▶ PostgreSQL（告警/案件）
         └────────────────────────────────▶ ClickHouse（原始日志、遥测）
                         └▶ object-storage（raw 归档）
 
@@ -47,7 +47,7 @@ flowchart LR
     I --> P[(PostgreSQL 业务数据)]
     I --> R[(Redis 限流/会话)]
     subgraph 规划中的数据链路
-      COL[collector] --> K[(Kafka)]
+      COL[ingestor] --> K[(Kafka)]
       K --> COR[correlator]
       COR --> P
       COL --> CH[(ClickHouse 遥测)]
@@ -86,7 +86,7 @@ PG/Redis仅绑定本机端口并持久化卷；内部IAM/Console不映射宿主�
 - 不同平台部署通过PG/Redis连接及部署原生资源隔离，不要求应用实例ID。
 - 现有Compose是可执行交付。Kubernetes/Helm、多架构发布及其他业务镜像尚未交付，有明确需求后单独设计和验证。
 
-字段、初始化、独立启动及日志示例统一见[配置指南](../configuration.md)，身份与备份恢复见[IAM README](../../src/apps/iam/README.md)，测试入口见[测试指南](../testing.md)。
+字段、初始化、独立启动及日志示例统一见[配置指南](../../development/configuration.md)，身份与备份恢复见[IAM README](../../../src/apps/iam/README.md)，测试入口见[测试指南](../../development/testing.md)。
 
 ## Web 上游与项目接入
 
@@ -94,4 +94,4 @@ Web 使用 Next.js 与统一 shadcn 组件和视觉配置。项目实际入口�
 
 Web 镜像使用 Node 24，以非特权用户运行 Next.js，容器监听 8080。公开 API 由新增的 Next Route Handler 流式转发至 IAM/Console；服务凭证不进入 Web 进程，代理不转发外部 Authorization 头。容器通过同名 SPX_IAM_HOST/PORT 与 SPX_CONSOLE_HOST/PORT 指定服务位置。Next 需要服务端运行时，不使用静态导出或旧 Nginx 静态镜像。规划中的 `llm-gateway` 接入同源入口时沿用此模式，届时再补其服务位置变量与代理白名单。
 
-Console 的业务与接口归属见 [Console README](../../src/apps/console/README.md)。同源入口按模块路由，IAM API 不经 Console 重写；后续模板功能按需接入，不恢复整套演示导航。
+Console 的业务与接口归属见 [Console README](../../../src/apps/console/README.md)。同源入口按模块路由，IAM API 不经 Console 重写；后续模板功能按需接入，不恢复整套演示导航。

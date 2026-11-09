@@ -31,7 +31,7 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 | `scripts/` 和 `deploy/` | 开发、构建、测试与部署工具 |
 | [`docs/plans/`](docs/plans/README.md) | 需求、实施计划、审核状态与验证证据 |
 
-先读受影响模块的 README 和已有实现。[架构文档](docs/architecture/README.md) 中保留了早期平台设想，请注意版本说明；当前实现以模块文档和已批准的规格为准。Console 尚未实现的业务工作流，以及界面演示页面，不能当作已交付的产品能力。
+先读受影响模块的 README 和已有实现。[架构文档](docs/design/architecture/README.md) 中保留了早期平台设想，请注意版本说明；当前实现以模块文档和已批准的规格为准。Console 尚未实现的业务工作流，以及界面演示页面，不能当作已交付的产品能力。
 
 ## 准备开发环境
 
@@ -46,7 +46,7 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 | PostgreSQL 与 Redis | 可访问的开发实例；仓库 Compose 使用 PostgreSQL 16 与 Redis 7 |
 | Docker 与 Compose | 选择容器依赖或容器测试时需要 |
 
-模板字体使用 `next/font/google`，首次 Web 构建需要访问 Google Fonts 的样式与字体地址。已有缓存的构建不能证明这项网络条件满足；下载失败时参照[构建排障](docs/configuration.md#首次构建与网络排障)，不要通过更换模板字体掩盖网络问题。
+模板字体使用 `next/font/google`，首次 Web 构建需要访问 Google Fonts 的样式与字体地址。已有缓存的构建不能证明这项网络条件满足；下载失败时参照[构建排障](docs/development/configuration.md#首次构建与网络排障)，不要通过更换模板字体掩盖网络问题。
 
 先将仓库 Fork 到自己的 GitHub 账号，再克隆 Fork，并将项目仓库添加为 `upstream`。将 `YOUR_USERNAME` 替换为你的 GitHub 用户名：
 
@@ -64,7 +64,7 @@ test -e .env || cp .env.example .env
 chmod 600 .env
 ```
 
-在 `.env` 中填写开发数据库连接、配置托管管理员密码、CSRF 密钥和服务调用凭证，字段要求与反向代理访问配置见[配置指南](docs/configuration.md)。不要将 `.env`、凭据和日志纳入版本控制。
+在 `.env` 中填写开发数据库连接、配置托管管理员密码、CSRF 密钥和服务调用凭证，字段要求与反向代理访问配置见[配置指南](docs/development/configuration.md)。不要将 `.env`、凭据和日志纳入版本控制。
 
 可以连接已有的开发 PostgreSQL 与 Redis，也可以显式创建仓库提供的依赖：
 
@@ -133,7 +133,7 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 
 ## 验证变更
 
-行为变更从一个聚焦的失败测试开始，选择能可靠保护该行为的最低层：单元测试覆盖规则和边界，集成测试覆盖真实组件契约，E2E 覆盖核心用户流程与访问边界。隔离、清理和定向执行方式见[测试指南](docs/testing.md)。
+行为变更从一个聚焦的失败测试开始，选择能可靠保护该行为的最低层：单元测试覆盖规则和边界，集成测试覆盖真实组件契约，E2E 覆盖核心用户流程与访问边界。隔离、清理和定向执行方式见[测试指南](docs/development/testing.md)。
 
 在仓库根目录执行与变更相关的检查：
 
@@ -207,4 +207,4 @@ PR 描述说明问题、变更后的行为、审查所需的设计决策和实�
 
 使用Gin原生Handler/中间件与模块自有DTO。IAM凭证用例接收类型化值，Argon2id、SCS、CSRF和Redis limiter分别负责机制；数据使用GORM投影/事务与Goose迁移，配置/命令使用Viper、mapstructure和Cobra。参照[实际角色管理链路](docs/development/role-management.md)，已有框架能力不要再套一层通用工具或影子路由。
 
-Web使用Axios模块API和Zod推导类型。Query管理服务端状态，RHF和Zod管理表单；密码操作不进入MutationCache。保留模板组件/样式及next-intl词典。执行`make lint-go`、`make vuln-go`和[测试指南](docs/testing.md)中的相关检查；均为本地检查，不是部署或CI流程。
+Web使用Axios模块API和Zod推导类型。Query管理服务端状态，RHF和Zod管理表单；密码操作不进入MutationCache。保留模板组件/样式及next-intl词典。执行`make lint-go`、`make vuln-go`和[测试指南](docs/development/testing.md)中的相关检查；均为本地检查，不是部署或CI流程。

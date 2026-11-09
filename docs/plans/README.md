@@ -8,6 +8,11 @@
 |---|---|---|---|---|---|
 | [timezone-and-user-preference](timezone-and-user-preference/spec.md) | 全平台时区统一与用户时区偏好 | 服务端固定 UTC；用户级时区偏好存库；显示按用户/浏览器回落 | 已实施 | [spec](timezone-and-user-preference/spec.md) | [plan](timezone-and-user-preference/plan.md) |
 | [test-strategy-and-coverage](test-strategy-and-coverage/spec.md) | 测试规范固化与存量测试补齐 | 改动类型与必需测试层判定表；存量无测试包补齐 | 规范已落地，存量部分完成 | [spec](test-strategy-and-coverage/spec.md) | [plan](test-strategy-and-coverage/plan.md) |
+| [org-tree-and-role-model](org-tree-and-role-model/spec.md) | 组织树、角色权限模型与成员管理重构 | 信息架构重划；组织树（深度上限 3，根 `master`）；权限目录扩展；字段校验统一 | 已实施，未提交 | [spec](org-tree-and-role-model/spec.md) | [plan](org-tree-and-role-model/plan.md) |
+| [org-inheritance-and-management](org-inheritance-and-management/spec.md) | 组织授权继承与管理界面修正 | 祖先角色向下继承；**取消组织深度硬上限**；管理员不变量归位应用层；成员子树聚合（可开关）；树形只读展示；reparent 递归重算 depth；脏数据清理 | 待审核（v3：15 缺陷已修，待实施） | [spec](org-inheritance-and-management/spec.md) | [plan](org-inheritance-and-management/plan.md) · [审查](org-inheritance-and-management/review-findings.md) |
+| [audit-role-settings-consolidation](audit-role-settings-consolidation/spec.md) | 审计与角色管理简化、设置区合并 | 审计单一列表（操作者/时间/结果筛选）；角色去 code/kind 与内置角色；创建/编辑改右侧抽屉；删除有成员角色被拒；设置区合并为 `/settings` 单入口 | 实施中 | [spec](audit-role-settings-consolidation/spec.md) | [plan](audit-role-settings-consolidation/plan.md) |
+| [org-user-management-merge](org-user-management-merge/spec.md) | 组织/用户管理合并与「成员 → 用户」统一命名 | 组织管理改为左树右列表；成员页与平台用户页合并为用户管理；全库表/列/权限键/文案 members→users | 实施中 | [spec](org-user-management-merge/spec.md) | — |
+| [ingest-and-normalization](ingest-and-normalization/spec.md) | 数据接入与归一化（ingestor 首版） | syslog/HTTP/Kafka 三通道接收；格式探测 + 厂商 YAML 模板映射 OCSF；发布 `spx.ingest.event`；connectors 注册表。不做告警提升/合并（归 correlator），不写 ClickHouse | 待审核，未实施 | [spec](ingest-and-normalization/spec.md) | [plan](ingest-and-normalization/plan.md) |
 
 ## 维护规则
 

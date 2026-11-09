@@ -42,4 +42,4 @@ HTTP 结果、业务结果和依赖诊断各有用途；不要在每一层反复
 
 正常浏览器导航可能取消尚未完成的请求。确认请求上下文已取消时，IAM 和数据库层记录 Debug 取消事件；不将其归类为内部 500 或数据库故障。其他依赖超时、断连和真实服务错误仍按既定级别诊断。
 
-当前 HTTP 接入由[共享 Gin 中间件](../src/packages/go/httpx/middleware/gin.go)使用原生 FullPath/Writer 和受控 CustomRecoveryWithWriter 实现；禁止启用 Gin 默认请求转储输出凭据。IAM 的[错误映射](../src/apps/iam/internal/handler/server.go)在 SCS 提交屏障内处理 `c.Error/Abort`，Console 流保持原生 Flush。生成客户端只报告受控 schema 路径/错误类别，不打印响应原文。
+当前 HTTP 接入由[共享 Gin 中间件](../../src/packages/go/httpx/middleware/gin.go)使用原生 FullPath/Writer 和受控 CustomRecoveryWithWriter 实现；禁止启用 Gin 默认请求转储输出凭据。IAM 的[错误映射](../../src/apps/iam/internal/handler/server.go)在 SCS 提交屏障内处理 `c.Error/Abort`，Console 流保持原生 Flush。生成客户端只报告受控 schema 路径/错误类别，不打印响应原文。

@@ -3,7 +3,7 @@
 > 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和真实共享包；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
 
 
-> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin；`llm-gateway` 内嵌 Bifrost `core` 作为供应商适配层），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块（Web / IAM / Console）的身份、会话、权限与存储设计以各模块 README（[IAM](../../src/apps/iam/README.md)、[Console](../../src/apps/console/README.md)、[Web](../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，其职责边界见下表与 §1.1。下文尚未实现的服务只描述规划，不代表已交付能力。
+> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin；`llm-gateway` 内嵌 Bifrost `core` 作为供应商适配层），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块（Web / IAM / Console）的身份、会话、权限与存储设计以各模块 README（[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md)、[Web](../../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，其职责边界见下表与 §1.1。下文尚未实现的服务只描述规划，不代表已交付能力。
 
 
 > 用大白话说：10 个自研服务 + 6 个开源组件跑在 PostgreSQL、Redis、Kafka 和 ClickHouse 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。
@@ -12,11 +12,11 @@
 
 服务拆分的判据不是"功能不同"，而是以下五条之一：**独立扩容**（瓶颈维度不同）、**故障隔离**（会卡住会崩溃）、**独立变更**（改动频率不同）、**技术栈强制**、**安全边界**（高危能力单独管控）。
 
-### 1.1 v1 全景（自研 10 组件（Python×6 + Go×3 + web 前端）；开源 6 组件）
+### 1.1 v1 全景（自研 10 组件（Python×5 + Go×4 + web 前端）；开源 6 组件）
 
 | # | 服务 | 类型 | 语言 | 职责 | 为什么拆 |
 |---|---|---|---|---|---|
-| 1 | `collector` | 自研 | Python | 一切外部数据的唯一入口：告警接入、形状判别、OCSF 归一化、L0/L1 校验 | 改动最频繁（每接一家厂商就改），独立发版；突发流量独立扛 |
+| 1 | `ingestor` | 自研 | Go（Gin） | 一切外部数据的唯一入口：syslog/HTTP/Kafka 接入、格式探测、厂商模板映射为 OCSF、发布 Kafka | 改动最频繁（每接一家厂商就改），独立发版；突发流量独立扛；只收不发库，接收路径零阻塞 |
 | 2 | `correlator` | 自研 | Python | D1 去重 → D2 窗口折叠 → D3 跨源关联 → 告警 + 事件视图（攻击链） | 吞吐瓶颈，纯 CPU，按 `org:entity` 分区保序扩容 |
 | 3 | `agent-runtime` | 自研 | Python（内嵌 NeMo Guardrails 库） | AI 推理业务逻辑：研判 Agent（图编排骨架）、NL→查询、**guardrail 检测 API**（ai-policy 的模型类检测调这里）。**模型调用本身经 `llm-gateway`** | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离——部署时独立容器 |
 | 4 | `soar` | 自研 | Python | **通用 workflow/playbook 引擎宿主**（orchestrator 库）、预案库、审批状态机（持久化暂停）、高危动作执行、按上游原生 ID 回写；通知（邮件/IM/工单）是 governed action | 安全边界：Agent 提议 / SOAR 执行的权限分界 |
@@ -35,7 +35,7 @@
 
 ### 1.2 每个模块的技术架构
 
-十一个模块分三类：**已交付的三个 Go/Web**、**规划中的六个 Python**、**一个开源数据面**。下面只写"用什么技术、连什么存储、跟谁说话"，不写字段和接口细节。
+十一个模块分三类：**已交付的三个 Go/Web**、**规划中的五个 Python + 一个 Go（ingestor）**、**一个开源数据面**。下面只写"用什么技术、连什么存储、跟谁说话"，不写字段和接口细节。
 
 ```
                         ┌──────────── 已交付 ────────────┐
@@ -44,7 +44,7 @@
                         └─▶ console(Go) ──▶ iam（服务凭证+用户上下文）
 
                         ┌──────────── 规划中 ────────────┐
-  数据源 ──▶ collector(Py) ──▶ Kafka ──▶ correlator(Py) ──┬─▶ PostgreSQL（告警）
+  数据源 ──▶ ingestor(Go) ──▶ Kafka ──▶ correlator(Py) ──┬─▶ PostgreSQL（告警）
                                                           └─▶ ClickHouse（遥测）
                               correlator ──▶ agent-runtime(Py) ──▶ llm-gateway(Go) ──▶ 供应商
                               agent-runtime ──▶ soar(Py) ──▶ 上游系统回写
@@ -62,15 +62,15 @@
 
 **为什么 `console` 没有数据库**：它当前只做"验证组织访问 + 授权后的 SSE"。等案件和工作台真正实现时，再按模块自己的表加。AGENTS 里写死了这条：模块拥有自己的配置、启动和表——不预先建空库占位。
 
-**为什么 `iam` 用 GORM 而不是手写 SQL**：授权判定要在事务里同时读会话、组织、成员和权限四张表，手写会有大量重复的字段映射。GORM 的泛型投影和回调事务省掉这部分；底层仍是 pgx 连接池，迁移仍用 Goose 显式执行，不做自动建表。
+**为什么 `iam` 用 GORM 而不是手写 SQL**：授权判定要在事务里同时读会话、组织、用户和权限四张表，手写会有大量重复的字段映射。GORM 的泛型投影和回调事务省掉这部分；底层仍是 pgx 连接池，迁移仍用 Goose 显式执行，不做自动建表。
 
-#### 规划中（Python 六件）
+#### 规划中（ingestor 与 Python 五件）
 
 这六个服务**还没有代码**，技术栈只定到"语言 + 关键库"这一层：
 
 | 模块 | 语言/关键库 | 存储 | 跟谁说话 |
 |---|---|---|---|
-| `collector` | Python | 对象存储（raw）<br>Kafka（产出） | 对外收数据；对内发 Kafka |
+| `ingestor` | Go + Gin | Kafka（产出）<br>PostgreSQL（connectors 注册表） | 对外收数据；对内发 Kafka；不写业务数据 |
 | `correlator` | Python | PostgreSQL（告警/事件视图）<br>ClickHouse（遥测）<br>Redis（去重窗口） | 消费 Kafka；产出告警 |
 | `agent-runtime` | Python + NeMo Guardrails | PostgreSQL（Ledger） | 调 `llm-gateway`；读告警 |
 | `soar` | Python + orchestrator 库 | PostgreSQL（预案、审批状态） | 执行处置；回写上游 |
@@ -120,7 +120,7 @@
         ▼                                         ▼
 ════════════ 数据处理主链路（自上而下）══════════════
   ┌─────────────────────────────────────────────────────┐
-  │ ① collector —— 接入 · 归一化                           │
+  │ ① ingestor —— 接入 · 归一化                           │
   │    OCSF 归一化 · 形状判别 · L0/L1 校验                  │
   │    raw payload → 对象存储（永不进主表）                  │
   └────────────────────────┬────────────────────────────┘
@@ -157,7 +157,7 @@
 
 三条设计要点：
 
-1. **两条数据源的汇合点在 ①**——`ai-policy` 拦下的注入事件回流 `collector`，从此和 EDR 告警走完全相同的链路。"防护对象 = 运营对象"在架构上就这一条线。
+1. **两条数据源的汇合点在 ①**——`ai-policy` 拦下的注入事件回流 `ingestor`，从此和 EDR 告警走完全相同的链路。"防护对象 = 运营对象"在架构上就这一条线。
 2. **跨阶段连接全靠队列不靠调用**——①→② 走 Kafka，②→③ 走 Case 事件；任何一级慢了或挂了，上游照常摄入，恢复后接着跑。
 3. **`worker` 和 `agent` 必须分进程不是洁癖**——LLM 卡住会阻塞去重；且两者扩容维度完全不同（CPU 密集 vs 网络等待密集）。
 
@@ -265,7 +265,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 | org 隔离 | 告警、案件、Ledger、事件视图 | 仅本 org |
 | org 隔离 | **机构记忆、实体档案**（记忆隔离即此层） | 仅本 org；IOC 命中结果回流全局层 |
 
-**告警的 org 归属在 collector 落定**：每个连接器配置属于某个 org（数据源 → org 默认），资产映射可覆盖；归属一旦落库不再变。
+**告警的 org 归属在 ingestor 落定**：每个连接器配置属于某个 org（数据源 → org 默认），资产映射可覆盖；归属一旦落库不再变。
 
 **iam 的职责边界（标准 PDP/PEP 分层）**——所有权限的**定义、判定、管理**收敛于 iam（策略决策点），**执行**分布在三个检查点：
 
@@ -494,7 +494,7 @@ ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
 |---|---|---|
 | `llmclient` | llm-gateway 的客户端 | 与 `iamclient` 同款：类型化请求、错误映射、不暴露 Bifrost 类型 |
 | `contracts` | OCSF 模型、枚举、查询 IR、RequestContext | 全部服务共用，服务化只有网络开销 |
-| `connectors` | 厂商连接器 + 归一化 profile + 回归样本 | 只被 collector 引用，独立版本化 |
+| `connectors` | 厂商模板 + 归一化 profile + 回归样本 | 只被 ingestor 引用，独立版本化 |
 | `orchestrator` | workflow 引擎：10 类节点、持久化审批暂停、幂等键 | correlator/agent/soar 复用；处置动作是 tool 节点调用的工具，不是节点类型——否则每接一个厂商就要改引擎 |
 | `audit` | 追加式哈希链审计 | 审计必须内嵌在每个写入点，不能是旁路服务 |
 

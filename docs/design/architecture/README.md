@@ -1,6 +1,6 @@
 # SecPlexus 架构文档
 
-> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块以各模块 README（[IAM](../../src/apps/iam/README.md)、[Console](../../src/apps/console/README.md)、[Web](../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，职责边界见 [02 §2.1](02-technical-architecture.md)。下文尚未实现的服务只描述规划，不代表已交付能力。
+> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块以各模块 README（[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md)、[Web](../../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，职责边界见 [02 §2.1](02-technical-architecture.md)。下文尚未实现的服务只描述规划，不代表已交付能力。
 
 
 > AI 原生安全运营平台 —— 告警运营、漏洞运营、大模型护栏、智能体安全，编织成一张互联的安全网络。
@@ -24,7 +24,7 @@
 ├─────────────────────────────────────────────────────────────────────────┤
 │                          技术架构（怎么实现）                              │
 │                                                                         │
-│   10 个自研组件（Python×6 规划 + Go×3 + Web）+ 6 个开源，               │
+│   10 个自研组件（Python×5 规划 + Go×4 + Web）+ 6 个开源，               │
 │   PG 存业务对象 / CK 存遥测 / Kafka 削峰 / Redis 去重限流，             │
 │   模型调用统一走 llm-gateway，工程标准八条（OTel/DLQ/隔离断言）         │
 ├─────────────────────────────────────────────────────────────────────────┤
@@ -40,7 +40,7 @@
 
 | 文档 | 内容 | 回答的问题 |
 |---|---|---|
-| [需求与设计计划索引](../plans/README.md) | 按需求组织的 Spec、Plan 与审核状态 | 本次准备交付什么、如何实施与验收 |
+| [需求与设计计划索引](../../plans/README.md) | 按需求组织的 Spec、Plan 与审核状态 | 本次准备交付什么、如何实施与验收 |
 | [01-business-architecture.md](01-business-architecture.md) | 产品定位、运营对象模型、三队列工作台、AI 研判闭环、影子模式 | 我们运营什么、人机怎么协同 |
 | [02-technical-architecture.md](02-technical-architecture.md) | 服务划分、数据流、数据模型、Agent 编排、AI 可靠性、检索与存储 | 用什么服务实现、数据长什么样 |
 | [03-deployment-architecture.md](03-deployment-architecture.md) | monorepo、镜像策略、部署形态、信创与离线交付 | 怎么部署、怎么扩展、怎么进内网 |

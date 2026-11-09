@@ -32,7 +32,7 @@
 | Microsoft Security Copilot | 单职责 agent 套件 | phishing/alert triage、TI、KQL hunting 等各管一摊；每 agent 自治独立配置；责任 AI 护栏；用户实测月省约 200 小时 | — |
 | Google SecOps (2026) | 专业 agent | Detection Engineering agent + Triage agent | — |
 
-**Radiant 被 Cribl（数据管道公司）收购**的信号：数据层是根基、AI 是放大器——独立 AI SOC 在收敛，要么长在自己的数据面上，要么被数据面公司吃掉。这支撑我们自建数据面（collector/归一化/实体档案）的路线。
+**Radiant 被 Cribl（数据管道公司）收购**的信号：数据层是根基、AI 是放大器——独立 AI SOC 在收敛，要么长在自己的数据面上，要么被数据面公司吃掉。这支撑我们自建数据面（ingestor/归一化/实体档案）的路线。
 
 ### 失败与负面教训
 
