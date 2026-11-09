@@ -10,14 +10,14 @@
 
 已有基础（不需要重建）：
 
-- `docs/testing.md` 存在且内容完整：三层职责表、缺陷修复验证规则、目录约定（Go 单元测试随包、`*_integration_test.go` 加 `integration` 构建标签、Web 单元测试在 `tests/unit/`、E2E 在 `tests/e2e/` 用 Playwright）、隔离与清理要求、可执行入口。
-- `AGENTS.md` 第 49 行已指向 `docs/testing.md`。
+- `docs/development/testing.md` 存在且内容完整：三层职责表、缺陷修复验证规则、目录约定（Go 单元测试随包、`*_integration_test.go` 加 `integration` 构建标签、Web 单元测试在 `tests/unit/`、E2E 在 `tests/e2e/` 用 Playwright）、隔离与清理要求、可执行入口。
+- `AGENTS.md` 第 49 行已指向 `docs/development/testing.md`。
 - `CONTRIBUTING.md` 已有「先从一个聚焦的失败测试开始」以及按行为选择最低可靠层次的表述。
-- `README.md`、`CONTRIBUTING.zh-CN.md`、各模块 README 均引用 `docs/testing.md`，入口没有孤立问题。
+- `README.md`、`CONTRIBUTING.zh-CN.md`、各模块 README 均引用 `docs/development/testing.md`，入口没有孤立问题。
 
 真实缺口（本计划要解决的）：
 
-1. 规范散在 `docs/testing.md` 与 `CONTRIBUTING.md`，但没有「什么类型的改动必须具备哪一层的测试」的强制对应表，导致同一句原则可以被解释成不同做法。
+1. 规范散在 `docs/development/testing.md` 与 `CONTRIBUTING.md`，但没有「什么类型的改动必须具备哪一层的测试」的强制对应表，导致同一句原则可以被解释成不同做法。
 2. `AGENTS.md` 只有一句话概括，没有可执行的最低要求，也没有禁止清单。
 3. 存量代码存在整包无测试：`console/internal/handler`、`console/internal/bootstrap`、`console/internal/router`、`iam/internal/router`、`iam/internal/handler/management` 完全没有测试文件。
 4. `iam/internal/service`（12 个源文件）仅有 1 个集成测试；`iam/internal/repository`（17 个源文件）仅 3 个测试。
@@ -33,15 +33,15 @@ Superpowers 的 `test-driven-development` 技能给出核心法则：**没有失
 
 ## 范围
 
-1. 在 `docs/testing.md` 增加「改动类型与必需测试层」对应表，把现行原则变成可判定条目。
-2. 在 `AGENTS.md` 增加强制最低要求、禁止清单与 TDD 要求，保持简短并继续指向 `docs/testing.md`。
+1. 在 `docs/development/testing.md` 增加「改动类型与必需测试层」对应表，把现行原则变成可判定条目。
+2. 在 `AGENTS.md` 增加强制最低要求、禁止清单与 TDD 要求，保持简短并继续指向 `docs/development/testing.md`。
 3. 建立覆盖率基线并记录，作为补齐的完成判据。
 4. 按对应表补齐存量缺口。
 
 明确不做：
 
 - 不追求行覆盖率数字本身，不设「必须 80%」这类无差别门槛。判据是「每个对外行为至少有一个能失败的测试」。
-- 不把临时排障脚本、一次性复现步骤转成长期测试（`docs/testing.md` 已禁止，继续遵守）。
+- 不把临时排障脚本、一次性复现步骤转成长期测试（`docs/development/testing.md` 已禁止，继续遵守）。
 - 不为纯文案、配置默认值、生成文件补测试。
 - 不接入远程 CI，与仓库现行「只做本地检查」一致。
 
@@ -82,7 +82,7 @@ Superpowers 的 `test-driven-development` 技能给出核心法则：**没有失
 
 ## 验收
 
-- `docs/testing.md` 含判定表，`AGENTS.md` 含强制最低要求并指向它。
+- `docs/development/testing.md` 含判定表，`AGENTS.md` 含强制最低要求并指向它。
 - 覆盖率基线已记录（当前实测：全仓 Go 约 63%，多个包 0%，其中部分 0% 是因为集成测试需要 `SPX_TEST_POSTGRES_URL` 而默认不运行，需在基线中区分）。
 - 上表每一行至少有一个能失败的测试，且该测试在移除对应实现后确实失败。
 - `pnpm test:unit`、`go test ./src/...`、`pnpm typecheck`、`pnpm lint`、`node scripts/build.mjs` 全部通过。

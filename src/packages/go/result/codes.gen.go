@@ -11,23 +11,28 @@ type Definition struct {
 }
 
 const (
-	CodeOK                     Code = "ok"
-	CodeInvalidRequest         Code = "invalid_request"
-	CodeUnauthenticated        Code = "unauthenticated"
-	CodePermissionDenied       Code = "permission_denied"
-	CodeNotFound               Code = "not_found"
-	CodeConflict               Code = "conflict"
-	CodeRateLimited            Code = "rate_limited"
-	CodeInternalError          Code = "internal_error"
-	CodeServiceUnavailable     Code = "service_unavailable"
-	CodePayloadTooLarge        Code = "payload_too_large"
-	CodeUnsupportedMediaType   Code = "unsupported_media_type"
-	CodeMethodNotAllowed       Code = "method_not_allowed"
-	CodeInvalidCredentials     Code = "iam.invalid_credentials"
-	CodeInvalidCurrentPassword Code = "iam.invalid_current_password"
-	CodeCSRFInvalid            Code = "iam.csrf_invalid"
-	CodeOriginInvalid          Code = "iam.origin_invalid"
-	CodeRecentAuthRequired     Code = "iam.recent_auth_required"
+	CodeOK                        Code = "ok"
+	CodeInvalidRequest            Code = "invalid_request"
+	CodeUnauthenticated           Code = "unauthenticated"
+	CodePermissionDenied          Code = "permission_denied"
+	CodeNotFound                  Code = "not_found"
+	CodeConflict                  Code = "conflict"
+	CodeRateLimited               Code = "rate_limited"
+	CodeInternalError             Code = "internal_error"
+	CodeServiceUnavailable        Code = "service_unavailable"
+	CodePayloadTooLarge           Code = "payload_too_large"
+	CodeUnsupportedMediaType      Code = "unsupported_media_type"
+	CodeMethodNotAllowed          Code = "method_not_allowed"
+	CodeInvalidCredentials        Code = "iam.invalid_credentials"
+	CodeInvalidCurrentPassword    Code = "iam.invalid_current_password"
+	CodeCSRFInvalid               Code = "iam.csrf_invalid"
+	CodeOriginInvalid             Code = "iam.origin_invalid"
+	CodeRecentAuthRequired        Code = "iam.recent_auth_required"
+	CodeUsernameTaken             Code = "iam.username_taken"
+	CodeEmailTaken                Code = "iam.email_taken"
+	CodeOrganizationHasChildren   Code = "iam.organization_has_children"
+	CodeOrganizationHasMembers    Code = "iam.organization_has_members"
+	CodeRootOrganizationImmutable Code = "iam.root_organization_immutable"
 )
 
 // Lookup 查询已注册结果码；未知码不会被当作成功。
@@ -67,6 +72,16 @@ func Lookup(code Code) (Definition, bool) {
 		return Definition{Status: 403, Message: "请求来源不被允许"}, true
 	case CodeRecentAuthRequired:
 		return Definition{Status: 403, Message: "请先确认密码"}, true
+	case CodeUsernameTaken:
+		return Definition{Status: 409, Message: "该用户名已被占用"}, true
+	case CodeEmailTaken:
+		return Definition{Status: 409, Message: "该邮箱已被占用"}, true
+	case CodeOrganizationHasChildren:
+		return Definition{Status: 409, Message: "该组织下仍有子组织，无法删除"}, true
+	case CodeOrganizationHasMembers:
+		return Definition{Status: 409, Message: "该组织下仍有用户，无法删除"}, true
+	case CodeRootOrganizationImmutable:
+		return Definition{Status: 409, Message: "根组织不能删除"}, true
 	}
 	return Definition{}, false
 }

@@ -1,5 +1,37 @@
 import { z } from "zod";
 
+// 账号字段规则必须与 Go identity 包完全一致：
+// 改动任何一条都要同步 src/apps/iam/internal/identity 下的实现与测试。
+const usernamePattern = /^[A-Za-z][A-Za-z0-9_.-]{1,37}[A-Za-z0-9]$/;
+const consecutiveSeparators = /[._-]{2,}/;
+const emailPattern =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+/** 用户名：3–39 位、字母开头字母数字结尾、无连续分隔符。 */
+export const zUsername = z
+  .string()
+  .regex(usernamePattern, { message: "username" })
+  .refine((value) => !consecutiveSeparators.test(value), { message: "username" });
+
+/** 显示名称：trim 后 1–100 码点。 */
+export const zDisplayName = z
+  .string()
+  .transform((value) => value.trim())
+  .pipe(z.string().min(1).max(100));
+
+/** 邮箱：可选；空串表示未设置；整址 ≤254、本地部 ≤64，与 Go identity.ValidateEmail 一致。 */
+export const zEmail = z.union([
+  z.literal(""),
+  z
+    .string()
+    .max(254)
+    .regex(emailPattern, { message: "email" })
+    .refine((value) => value.lastIndexOf("@") <= 64, { message: "email" }),
+]);
+
+/** 密码：12–128 码点。 */
+export const zPassword = z.string().min(12).max(128);
+
 // 仅声明 Web 实际消费的数据及表单输入，类型由 Zod 推导。
 export const zApiAuditEvent = z.object({
   action: z.string(),
@@ -24,11 +56,14 @@ export const zApiCreated = z.object({
   id: z.string(),
 });
 
-export const zApiMember = z.object({
+export const zApiOrganizationUser = z.object({
   is_super_admin: z.boolean(),
   display_name: z.string(),
   id: z.string(),
+  org_id: z.string().optional(),
+  org_slug: z.string().optional(),
   role_ids: z.array(z.string()).optional(),
+  source: z.enum(["direct", "subtree", "inherited"]).optional(),
   status: z.enum(["active", "disabled"]),
   user_id: z.string(),
   username: z.string(),
@@ -36,10 +71,12 @@ export const zApiMember = z.object({
 
 export const zApiOrganization = z.object({
   authz_epoch: z.string(),
+  depth: z.int(),
   id: z.string(),
   name: z.string(),
+  parent_id: z.string().nullish(),
+  path: z.array(z.string()).nullish(),
   slug: z.string(),
-  status: z.string().optional(),
 });
 
 export const zApiPermission = z.object({
@@ -102,14 +139,11 @@ export const zApiProfileUpdateResponse = z.object({
 
 export const zApiRole = z.object({
   allowed_actions: z.array(z.string()),
-  code: z.string(),
   description: z.string(),
   id: z.string(),
-  kind: z.string(),
   member_count: z.int().gte(0).lte(9007199254740991),
   name: z.string(),
   permissions: z.array(z.string()),
-  status: z.enum(["active", "disabled"]),
   version: z.string(),
 });
 
@@ -140,23 +174,33 @@ export const zReauthenticateBody = z
 export const zChangePasswordBody = z
   .object({
     old_password: z.string(),
-    new_password: z.string().min(8).max(128),
+    new_password: zPassword,
   })
   .strict();
 
 export const zCreateUserBody = z
   .object({
-    username: z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{2,63}$/),
-    display_name: z.string().min(1).max(100),
-    email: z.string().optional(),
-    password: z.string().min(8).max(128),
+    username: zUsername,
+    display_name: zDisplayName,
+    email: zEmail.optional(),
+    password: zPassword,
+    org_id: z.uuid(),
+    role_ids: z.array(z.uuid()).min(1),
   })
   .strict();
 
+// 创建成员表单：在请求体之外增加确认密码，仅用于交互校验，不发送到服务端。
+export const zCreateUserForm = zCreateUserBody
+  .extend({ confirm_password: z.string() })
+  .refine((value) => value.password === value.confirm_password, {
+    path: ["confirm_password"],
+    message: "passwordMismatch",
+  });
+
 export const zUpdateUserBody = z
   .object({
-    display_name: z.string().min(1).max(100),
-    email: z.string().optional(),
+    display_name: zDisplayName,
+    email: zEmail.optional(),
     status: z.enum(["active", "disabled"]),
     auth_epoch: z.string().regex(/^[1-9][0-9]*$/),
   })
@@ -164,7 +208,7 @@ export const zUpdateUserBody = z
 
 export const zResetUserPasswordBody = z
   .object({
-    password: z.string().min(8).max(128),
+    password: zPassword,
   })
   .strict();
 
@@ -180,38 +224,29 @@ export const zCreateOrganizationBody = z
     slug: z.string().regex(/^[a-z][a-z0-9_-]{1,28}[a-z0-9]$/),
     name: organizationName,
     admin_user_id: z.uuid(),
+    parent_id: z.uuid().optional(),
   })
   .strict();
 
 export const zUpdateOrganizationBody = z
   .object({
     name: organizationName,
-    status: z.enum(["active", "suspended"]),
     authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
+    parent_id: z.uuid().optional(),
   })
   .strict();
 
-export const zUpdateCurrentOrganizationBody = z
-  .object({
-    name: organizationName,
-    authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
-  })
-  .strict();
-
-export const zCreateMemberBody = z
+export const zCreateOrganizationUserBody = z
   .object({
     user_id: z.uuid().optional(),
-    username: z
-      .string()
-      .regex(/^[A-Za-z][A-Za-z0-9_.-]{2,63}$/)
-      .optional(),
-    display_name: z.string().min(1).max(100).optional(),
-    email: z.string().optional(),
-    password: z.string().min(8).max(128).optional(),
+    username: zUsername.optional(),
+    display_name: zDisplayName.optional(),
+    email: zEmail.optional(),
+    password: zPassword.optional(),
   })
   .strict();
 
-export const zUpdateMemberBody = z
+export const zUpdateOrganizationUserBody = z
   .object({
     status: z.enum(["active", "disabled"]),
     authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
@@ -220,10 +255,9 @@ export const zUpdateMemberBody = z
 
 export const zCreateRoleBody = z
   .object({
-    code: z.string().regex(/^[a-z][a-z0-9_]{2,63}$/),
     name: z.string().min(1).max(100),
     description: z.string().max(1000).optional(),
-    status: z.enum(["active", "disabled"]).optional(),
+    permissions: z.array(z.string()).max(100),
   })
   .strict();
 
@@ -231,7 +265,6 @@ export const zUpdateRoleBody = z
   .object({
     name: z.string().min(1).max(100),
     description: z.string().max(1000).optional(),
-    status: z.enum(["active", "disabled"]),
     version: z.string().regex(/^[1-9][0-9]*$/),
   })
   .strict();
@@ -253,7 +286,7 @@ const zApiRoleIds = z
   .max(50)
   .refine((values) => new Set(values).size === values.length);
 
-export const zSetMemberRolesBody = z
+export const zSetOrganizationUserRolesBody = z
   .object({
     role_ids: zApiRoleIds,
     authz_epoch: z.string().regex(/^[1-9][0-9]*$/),
@@ -279,7 +312,7 @@ export const zPreviewPermissionBody = z
 
 export type ApiAuditEvent = z.infer<typeof zApiAuditEvent>;
 
-export type ApiMember = z.infer<typeof zApiMember>;
+export type ApiOrganizationUser = z.infer<typeof zApiOrganizationUser>;
 
 export type ApiOrganization = z.infer<typeof zApiOrganization>;
 
@@ -302,5 +335,22 @@ export const listQuerySchema = z.object({
   offset: z.number().int().min(0).max(100000).optional(),
   q: z.string().optional(),
   org_id: z.string().optional(),
+  scope: z.enum(["direct", "subtree"]).optional(),
 });
 export type ListQuery = z.infer<typeof listQuerySchema>;
+
+export const auditQuerySchema = z.object({
+  limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).max(100000).optional(),
+  actor: z.string().optional(),
+  outcome: z.enum(["success", "failure", "denied"]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+export type AuditQuery = z.infer<typeof auditQuerySchema>;
+
+export const zOrganizationTree = z.object({
+  items: z.array(zApiOrganization),
+  truncated: z.boolean().optional(),
+});
+export type OrganizationTreeResponse = z.infer<typeof zOrganizationTree>;

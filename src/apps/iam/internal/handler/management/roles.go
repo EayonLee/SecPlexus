@@ -31,8 +31,8 @@ func (s *Handler) PreviewPermission(c *gin.Context) {
 	result.Success(w, response)
 }
 
-// ListRoleMembers 查询角色关联成员，组织与角色读取权限均由用例校验。
-func (s *Handler) ListRoleMembers(c *gin.Context) {
+// ListRoleUsers 查询角色关联用户，组织与角色读取权限均由用例校验。
+func (s *Handler) ListRoleUsers(c *gin.Context) {
 	orgId := c.Param("org_id")
 	id := c.Param("id")
 	var params model.ListQuery
@@ -44,7 +44,7 @@ func (s *Handler) ListRoleMembers(c *gin.Context) {
 	r := c.Request
 	limit, offset := params.Limit, params.Offset
 
-	response, err := s.Service.ListRoleMembers(r.Context(), limit, offset, orgId, id)
+	response, err := s.Service.ListRoleUsers(r.Context(), limit, offset, orgId, id)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -154,7 +154,7 @@ func (s *Handler) SetRolePermissions(c *gin.Context) {
 	result.NoContent(w)
 }
 
-// DeleteRole 按版本删除未被成员引用的自定义角色。
+// DeleteRole 按版本删除未被用户引用的自定义角色。
 func (s *Handler) DeleteRole(c *gin.Context) {
 	orgId := c.Param("org_id")
 	id := c.Param("id")
@@ -175,19 +175,19 @@ func (s *Handler) DeleteRole(c *gin.Context) {
 	result.NoContent(w)
 }
 
-// SetMemberRoles 替换成员角色关系，权限和版本检查由用例完成。
-func (s *Handler) SetMemberRoles(c *gin.Context) {
+// SetOrganizationUserRoles 替换用户角色关系，权限和版本检查由用例完成。
+func (s *Handler) SetOrganizationUserRoles(c *gin.Context) {
 	orgId := c.Param("org_id")
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input service.MemberRolesInput
+	var input service.OrganizationUserRolesInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	if err := s.Service.ReplaceMemberRoles(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+	if err := s.Service.ReplaceOrganizationUserRoles(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}

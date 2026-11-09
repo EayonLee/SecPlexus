@@ -135,6 +135,37 @@ func newAPIClient(t *testing.T, base, origin string) *apiClient {
 	return &apiClient{t: t, base: base, origin: origin, sourceIP: "2001:db8::" + strconv.FormatUint(port, 16), client: &http.Client{Jar: jar, Timeout: 10 * time.Second}}
 }
 
+// organizationEpoch 从平台组织列表读取目标组织的权限版本；
+// 按组织读取详情的端点已随「当前组织」页面一并移除。
+func (c *apiClient) organizationEpoch(orgID string) string {
+	c.t.Helper()
+	items := c.request("GET", "/api/v1/iam/organizations?limit=100", nil, 200)["items"].([]any)
+	for _, item := range items {
+		row := item.(map[string]any)
+		if row["id"] == orgID {
+			return row["authz_epoch"].(string)
+		}
+	}
+
+	c.t.Fatalf("organization %s missing from platform list", orgID)
+	return ""
+}
+
+// roleVersion 读取角色的当前版本，用于区分「版本过期」与「仍有用户」两种冲突。
+func (c *apiClient) roleVersion(orgID, roleID string) string {
+	c.t.Helper()
+	items := c.request("GET", "/api/v1/iam/orgs/"+orgID+"/roles?limit=100", nil, 200)["items"].([]any)
+	for _, item := range items {
+		row := item.(map[string]any)
+		if row["id"] == roleID {
+			return row["version"].(string)
+		}
+	}
+
+	c.t.Fatalf("role %s missing from role list", roleID)
+	return ""
+}
+
 // httpFixture 持有本用例独占的服务、数据和调用凭证。
 type httpFixture struct {
 	redis                         *redis.Client
@@ -147,8 +178,8 @@ type httpFixture struct {
 func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	adminUsername := "admin-" + uuid.NewString()
-	memberUsername := "auditor-" + uuid.NewString()
+	adminUsername := "admin" + uuid.NewString()[:8]
+	organizationUserName := "auditor" + uuid.NewString()[:8]
 	initial := "isolated initial password"
 	password := initial
 	if err := store.Seed(ctx, adminUsername, initial); err != nil {
@@ -190,7 +221,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		keys := []string{}
 		digest := sha256.Sum256([]byte(sourceIP))
 		keys = append(keys, cachekey.IAMLoginIP.Format(hex.EncodeToString(digest[:])))
-		accounts := []string{adminUsername, memberUsername}
+		accounts := []string{adminUsername, organizationUserName}
 		connection, err := pgx.Connect(context.Background(), store.Pool.Config().ConnConfig.ConnString())
 		if err != nil {
 			t.Error("cannot connect for owned key cleanup")
@@ -249,7 +280,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	public.Config.Handler = router.Handler(server)
 	public.Start()
 	t.Cleanup(public.Close)
-	return &httpFixture{redis: redisClient, admin: adminUsername, member: memberUsername,
+	return &httpFixture{redis: redisClient, admin: adminUsername, member: organizationUserName,
 		server:     server,
 		public:     public,
 		initial:    initial,
@@ -276,7 +307,7 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	orgPath := "/api/v1/iam/orgs/" + org
 	admin.request("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": "Changed", "status": "disabled", "auth_epoch": me["principal"].(map[string]any)["auth_epoch"]}, 403)
 	admin.request("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "not configured password"}, 403)
-	members := admin.request("GET", orgPath+"/members", nil, 200)["items"].([]any)
+	members := admin.request("GET", orgPath+"/users", nil, 200)["items"].([]any)
 	var configuredMembership string
 	for _, item := range members {
 		row := item.(map[string]any)
@@ -287,12 +318,12 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	if configuredMembership == "" {
 		t.Fatal("configured administrator membership missing")
 	}
-	configuredVersion := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
-	protectedPath := orgPath + "/members/" + configuredMembership
+	configuredVersion := admin.organizationEpoch(org)
+	protectedPath := orgPath + "/users/" + configuredMembership
 	admin.request("PATCH", protectedPath, map[string]any{"status": "disabled", "authz_epoch": configuredVersion}, 403)
 	admin.request("DELETE", protectedPath+"?authz_epoch="+configuredVersion, nil, 403)
 	admin.request("PUT", protectedPath+"/roles", map[string]any{"role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
-	admin.request("POST", orgPath+"/permission-preview", map[string]any{"membership_id": configuredMembership, "role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
+	admin.request("POST", orgPath+"/permission-preview", map[string]any{"organization_user_id": configuredMembership, "role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
 
 	catalog := admin.request("GET", "/api/v1/iam/permissions?org_id="+org, nil, 200)["items"].([]any)
 	foundAudit := false
@@ -310,40 +341,43 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	}
 
 	admin.request("PUT", "/api/v1/iam/users/"+userID+"/super-admin", map[string]any{"enabled": false, "reason": "identity is configuration-owned"}, 404)
-	initialMember := "12345678"
-	memberPassword := "isolated member password"
-	memberID := admin.request("POST", orgPath+"/members", map[string]string{"username": f.member, "display_name": "审计成员", "password": initialMember}, 201)["id"].(string)
-	roleID := admin.request("POST", orgPath+"/roles", map[string]string{"code": "security_auditor", "name": "审计员"}, 201)["id"].(string)
+	initialMember := "123456789012"
+	organizationUserPassword := "isolated member password"
+	organizationUserID := admin.request("POST", orgPath+"/users", map[string]string{"username": f.member, "display_name": "审计用户", "password": initialMember}, 201)["id"].(string)
+	roleID := admin.request("POST", orgPath+"/roles", map[string]any{"name": "审计员", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
 	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{"iam.audit.read"}, "version": "1"}, 204)
 	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{}, "version": "1"}, 409)
-	version := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
-	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{roleID}, "authz_epoch": version}, 204)
+	version := admin.organizationEpoch(org)
+	admin.request("PUT", orgPath+"/users/"+organizationUserID+"/roles", map[string]any{"role_ids": []string{roleID}, "authz_epoch": version}, 204)
 	member := newAPIClient(t, public.URL, public.URL)
 	member.login(f.member, initialMember)
-	member.request("GET", orgPath+"/audit-events", nil, 200)
-	member.change(initialMember, memberPassword)
-	member.login(f.member, memberPassword)
-	member.request("GET", orgPath+"/audit-events", nil, 200)
-	memberUserID := member.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["user_id"].(string)
-	admin.request("POST", "/api/v1/iam/users/"+memberUserID+"/reset-password", map[string]string{"password": "12345678"}, 204)
-	member.request("GET", orgPath+"/audit-events", nil, 401)
-	member.login(f.member, "12345678")
-	member.request("GET", orgPath+"/audit-events", nil, 200)
-	member.request("GET", orgPath+"/members", nil, 403)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
+	member.change(initialMember, organizationUserPassword)
+	member.login(f.member, organizationUserPassword)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
+	organizationUserAccountID := member.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["user_id"].(string)
+	admin.request("POST", "/api/v1/iam/users/"+organizationUserAccountID+"/reset-password", map[string]string{"password": "123456789012"}, 204)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 401)
+	member.login(f.member, "123456789012")
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
+	member.request("GET", orgPath+"/users", nil, 403)
 	member.request("GET", "/api/v1/iam/users", nil, 403)
 	otherOrg := admin.request("POST", "/api/v1/iam/organizations", map[string]string{"slug": "isolated-team", "name": "Other organization", "admin_user_id": userID}, 201)["id"].(string)
-	otherRole := admin.request("POST", "/api/v1/iam/orgs/"+otherOrg+"/roles", map[string]string{"code": "other_reader", "name": "Other reader"}, 201)["id"].(string)
-	member.request("GET", "/api/v1/iam/orgs/"+otherOrg+"/audit-events", nil, 403)
-	currentVersion := admin.request("GET", orgPath, nil, 200)["authz_epoch"].(string)
-	admin.request("PUT", orgPath+"/members/"+memberID+"/roles", map[string]any{"role_ids": []string{otherRole}, "authz_epoch": currentVersion}, 404)
-	member.request("GET", orgPath+"/audit-events", nil, 200)
+	otherRole := admin.request("POST", "/api/v1/iam/orgs/"+otherOrg+"/roles", map[string]any{"name": "Other reader", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
+	// 权限沿祖先链向下继承：member 在根组织获得的审计权限对全部后代组织生效，
+	// 因此读取兄弟子组织的审计是允许的；跨到无亲缘关系的组织才会被拒。
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
+	currentVersion := admin.organizationEpoch(org)
+	admin.request("PUT", orgPath+"/users/"+organizationUserID+"/roles", map[string]any{"role_ids": []string{otherRole}, "authz_epoch": currentVersion}, 404)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
 	admin.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": password, "return_to": "https://untrusted.invalid"}, 400)
 	// 角色显示名称可以改变，稳定的能力语义不随名称改变。
-	admin.request("PATCH", orgPath+"/roles/"+roleID, map[string]any{"name": "只读审计", "description": "", "status": "active", "version": "2"}, 204)
-	member.request("GET", orgPath+"/audit-events", nil, 200)
-	admin.request("DELETE", orgPath+"/roles/"+roleID+"?version=3", nil, 409)
+	admin.request("PATCH", orgPath+"/roles/"+roleID, map[string]any{"name": "只读审计", "description": "", "version": "2"}, 204)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
+	// 版本取自角色本身而非硬编码：只有版本正确时仍然 409，才能证明拦截来自「仍有绑定用户」。
+	admin.request("DELETE", orgPath+"/roles/"+roleID+"?version="+admin.roleVersion(org, roleID), nil, 409)
 	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{}, "version": "3"}, 204)
-	member.request("GET", orgPath+"/audit-events", nil, 403)
+	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
 	// 服务凭证不能代替浏览器原始身份。
 	call := func(cookie string, method string, want int, resources ...any) {
 		t.Helper()
@@ -454,7 +488,11 @@ func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
 	admin := newAPIClient(t, f.public.URL, f.public.URL)
 	admin.login(f.admin, f.initial)
 	admin.login(f.admin, f.password)
-	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password}, 201)
+	createOrg := admin.request("GET", "/api/v1/iam/me", nil, 200)["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	organizationUserRoleID := admin.request("POST", "/api/v1/iam/orgs/"+createOrg+"/roles",
+		map[string]any{"name": "只读用户", "permissions": []string{"iam.users.read"}}, 201)["id"].(string)
+
+	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password, "org_id": createOrg, "role_ids": []string{organizationUserRoleID}}, 201)
 	userPath := "/api/v1/iam/users/" + user["id"].(string)
 	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "1"}, 204)
 	if got := admin.request("GET", userPath, nil, 200)["email"]; got != "patch@example.com" {
@@ -467,17 +505,17 @@ func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
 	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "3", "email": nil}, 400)
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	role := admin.request("POST", "/api/v1/iam/orgs/"+org+"/roles", map[string]any{"code": "patch_role", "name": "Before", "description": "Preserve me"}, 201)
+	role := admin.request("POST", "/api/v1/iam/orgs/"+org+"/roles", map[string]any{"name": "Before", "description": "Preserve me", "permissions": []string{"iam.roles.read"}}, 201)
 	rolePath := "/api/v1/iam/orgs/" + org + "/roles/" + role["id"].(string)
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "1"}, 204)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "1"}, 204)
 	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "Preserve me" {
 		t.Fatalf("omitted description changed stored value: %v", got)
 	}
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "2", "description": ""}, 204)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "2", "description": ""}, 204)
 	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "" {
 		t.Fatalf("explicit empty description was not cleared: %v", got)
 	}
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "status": "active", "version": "3", "description": nil}, 400)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "3", "description": nil}, 400)
 }
 
 func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
@@ -489,7 +527,7 @@ func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	base := "/api/v1/iam/orgs/" + org
 	admin.request("POST", base+"/roles", map[string]any{"name": "Missing code"}, 400)
-	role := admin.request("POST", base+"/roles", map[string]any{"code": "review_role", "name": "Review"}, 201)["id"].(string)
+	role := admin.request("POST", base+"/roles", map[string]any{"name": "Review", "permissions": []string{"iam.roles.read"}}, 201)["id"].(string)
 	admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Missing status"}, 400)
 	permissions := []string{"iam.audit.read", "iam.audit.read"}
 	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": role, "permissions": permissions, "version": "1"}, 400)
@@ -499,11 +537,11 @@ func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
 		roles[i] = uuid.NewString()
 	}
 	member := uuid.NewString()
-	admin.request("POST", base+"/permission-preview", map[string]any{"membership_id": member, "role_ids": roles, "authz_epoch": "1"}, 400)
-	admin.request("PUT", base+"/members/"+member+"/roles", map[string]any{"role_ids": roles, "authz_epoch": "1"}, 400)
+	admin.request("POST", base+"/permission-preview", map[string]any{"organization_user_id": member, "role_ids": roles, "authz_epoch": "1"}, 400)
+	admin.request("PUT", base+"/users/"+member+"/roles", map[string]any{"role_ids": roles, "authz_epoch": "1"}, 400)
 
 	for _, version := range []string{"0", "9223372036854775808", "invalid"} {
-		admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Review", "status": "active", "version": version}, 400)
+		admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Review", "version": version}, 400)
 	}
 	admin.request("GET", base+"/roles?limit=0", nil, 400)
 	admin.request("GET", base+"/roles?offset=-1", nil, 400)
@@ -527,11 +565,11 @@ func TestProfileTimeZonePreference(t *testing.T) {
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	orgPath := "/api/v1/iam/orgs/" + org
 
-	memberPassword := "isolated timezone password"
-	admin.request("POST", orgPath+"/members", map[string]string{"username": f.member, "display_name": "时区成员", "password": memberPassword}, 201)
+	organizationUserPassword := "isolated timezone password"
+	admin.request("POST", orgPath+"/users", map[string]string{"username": f.member, "display_name": "时区用户", "password": organizationUserPassword}, 201)
 
 	client := newAPIClient(t, public.URL, public.URL)
-	client.login(f.member, memberPassword)
+	client.login(f.member, organizationUserPassword)
 
 	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != nil && got != "" {
 		t.Fatalf("fresh account timezone = %v, want empty", got)
@@ -572,7 +610,7 @@ func TestProfileTimeZonePreference(t *testing.T) {
 	}
 }
 
-// TestCrossOrganizationAccessIsDenied 固定长期安全契约：组织成员不能读写
+// TestCrossOrganizationAccessIsDenied 固定长期安全契约：组织用户不能读写
 // 其它组织的资源，即使持有本组织的全部管理权限。
 func TestCrossOrganizationAccessIsDenied(t *testing.T) {
 	f := newFixture(t, nil)
@@ -583,13 +621,16 @@ func TestCrossOrganizationAccessIsDenied(t *testing.T) {
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
 	homeOrg := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 
-	memberPassword := "cross org member password"
-	admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/members",
-		map[string]string{"username": f.member, "display_name": "跨组织成员", "password": memberPassword}, 201)
+	organizationUserPassword := "cross org member password"
+	admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/users",
+		map[string]string{"username": f.member, "display_name": "跨组织用户", "password": organizationUserPassword}, 201)
 
-	// 第二个组织由超级管理员创建，成员不属于它。
+	homeMemberRole := admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/roles",
+		map[string]any{"name": "只读用户", "permissions": []string{"iam.users.read"}}, 201)["id"].(string)
+
+	// 第二个组织由超级管理员创建，用户不属于它。
 	foreignAdmin := admin.request("POST", "/api/v1/iam/users",
-		map[string]any{"username": "foreign_admin_" + uuid.NewString()[:8], "display_name": "外部管理员", "password": "foreign admin password"}, 201)
+		map[string]any{"username": "foreignadm" + uuid.NewString()[:8], "display_name": "外部管理员", "password": "foreign admin password", "org_id": homeOrg, "role_ids": []string{homeMemberRole}}, 201)
 	foreign := admin.request("POST", "/api/v1/iam/organizations",
 		map[string]any{"slug": "foreign-" + uuid.NewString()[:8], "name": "外部组织",
 			"admin_user_id": foreignAdmin["id"]}, 201)
@@ -599,14 +640,13 @@ func TestCrossOrganizationAccessIsDenied(t *testing.T) {
 	}
 
 	member := newAPIClient(t, f.public.URL, f.public.URL)
-	member.login(f.member, memberPassword)
+	member.login(f.member, organizationUserPassword)
 
-	// 读写外部组织的成员、角色与审计都必须拒绝，不能因为持有本组织权限而通过。
-	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/members", nil, 403)
+	// 读写外部组织的用户、角色与审计都必须拒绝，不能因为持有本组织权限而通过。
+	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/users", nil, 403)
 	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/roles", nil, 403)
-	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/audit-events", nil, 403)
-	member.request("PATCH", "/api/v1/iam/orgs/"+foreignOrg, map[string]any{"name": "被改名", "authz_epoch": "1"}, 403)
-	member.request("POST", "/api/v1/iam/orgs/"+foreignOrg+"/roles", map[string]any{"code": "sneaky", "name": "偷建"}, 403)
+	member.request("GET", "/api/v1/iam/audit-events?actor=nobody-matches", nil, 200)
+	member.request("POST", "/api/v1/iam/orgs/"+foreignOrg+"/roles", map[string]any{"name": "偷建", "permissions": []string{"iam.roles.read"}}, 403)
 
 	// 用外部组织 org_id 请求身份上下文同样被拒，说明边界在服务端而非菜单。
 	member.request("GET", "/api/v1/iam/me?org_id="+foreignOrg, nil, 403)
@@ -629,12 +669,12 @@ func TestManagementBindingRejectsInvalidInputBeforeService(t *testing.T) {
 	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
 	base := "/api/v1/iam/orgs/" + org
 
-	admin.request("POST", base+"/roles", map[string]any{"code": "", "name": ""}, 400)
-	admin.request("PATCH", base+"/roles/00000000-0000-4000-8000-000000000000", map[string]any{"name": "Role", "status": "active"}, 400)
+	admin.request("POST", base+"/roles", map[string]any{"name": "", "permissions": []string{}}, 400)
+	admin.request("PATCH", base+"/roles/00000000-0000-4000-8000-000000000000", map[string]any{"name": "Role"}, 400)
 	admin.request("PUT", base+"/roles/00000000-0000-4000-8000-000000000000/permissions", map[string]any{"permissions": []string{}, "version": "abc"}, 400)
 	admin.request("POST", "/api/v1/iam/organizations", map[string]any{"name": "", "slug": "", "admin_user_id": ""}, 400)
 	admin.request("GET", "/api/v1/iam/organizations?limit=1000", nil, 400)
 	admin.request("GET", "/api/v1/iam/audit-events?offset=-1", nil, 400)
 	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": ""}, 400)
-	admin.request("GET", "/api/v1/iam/orgs/not-a-uuid/members", nil, 400)
+	admin.request("GET", "/api/v1/iam/orgs/not-a-uuid/users", nil, 400)
 }

@@ -87,7 +87,7 @@ func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset
 	for i := range items {
 		role := &items[i]
 		role.AllowedActions = []string{iamclient.PermissionIAMRolesRead}
-		if canManage && role.Kind == "custom" && authorization.CheckDelegation(effective, role.Permissions, role.Permissions, catalog) == nil {
+		if canManage && authorization.CheckDelegation(effective, role.Permissions, role.Permissions, catalog) == nil {
 			role.AllowedActions = append(role.AllowedActions, iamclient.PermissionIAMRolesManage)
 		}
 	}

@@ -2,15 +2,17 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/aarondl/opt/omit"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
 // InsertUser 创建用户资料，不对外暴露密码记录。
 func InsertUser(ctx context.Context, db *gorm.DB, id uuid.UUID, value string, normalized string, displayName string, email string) error {
-	return db.WithContext(ctx).Table("iam.users").Create(map[string]any{
+	err := db.WithContext(ctx).Table("iam.users").Create(map[string]any{
 		"id":                  id,
 		"username":            value,
 		"username_normalized": normalized,
@@ -18,6 +20,25 @@ func InsertUser(ctx context.Context, db *gorm.DB, id uuid.UUID, value string, no
 		"email":               gorm.Expr("NULLIF(?, '')", email),
 		"status":              "active",
 	}).Error
+	return mapUniqueViolation(err)
+}
+
+// mapUniqueViolation 按约束名区分用户名与邮箱冲突。
+// 通用 23505 映射会落到 conflict，用户无法知道该改哪一项。
+func mapUniqueViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return err
+	}
+
+	switch pgErr.ConstraintName {
+	case "users_username_normalized_key":
+		return ErrUsernameTaken
+	case "users_email_normalized_key":
+		return ErrEmailTaken
+	}
+
+	return err
 }
 
 // InsertPassword 为新账号写入密码哈希。

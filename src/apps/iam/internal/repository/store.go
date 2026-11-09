@@ -23,6 +23,15 @@ var (
 	ErrConflict        = errors.New("resource changed or is still in use")
 	ErrInvalid         = errors.New("invalid input")
 	ErrNotFound        = errors.New("resource not found")
+	// ErrHasChildren 与 ErrHasUsers 区分组织删除的两种阻塞原因，
+	// 否则二者都落到通用 conflict，用户不知道要先处理哪一项。
+	ErrHasChildren = errors.New("organization still has child organizations")
+	ErrHasUsers    = errors.New("organization still has users")
+	// ErrRootOrganization 阻止删除全局唯一的根组织：删除后整棵树失去根，
+	// organizations_single_root 不变量被破坏，祖先链查询随之失效。
+	ErrRootOrganization = errors.New("root organization cannot be deleted")
+	ErrUsernameTaken    = errors.New("username is already taken")
+	ErrEmailTaken       = errors.New("email is already taken")
 )
 
 // Store 持有 IAM 使用的 PostgreSQL 连接池。
@@ -156,55 +165,69 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		}
 	}
 
-	var count int64
-	if err = tx.WithContext(ctx).Table("iam.users").Count(&count).Error; err != nil {
-		return err
-	}
 	userID, err := syncAdministrator(ctx, tx, username, password)
 	if err != nil {
 		return err
 	}
-	if count == 0 {
-		orgID := uuid.New()
-		if err = CreateOrganization(ctx, tx, orgID, "default", "默认组织", userID, userID); err != nil {
+
+	// 根组织由 00010 迁移创建（slug=master）。这里只保证它有管理员关系，
+	// 不重复建组织，也不依赖 users 是否为空：组织重建后既有账号仍需可登录。
+	var rootID string
+	if err = tx.WithContext(ctx).Raw(`SELECT id::text FROM iam.organizations WHERE parent_id IS NULL`).Row().Scan(&rootID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("root organization is missing; run the organization tree migration before seeding")
+		}
+
+		return err
+	}
+
+	orgID, err := uuid.Parse(rootID)
+	if err != nil {
+		return err
+	}
+
+	var attached bool
+	if err = tx.WithContext(ctx).Raw(
+		`SELECT EXISTS(SELECT 1 FROM iam.organization_users WHERE org_id = $1 AND user_id = $2)`, orgID, userID,
+	).Row().Scan(&attached); err != nil {
+		return err
+	}
+
+	if !attached {
+		if err = AttachRootMembership(ctx, tx, orgID, userID); err != nil {
 			return err
 		}
+
 		if err = AppendAudit(ctx, tx, Audit{ActorType: "deployment_operator", Action: "iam.initialize", TargetType: "organization", TargetID: &orgID, RequestID: uuid.NewString()}); err != nil {
 			return err
 		}
-	}
-	// 只同步内置角色授权；自定义角色属于用户数据，不能被初始化覆盖。
-	if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT r.org_id,r.id,p.permission_key FROM iam.roles r CROSS JOIN iam.permissions p WHERE r.kind='system' AND r.code='org_admin' AND p.scope='organization' AND p.status='active' ON CONFLICT DO NOTHING`).Error; err != nil {
-		return err
 	}
 
 	return tx.Commit().Error
 }
 
-// CreateOrganization 在事务中创建组织及其管理员关系。
-func CreateOrganization(ctx context.Context, tx *gorm.DB, id uuid.UUID, slug, name string, adminID, actorID uuid.UUID) error {
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,$2,$3,'active')`, id, slug, name).Error; err != nil {
+// CreateOrganization 在事务中创建组织，并把指定的初始用户挂到该组织。
+// parentID 为空表示创建根组织；深度由 organization_tree_guard 触发器计算。
+func CreateOrganization(ctx context.Context, tx *gorm.DB, id uuid.UUID, slug, name string, parentID *uuid.UUID, organizationUserID, actorID uuid.UUID) error {
+	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,$2,$3,$4)`, id, slug, name, parentID).Error; err != nil {
 		return err
 	}
 
-	adminRole, memberRole, membership := uuid.New(), uuid.New(), uuid.New()
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.roles(id,org_id,code,name,kind,status,created_by) VALUES($1,$3,'org_admin','组织管理员','system','active',$4),($2,$3,'member','普通成员','system','active',$4)`, adminRole, memberRole, id, actorID).Error; err != nil {
-		return err
-	}
-
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.role_permissions(org_id,role_id,permission_key) SELECT $1,$2,permission_key FROM iam.permissions WHERE scope='organization' AND status='active'`, id, adminRole).Error; err != nil {
-		return err
-	}
-
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.memberships(id,org_id,user_id,status) VALUES($1,$2,$3,'active')`, membership, id, adminID).Error; err != nil {
-		return err
-	}
-
-	err := tx.WithContext(ctx).Exec(`INSERT INTO iam.membership_roles(org_id,membership_id,role_id,created_by) VALUES($1,$2,$3,$4),($1,$2,$5,$4)`, id, membership, adminRole, actorID, memberRole).Error
-	return err
+	return AttachRootMembership(ctx, tx, id, organizationUserID)
 }
 
-// VerifySchema 校验迁移版本及初始管理员，不在服务启动时自动改表。
+// AttachRootMembership 把指定用户作为有效用户挂到组织下。
+//
+// 组织不再自带内置角色：角色完全由使用者按需创建并授予权限，
+// 因此这里只建用户关系，不写任何角色或授权。
+func AttachRootMembership(ctx context.Context, tx *gorm.DB, orgID, userID uuid.UUID) error {
+	return tx.WithContext(ctx).Exec(
+		`INSERT INTO iam.organization_users(id,org_id,user_id,status) VALUES($1,$2,$3,'active') ON CONFLICT (org_id,user_id) DO NOTHING`,
+		uuid.New(), orgID, userID,
+	).Error
+}
+
+// VerifySchema 校验迁移版本及初始超级管理员，不在服务启动时自动改表。
 func (s *Store) VerifySchema(ctx context.Context) error {
 	var err error
 	current, target, pending, err := schemaState(ctx, s.sqlDB)

@@ -60,7 +60,7 @@ func TestDefaultAndCustomFailure(t *testing.T) {
 	}{
 		{"default", func(w http.ResponseWriter) { Fail(w) }, 500, ""},
 		{"registered", func(w http.ResponseWriter) { Fail(w, CodePermissionDenied) }, 403, ""},
-		{"custom message", func(w http.ResponseWriter) { FailWithMessage(w, CodeConflict, "角色仍有成员") }, 409, "角色仍有成员"},
+		{"custom message", func(w http.ResponseWriter) { FailWithMessage(w, CodeConflict, "角色仍有用户") }, 409, "角色仍有用户"},
 	} {
 		t.Run(input.name, func(t *testing.T) {
 			w := httptest.NewRecorder()

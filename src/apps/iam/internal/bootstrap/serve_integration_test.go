@@ -26,7 +26,7 @@ func TestUnifiedHTTPListener(t *testing.T) {
 	}
 	cfg.DB.URL = store.Pool.Config().ConnConfig.ConnString()
 	cfg.Cache.URL = os.Getenv("SPX_TEST_REDIS_URL")
-	cfg.Bootstrap.Username = "admin-" + uuid.NewString()
+	cfg.Bootstrap.Username = "admin" + uuid.NewString()[:8]
 	cfg.Bootstrap.Password = "isolated administrator password"
 	if err := store.Seed(context.Background(), cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
 		t.Fatal(err)

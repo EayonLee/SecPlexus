@@ -9,8 +9,14 @@ import (
 	"time"
 )
 
+// testBootstrapPassword 供全部配置用例使用。R1 之后 YAML 不再内置默认密码，
+// 缺失时校验会失败，因此这里显式注入。
+const testBootstrapPassword = "test-bootstrap-password"
+
 func configFile(t *testing.T) string {
 	t.Helper()
+	t.Setenv("SPX_IAM_BOOTSTRAP_PASSWORD", testBootstrapPassword)
+
 	data, err := os.ReadFile("../../config.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +47,7 @@ func TestConfigurationPrecedence(t *testing.T) {
 		t.Fatal("incorrect configuration precedence")
 	}
 
-	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password != "secplexus" || cfg.Cache.Password != "secplexus" || cfg.Cache.User != "default" {
+	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password != testBootstrapPassword || cfg.Cache.Password != "secplexus" || cfg.Cache.User != "default" {
 		t.Fatal("incorrect authentication defaults")
 	}
 
@@ -233,5 +239,29 @@ func TestConnectionHostDoesNotBindListener(t *testing.T) {
 	}
 	if cfg.App.Host != "127.0.0.1" || cfg.App.Port != 18081 {
 		t.Fatal("explicit listener override not respected")
+	}
+}
+
+// TestValidateAdministratorReportsPasswordLength 确保密码不合法时错误信息
+// 报出实际接收到的字符数。截断值（例如 .env 里未加引号的 '#' 之后被当作
+// 注释丢弃）会因此立刻自解释，而无需泄露密码本身。
+func TestValidateAdministratorReportsPasswordLength(t *testing.T) {
+	t.Parallel()
+
+	c := Config{}
+	c.Bootstrap.Username = "admin"
+	c.Bootstrap.Password = "SecPlexus"
+
+	err := c.ValidateAdministrator()
+	if err == nil {
+		t.Fatal("ValidateAdministrator() accepted a 9-character password")
+	}
+
+	if !strings.Contains(err.Error(), "got 9") {
+		t.Fatalf("error does not report the received length: %v", err)
+	}
+
+	if strings.Contains(err.Error(), c.Bootstrap.Password) {
+		t.Fatalf("error leaks the password value: %v", err)
 	}
 }

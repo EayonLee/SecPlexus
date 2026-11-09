@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 400" width="860" height="400" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="860" height="400" fill="#ffffff"/>
+
+  <text x="430" y="32" text-anchor="middle" font-size="15" font-weight="700" fill="#1e293b">一次授权判定经过什么</text>
+  <text x="430" y="52" text-anchor="middle" font-size="11" fill="#94a3b8">每个受保护请求都会走完这条链路</text>
+
+  <!-- 步骤 -->
+  <rect x="30" y="80" width="150" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="105" y="108" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">1. 验服务凭证</text>
+  <text x="105" y="128" text-anchor="middle" font-size="10" fill="#64748b">调用方是谁</text>
+
+  <rect x="215" y="80" width="150" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="290" y="108" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">2. 验用户会话</text>
+  <text x="290" y="128" text-anchor="middle" font-size="10" fill="#64748b">原 Cookie + 版本</text>
+
+  <rect x="400" y="80" width="150" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="475" y="108" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">3. 查权限目录</text>
+  <text x="475" y="128" text-anchor="middle" font-size="10" fill="#64748b">这个 action 存在吗</text>
+
+  <rect x="585" y="80" width="150" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="660" y="108" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">4. 算有效权限</text>
+  <text x="660" y="128" text-anchor="middle" font-size="10" fill="#64748b">角色并集</text>
+
+  <line x1="182" y1="115" x2="212" y2="115" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="367" y1="115" x2="397" y2="115" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="552" y1="115" x2="582" y2="115" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- 判定 -->
+  <rect x="215" y="205" width="430" height="65" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="430" y="232" text-anchor="middle" font-size="12" font-weight="600" fill="#1e40af">5. 统一求值（不通过则拒绝）</text>
+  <text x="430" y="252" text-anchor="middle" font-size="10" fill="#3b82f6">组织有效 · 成员有效 · 权限命中 · 近期认证</text>
+
+  <line x1="660" y1="152" x2="660" y2="180" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="660" y1="180" x2="432" y2="180" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="432" y1="180" x2="432" y2="202" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- 结果 -->
+  <rect x="215" y="305" width="205" height="60" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+  <text x="317" y="330" text-anchor="middle" font-size="12" font-weight="600" fill="#065f46">允许</text>
+  <text x="317" y="350" text-anchor="middle" font-size="10" fill="#059669">返回 scope + decision_id</text>
+
+  <rect x="440" y="305" width="205" height="60" rx="8" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
+  <text x="542" y="330" text-anchor="middle" font-size="12" font-weight="600" fill="#991b1b">拒绝</text>
+  <text x="542" y="350" text-anchor="middle" font-size="10" fill="#dc2626">403 / 401 / 503</text>
+
+  <line x1="360" y1="271" x2="317" y2="302" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="500" y1="271" x2="542" y2="302" stroke="#64748b" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <text x="430" y="388" text-anchor="middle" font-size="10" fill="#94a3b8">依赖故障返回 503，绝不放行</text>
+</svg>

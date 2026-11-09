@@ -45,8 +45,8 @@ IAM已提供真实登录、主动改密、可撤销会话、组织、自定义�
 唯一超级管理员默认 `admin/secplexus`，身份与密码由 `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` 持续管理，修改后重启全部 IAM 副本，不能在页面中修改。管理中心和个人设置已接入真实API。
 Console当前提供组织访问与SSE鉴权，还没有业务工作流；Web基于Next.js/shadcn，仅保留`/dashboard`的CRM V1安全智驾工作台和`/login`、`/settings/profile`、`/settings/account`、`/management`真实IAM页面；其他模板页面及菜单已删除，工作台当前展示示例数据；Web通过next-intl支持英文与简体中文切换。
 
-启动方式、配置优先级和维护步骤见[配置指南](docs/configuration.md)。
-测试入口见[测试指南](docs/testing.md)，模块设计见[IAM README](src/apps/iam/README.md)与
+启动方式、配置优先级和维护步骤见[配置指南](docs/development/configuration.md)。
+测试入口见[测试指南](docs/development/testing.md)，模块设计见[IAM README](src/apps/iam/README.md)与
 [Web README](src/apps/web/README.md)。
 
 Go模块在`config.yaml`中声明环境变量和默认值，使用成熟参数组件展开，再由Viper/mapstructure严格解码，命令入口采用Cobra。

@@ -11,11 +11,11 @@ func TestAuthorizationBoundaries(t *testing.T) {
 	p := iamclient.Principal{UserID: "user", AuthenticatedAt: time.Now()}
 	permission := Permission{Key: "iam.roles.read", Scope: "organization", Status: "active"}
 	base := Snapshot{
-		Principal:          p,
-		OrganizationID:     "org",
-		OrganizationActive: true,
-		MembershipActive:   true,
-		Permissions:        []string{"iam.roles.read"},
+		Principal:              p,
+		OrganizationID:         "org",
+		OrganizationActive:     true,
+		OrganizationUserActive: true,
+		Permissions:            []string{"iam.roles.read"},
 	}
 	if _, err := Evaluate(base, permission, "org", time.Now(), 5*time.Minute); err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func TestAuthorizationBoundaries(t *testing.T) {
 		permission Permission
 	}{
 		{"different organization", base, "other", permission},
-		{"empty grants", Snapshot{Principal: p, OrganizationID: "org", OrganizationActive: true, MembershipActive: true}, "org", permission},
+		{"empty grants", Snapshot{Principal: p, OrganizationID: "org", OrganizationActive: true, OrganizationUserActive: true}, "org", permission},
 		{"platform requires protected identity", base, "", Permission{Scope: "platform", Status: "active"}},
 		{"unknown scope", base, "org", Permission{Scope: "object", Status: "active"}},
 		{"retired action", base, "org", Permission{Scope: "organization", Status: "retired"}},

@@ -42,7 +42,7 @@ repository. PostgreSQL stores IAM data and sessions; Redis supports rate limitin
 | [`docs/plans/`](docs/plans/README.md) | Requirements, implementation plans, approval status, and validation evidence |
 
 Read the affected module's README and existing implementation first. The
-[architecture documents](docs/architecture/README.md) include earlier platform
+[architecture documents](docs/design/architecture/README.md) include earlier platform
 proposals; heed their version notes. Use module documentation and approved
 specifications for the current implementation. Console business workflows and
 UI demonstration pages must not be presented as completed product capabilities.
@@ -62,7 +62,7 @@ Tool versions follow `go.mod` and `package.json`:
 
 The template font registry uses `next/font/google`: a cold Web build needs access
 to Google Fonts stylesheet and font endpoints. A cached build does not verify that
-network requirement. See [build troubleshooting](docs/configuration.md#首次构建与网络排障)
+network requirement. See [build troubleshooting](docs/development/configuration.md#首次构建与网络排障)
 if font downloads fail; do not change the template fonts to hide a network failure.
 
 Fork the repository to your GitHub account, then clone your fork and add the
@@ -86,7 +86,7 @@ chmod 600 .env
 
 Fill in `.env` with your development database connection, configuration-managed administrator
 password, CSRF key, and service credential. Follow the
-[configuration guide](docs/configuration.md) for field requirements and reverse proxy access.
+[configuration guide](docs/development/configuration.md) for field requirements and reverse proxy access.
 Keep `.env`, credentials, and logs out of version control.
 
 Connect to existing development PostgreSQL and Redis instances, or explicitly
@@ -193,7 +193,7 @@ Follow [AGENTS.md](AGENTS.md) and the
 Start behavior changes with a focused failing test. Choose the lowest layer
 that reliably protects the behavior: unit tests for rules and boundaries,
 integration tests for real component contracts, and E2E tests for core user flows
-and access boundaries. See the [testing guide](docs/testing.md) for isolation,
+and access boundaries. See the [testing guide](docs/development/testing.md) for isolation,
 resource cleanup, and targeted test commands.
 
 Run relevant checks from the repository root:
@@ -292,4 +292,4 @@ reported test results.
 
 Use native Gin handlers and middleware with module-owned DTOs. IAM credential use cases take typed values; Argon2id, SCS, CSRF and the Redis limiter own their mechanisms. Use GORM projections/transactions and Goose migrations, and Viper/mapstructure with Cobra for configuration and commands. See the [actual role management walkthrough](docs/development/role-management.md); do not create another generic utility or routing layer for an existing framework capability.
 
-Use Axios for module API calls and infer types from consumed Zod models. Query owns server state; RHF and Zod own forms. Sensitive password operations stay outside MutationCache. Preserve the template components/styles and next-intl catalogs. Run `make lint-go`, `make vuln-go` and the applicable checks in the [testing guide](docs/testing.md); these are local checks, not a deployment or CI workflow.
+Use Axios for module API calls and infer types from consumed Zod models. Query owns server state; RHF and Zod own forms. Sensitive password operations stay outside MutationCache. Preserve the template components/styles and next-intl catalogs. Run `make lint-go`, `make vuln-go` and the applicable checks in the [testing guide](docs/development/testing.md); these are local checks, not a deployment or CI workflow.

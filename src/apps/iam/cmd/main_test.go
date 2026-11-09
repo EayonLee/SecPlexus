@@ -24,6 +24,7 @@ func TestCommandsRejectArgumentsWithoutLoadingDependencies(t *testing.T) {
 }
 
 func TestServeRejectsMissingSecurityBeforeOpeningLog(t *testing.T) {
+	t.Setenv("SPX_IAM_BOOTSTRAP_PASSWORD", "test-bootstrap-password")
 	cfg, err := config.Load("../config.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +48,7 @@ func TestCheckConfigHasNoRuntimeSideEffects(t *testing.T) {
 	t.Setenv("SPX_REDIS_PORT", "1")
 	logfile := filepath.Join(t.TempDir(), "must-not-exist.log")
 	t.Setenv("SPX_IAM_LOG_FILE", logfile)
+	t.Setenv("SPX_IAM_BOOTSTRAP_PASSWORD", "test-bootstrap-password")
 	cmd := newCommand()
 	cmd.SetArgs([]string{"check-config", "--config", "../config.yaml", "--print-endpoints"})
 	output := &bytes.Buffer{}

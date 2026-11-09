@@ -14,35 +14,43 @@ import (
 // Role 保存角色及其当前权限；仅在模块内部用于委派校验。
 type Role struct {
 	ID          string   // 资源标识。
-	Code        string   // 角色稳定代码。
 	Name        string   // 角色显示名称。
 	Description string   // 用途说明。
-	Kind        string   // 内置或自定义角色类别。
-	Status      string   // 当前启用状态。
 	Version     int64    // 用于拒绝过期写入的版本号。
-	MemberCount int64    // 当前关联成员数。
-	Permissions []string `gorm:"-"` // 当前权限键集合。
+	UserCount   int64    `gorm:"column:organization_user_count"` // 当前关联用户数。
+	Permissions []string `gorm:"-"`                              // 当前权限键集合。
 }
 
-// CreateRole 在调用方事务中创建自定义角色。
-func CreateRole(ctx context.Context, tx *gorm.DB, id uuid.UUID, orgID, code, name, description, status, actorID string) error {
+// CreateRole 在调用方事务中创建角色。
+func CreateRole(ctx context.Context, tx *gorm.DB, id uuid.UUID, orgID, name, description, actorID string) error {
 	return tx.WithContext(ctx).Table("iam.roles").Create(map[string]any{
 		"id":          id,
 		"org_id":      orgID,
-		"code":        code,
 		"name":        name,
 		"description": description,
-		"kind":        "custom",
-		"status":      status,
 		"created_by":  actorID,
 	}).Error
+}
+
+// GrantRolePermissions 为新建角色一次性写入初始权限。
+func GrantRolePermissions(ctx context.Context, tx *gorm.DB, orgID, roleID string, permissions []string) error {
+	if len(permissions) == 0 {
+		return nil
+	}
+
+	grants := make([]rolePermission, 0, len(permissions))
+	for _, key := range permissions {
+		grants = append(grants, rolePermission{OrgID: orgID, RoleID: roleID, PermissionKey: key})
+	}
+
+	return gorm.G[rolePermission](tx).Table("iam.role_permissions").CreateInBatches(ctx, &grants, 100)
 }
 
 // RoleGrants 锁定目标角色并读取权限，供相同事务内的版本及委派校验使用。
 func RoleGrants(ctx context.Context, tx *gorm.DB, orgID, roleID string) (Role, error) {
 	role := Role{Permissions: []string{}}
 	err := tx.WithContext(ctx).Table("iam.roles AS r").
-		Select("r.id,r.code,r.name,r.description,r.kind,r.status,r.version,(SELECT count(*) FROM iam.membership_roles mr WHERE mr.org_id=r.org_id AND mr.role_id=r.id) AS member_count").
+		Select("r.id,r.name,r.description,r.version,(SELECT count(*) FROM iam.organization_user_roles mr WHERE mr.org_id=r.org_id AND mr.role_id=r.id) AS organization_user_count").
 		Clauses(clause.Locking{Strength: "UPDATE"}).Where("r.org_id = ? AND r.id = ?", orgID, roleID).Take(&role).Error
 	if err != nil {
 		return role, err
@@ -53,12 +61,11 @@ func RoleGrants(ctx context.Context, tx *gorm.DB, orgID, roleID string) (Role, e
 }
 
 // UpdateRole 更新角色信息和版本，零值描述仍会写入。
-func UpdateRole(ctx context.Context, tx *gorm.DB, orgID, roleID, name, description, status string) error {
+func UpdateRole(ctx context.Context, tx *gorm.DB, orgID, roleID, name, description string) error {
 	return tx.WithContext(ctx).Table("iam.roles").Where("org_id = ? AND id = ?", orgID, roleID).
 		Updates(map[string]any{
 			"name":        name,
 			"description": description,
-			"status":      status,
 			"version":     gorm.Expr("version+1"),
 			"updated_at":  gorm.Expr("now()"),
 		}).Error
@@ -116,53 +123,49 @@ func OrganizationVersion(ctx context.Context, tx *gorm.DB, orgID string) (int64,
 	return row.AuthzEpoch, err
 }
 
-// MemberExists 判断目标是否属于当前组织。
-func MemberExists(ctx context.Context, tx *gorm.DB, orgID, memberID string) (bool, error) {
+// OrganizationUserExists 判断目标是否属于当前组织。
+func OrganizationUserExists(ctx context.Context, tx *gorm.DB, orgID, organizationUserID string) (bool, error) {
 	var count int64
-	err := tx.WithContext(ctx).Table("iam.memberships").Where("org_id = ? AND id = ?", orgID, memberID).Count(&count).Error
+	err := tx.WithContext(ctx).Table("iam.organization_users").Where("org_id = ? AND id = ?", orgID, organizationUserID).Count(&count).Error
 	return count > 0, err
 }
 
-// MemberRoleIDs 读取目标成员的角色标识。
-func MemberRoleIDs(ctx context.Context, tx *gorm.DB, orgID, memberID string) ([]string, error) {
+// OrganizationUserRoleIDs 读取目标用户的角色标识。
+func OrganizationUserRoleIDs(ctx context.Context, tx *gorm.DB, orgID, organizationUserID string) ([]string, error) {
 	ids := []string{}
-	err := tx.WithContext(ctx).Table("iam.membership_roles").Where("org_id = ? AND membership_id = ?", orgID, memberID).Pluck("role_id::text", &ids).Error
+	err := tx.WithContext(ctx).Table("iam.organization_user_roles").Where("org_id = ? AND organization_user_id = ?", orgID, organizationUserID).Pluck("role_id::text", &ids).Error
 	return ids, err
 }
 
-// ReplaceMemberRoles 在已完成授权和版本检查的事务内替换角色关系。
-func ReplaceMemberRoles(ctx context.Context, tx *gorm.DB, orgID, memberID string, ids []string, actorID string) error {
-	if err := tx.WithContext(ctx).Table("iam.membership_roles").Where("org_id = ? AND membership_id = ?", orgID, memberID).Delete(nil).Error; err != nil {
+// ReplaceOrganizationUserRoles 在已完成授权和版本检查的事务内替换角色关系。
+func ReplaceOrganizationUserRoles(ctx context.Context, tx *gorm.DB, orgID, organizationUserID string, ids []string, actorID string) error {
+	if err := tx.WithContext(ctx).Table("iam.organization_user_roles").Where("org_id = ? AND organization_user_id = ?", orgID, organizationUserID).Delete(nil).Error; err != nil {
 		return err
 	}
 
 	if len(ids) == 0 {
 		return nil
 	}
-	rows := make([]membershipRole, 0, len(ids))
+	rows := make([]organizationUserRole, 0, len(ids))
 	for _, id := range ids {
-		rows = append(rows, membershipRole{OrgID: orgID, MembershipID: memberID, RoleID: id, CreatedBy: actorID})
+		rows = append(rows, organizationUserRole{OrgID: orgID, OrganizationUserID: organizationUserID, RoleID: id, CreatedBy: actorID})
 	}
-	return gorm.G[membershipRole](tx).Table("iam.membership_roles").CreateInBatches(ctx, &rows, 100)
+	return gorm.G[organizationUserRole](tx).Table("iam.organization_user_roles").CreateInBatches(ctx, &rows, 100)
 
 }
 
-// ProtectLastAdministrators 保持平台和各有效组织至少一个有效管理员。
-// 此查询须在管理锁内执行，防止两个并发撤销同时通过。
-func ProtectLastAdministrators(ctx context.Context, tx *gorm.DB) error {
-	var invalid bool
-	err := tx.WithContext(ctx).Raw(`
- SELECT NOT EXISTS(SELECT 1 FROM iam.users WHERE is_super_admin AND status='active')
- OR EXISTS(SELECT 1 FROM iam.organizations o WHERE o.status='active' AND NOT EXISTS(
- SELECT 1 FROM iam.memberships m JOIN iam.users u ON u.id=m.user_id AND u.status='active'
- JOIN iam.membership_roles mr ON mr.org_id=m.org_id AND mr.membership_id=m.id
- JOIN iam.roles r ON r.org_id=mr.org_id AND r.id=mr.role_id AND r.kind='system' AND r.code='org_admin' AND r.status='active'
- WHERE m.org_id=o.id AND m.status='active'))`).Row().Scan(&invalid)
+// ProtectPlatformAdministrator 校验平台仍至少有一个有效超级管理员。
+// 这是平台级约束，与具体组织无关；组织不再强制要求管理员。
+func ProtectPlatformAdministrator(ctx context.Context, tx *gorm.DB) error {
+	var missing bool
+	err := tx.WithContext(ctx).Raw(
+		`SELECT NOT EXISTS(SELECT 1 FROM iam.users WHERE is_super_admin AND status='active')`,
+	).Row().Scan(&missing)
 	if err != nil {
 		return err
 	}
 
-	if invalid {
+	if missing {
 		return ErrConflict
 	}
 
@@ -182,11 +185,11 @@ func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limi
 	}
 
 	rows, err := db.WithContext(ctx).Raw(`
- SELECT r.id::text,r.code,r.name,r.description,r.kind,r.status,r.version,
+ SELECT r.id::text,r.name,r.description,r.version,
  ARRAY(SELECT permission_key FROM iam.role_permissions rp WHERE rp.org_id=r.org_id AND rp.role_id=r.id ORDER BY permission_key),
- (SELECT count(*) FROM iam.membership_roles mr WHERE mr.org_id=r.org_id AND mr.role_id=r.id)
+ (SELECT count(*) FROM iam.organization_user_roles mr WHERE mr.org_id=r.org_id AND mr.role_id=r.id)
  FROM iam.roles r WHERE r.org_id=$1 AND ($2::uuid IS NULL OR r.id=$2)
- ORDER BY r.kind DESC,r.created_at,r.id LIMIT $3 OFFSET $4`, org, target, limit, offset).Rows()
+ ORDER BY r.created_at,r.id LIMIT $3 OFFSET $4`, org, target, limit, offset).Rows()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -197,7 +200,7 @@ func ListRoles(ctx context.Context, db *gorm.DB, org uuid.UUID, target any, limi
 	for rows.Next() {
 		var role model.APIRole
 		role.Permissions = []string{}
-		if err := rows.Scan(&role.ID, &role.Code, &role.Name, &role.Description, &role.Kind, &role.Status, &role.Version, pgtype.NewMap().SQLScanner(&role.Permissions), &role.MemberCount); err != nil {
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.Version, pgtype.NewMap().SQLScanner(&role.Permissions), &role.UserCount); err != nil {
 			return nil, 0, err
 		}
 
@@ -214,10 +217,10 @@ type rolePermission struct {
 	PermissionKey string
 }
 
-// membershipRole 是已经通过组织与委派校验的成员角色关联。
-type membershipRole struct {
-	OrgID        string
-	MembershipID string
-	RoleID       string
-	CreatedBy    string
+// organizationUserRole 是已经通过组织与委派校验的用户角色关联。
+type organizationUserRole struct {
+	OrgID              string
+	OrganizationUserID string
+	RoleID             string
+	CreatedBy          string
 }

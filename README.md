@@ -49,7 +49,7 @@ The management center and personal settings pages use real APIs. Console current
 verifies organization access and SSE authorization through IAM; business workflows
 are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based intelligent security workbench at `/dashboard` and real IAM pages at `/login`, `/settings/profile`, `/settings/account` and `/management`. Other template pages and menus are removed; the workbench currently displays sample data. The Web interface supports English and Simplified Chinese through next-intl.
 
-See [configuration and startup](docs/configuration.md), [testing](docs/testing.md),
+See [configuration and startup](docs/development/configuration.md), [testing](docs/development/testing.md),
 [IAM architecture](src/apps/iam/README.md), and [Web](src/apps/web/README.md).
 
 Go modules declare environment variables and defaults in `config.yaml`, use mature POSIX parameter expansion and Viper/mapstructure for strict typed decoding, and expose Cobra commands.

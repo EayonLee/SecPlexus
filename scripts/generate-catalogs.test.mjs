@@ -14,7 +14,7 @@ for (const collision of ["permission", "result"]) {
       copyFileSync(new URL(script, import.meta.url), path.join(root, "scripts", script));
     }
     const codes = [{ name: "OK", code: "ok", status: 200, message: "成功", module: "common" }];
-    const permissions = [{ key: "iam.foo.bar_baz", scope: "organization", delegable: true }];
+    const permissions = [{ key: "iam.foo.bar_baz", scope: "organization", delegable: true, group: "foo" }];
     const codesPath = path.join(root, "src/packages/go/result/error-codes.json");
     const permissionsPath = path.join(root, "src/apps/iam/internal/authorization/permissions.json");
     for (const [filename, entries] of [
@@ -35,7 +35,7 @@ for (const collision of ["permission", "result"]) {
     const exports = JSON.parse(readFileSync(path.join(root, manifest), "utf8"));
     const before = [manifest, ...exports].map((filename) => [filename, readFileSync(path.join(root, filename))]);
     if (collision === "permission") {
-      permissions.push({ key: "iam.foo_bar.baz", scope: "organization", delegable: true });
+      permissions.push({ key: "iam.foo_bar.baz", scope: "organization", delegable: true, group: "foo" });
       writeFileSync(permissionsPath, JSON.stringify(permissions));
     } else {
       codes.push({ name: "OK", code: "other", status: 400, message: "失败", module: "common" });

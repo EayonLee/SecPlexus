@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 520" width="860" height="520" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <rect width="860" height="520" fill="#ffffff"/>
+
+  <text x="430" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="#1e293b">身份模型</text>
+
+  <!-- 平台层 -->
+  <rect x="30" y="50" width="800" height="88" rx="10" fill="#fefce8" stroke="#fde047" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="48" y="72" font-size="11" font-weight="600" fill="#854d0e">平台层</text>
+
+  <rect x="48" y="82" width="175" height="44" rx="8" fill="#fffbeb" stroke="#facc15" stroke-width="1.5"/>
+  <text x="135" y="102" text-anchor="middle" font-size="11" font-weight="600" fill="#854d0e">超级管理员</text>
+  <text x="135" y="118" text-anchor="middle" font-size="9" fill="#a16207">仅配置指定，页面不可改</text>
+
+  <rect x="243" y="82" width="570" height="44" rx="8" fill="#fffbeb" stroke="#facc15" stroke-width="1.5"/>
+  <text x="528" y="102" text-anchor="middle" font-size="11" font-weight="600" fill="#854d0e">平台权限（5 项）</text>
+  <text x="528" y="118" text-anchor="middle" font-size="9" fill="#a16207">平台成员读/管 · 平台组织读/管 · 平台审计读</text>
+
+  <!-- 组织树 -->
+  <rect x="30" y="155" width="800" height="235" rx="10" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="48" y="177" font-size="11" font-weight="600" fill="#075985">组织层（树形，深度 0–2，全局唯一根）</text>
+
+  <rect x="330" y="192" width="200" height="46" rx="8" fill="#0369a1" stroke="#075985" stroke-width="2"/>
+  <text x="430" y="213" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">master（depth 0）</text>
+  <text x="430" y="229" text-anchor="middle" font-size="9" fill="#bae6fd">根组织，slug 固定</text>
+
+  <rect x="120" y="265" width="170" height="44" rx="8" fill="#e0f2fe" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="205" y="284" text-anchor="middle" font-size="11" font-weight="600" fill="#075985">部门 A（depth 1）</text>
+  <text x="205" y="300" text-anchor="middle" font-size="9" fill="#0284c7">可删（无子无成员时）</text>
+
+  <rect x="570" y="265" width="170" height="44" rx="8" fill="#e0f2fe" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="655" y="284" text-anchor="middle" font-size="11" font-weight="600" fill="#075985">部门 B（depth 1）</text>
+  <text x="655" y="300" text-anchor="middle" font-size="9" fill="#0284c7">可删（无子无成员时）</text>
+
+  <rect x="120" y="332" width="170" height="40" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="205" y="350" text-anchor="middle" font-size="10" font-weight="600" fill="#0369a1">小组 A1（depth 2）</text>
+  <text x="205" y="364" text-anchor="middle" font-size="9" fill="#dc2626">封顶，不能再有子</text>
+
+  <line x1="430" y1="238" x2="430" y2="252" stroke="#0284c7" stroke-width="1.5"/>
+  <line x1="205" y1="252" x2="655" y2="252" stroke="#0284c7" stroke-width="1.5"/>
+  <line x1="205" y1="252" x2="205" y2="265" stroke="#0284c7" stroke-width="1.5"/>
+  <line x1="655" y1="252" x2="655" y2="265" stroke="#0284c7" stroke-width="1.5"/>
+  <line x1="205" y1="309" x2="205" y2="332" stroke="#7dd3fc" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <rect x="330" y="265" width="200" height="44" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="430" y="284" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">成员（member）</text>
+  <text x="430" y="300" text-anchor="middle" font-size="9" fill="#059669">用户 ↔ 组织，有 active/disabled</text>
+
+  <rect x="330" y="332" width="200" height="40" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="430" y="350" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">角色（可多个）</text>
+  <text x="430" y="364" text-anchor="middle" font-size="9" fill="#059669">org_admin / member / 自定义</text>
+
+  <line x1="430" y1="309" x2="430" y2="332" stroke="#059669" stroke-width="1.5"/>
+
+  <rect x="180" y="410" width="500" height="58" rx="10" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+  <text x="430" y="434" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">有效权限 = 该组织内所有角色的并集</text>
+  <text x="430" y="454" text-anchor="middle" font-size="9" fill="#059669">组织权限 8 项 · 无 deny · 无继承 · 无用户直授 · 角色无启用态</text>
+
+  <text x="430" y="500" text-anchor="middle" font-size="9" fill="#94a3b8">深度、上限、成环由数据库触发器 organization_tree_guard 强制</text>
+</svg>

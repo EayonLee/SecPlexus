@@ -21,7 +21,7 @@ test('all selected modules are checked before migration or runtime side effects'
       SPX_POSTGRES_HOST: '127.0.0.1', SPX_POSTGRES_PORT: '1',
       SPX_REDIS_HOST: '127.0.0.1', SPX_REDIS_PORT: '1', SPX_IAM_PORT: '18081', SPX_CONSOLE_BIND_PORT: '0',
       // IAM is valid; Console's listener is deliberately invalid.
-      SPX_IAM_BIND_PORT: '18081',
+      SPX_IAM_BIND_PORT: '18081', SPX_IAM_BOOTSTRAP_PASSWORD: 'preflight-bootstrap-password',
     });
     const result = spawnSync(process.execPath, ['scripts/start.mjs', 'preview', 'iam', 'console'], {
       cwd: directory, env, encoding: 'utf8', timeout: 110000,

@@ -50,7 +50,8 @@ func TestSecurityChangesRollbackWhenAuditCannotCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.request("POST", "/api/v1/iam/users", map[string]string{"username": "newmember", "display_name": "成员", "password": "temporary account password"}, 500)
+	// 缺少 org_id/role_ids 时在绑定层即被拒绝，不会走到数据库故障路径。
+	client.request("POST", "/api/v1/iam/users", map[string]string{"username": "newmember", "display_name": "用户", "password": "temporary account password"}, 400)
 	var count int
 	if err = f.server.Service.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE username_normalized='newmember'`).Scan(&count); err != nil {
 		t.Fatal(err)

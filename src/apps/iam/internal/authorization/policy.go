@@ -16,11 +16,11 @@ var (
 
 // Snapshot 包含计算授权结果所需的身份与组织状态。
 type Snapshot struct {
-	Principal          iamclient.Principal // 已验证的身份投影。
-	OrganizationID     string              // 本次计算的组织范围。
-	OrganizationActive bool                // 组织是否有效。
-	MembershipActive   bool                // 当前用户的组织成员关系是否有效。
-	Permissions        []string            // 有效权限键集合。
+	Principal              iamclient.Principal // 已验证的身份投影。
+	OrganizationID         string              // 本次计算的组织范围。
+	OrganizationActive     bool                // 组织是否有效。
+	OrganizationUserActive bool                // 当前用户在本组织或其任一祖先的用户关系是否有效。
+	Permissions            []string            // 有效权限键集合。
 }
 
 // Evaluate 只返回能力授权范围；业务服务仍需校验实际资源所属组织、状态和审批要求。
@@ -52,7 +52,7 @@ func Evaluate(s Snapshot, p Permission, orgID string, now time.Time, recentWindo
 		if orgID == "" || orgID != s.OrganizationID || !s.OrganizationActive {
 			return denied, ErrDenied
 		}
-		if !s.Principal.IsSuperAdmin && (!s.MembershipActive || !slices.Contains(s.Permissions, p.Key)) {
+		if !s.Principal.IsSuperAdmin && (!s.OrganizationUserActive || !slices.Contains(s.Permissions, p.Key)) {
 			return denied, ErrDenied
 		}
 		return iamclient.AuthorizedScope{Kind: "organization",

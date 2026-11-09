@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import {
   ArrowLeft,
+  ChevronsUpDownIcon,
   Command,
   KeyRound,
   LayoutDashboard,
@@ -26,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -45,7 +46,9 @@ import {
 } from "@/components/ui/sidebar";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-import { visibleManagementPages, visibleManagementSections } from "../iam/navigation";
+import { OrganizationTree } from "./organization-tree";
+
+import { visibleSettingsPages } from "../iam/navigation";
 import { signOut, useIdentity } from "../iam/session";
 import { useAction } from "./data";
 import { LanguageSwitcher } from "./language-switcher";
@@ -62,13 +65,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const variant = usePreferencesStore((state) => state.values.sidebar_variant);
   const collapsible = usePreferencesStore((state) => state.values.sidebar_collapsible);
-  const pages = visibleManagementPages(auth);
-  const management = pathname === "/management" || pathname.startsWith("/management/");
-  const settings = pathname === "/settings" || pathname.startsWith("/settings/");
-  const sections = visibleManagementSections(auth);
-  let navigationLabel = t("mainNavigation");
-  if (management) navigationLabel = t("managementNavigation");
-  if (settings) navigationLabel = t("accountSettings");
+  const settingsItems = visibleSettingsPages(auth);
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const navigationLabel = inSettings ? t("settingsNavigation") : t("mainNavigation");
   const workspace = auth.org_id ? `/dashboard?org_id=${encodeURIComponent(auth.org_id)}` : "/dashboard";
   return (
     <SidebarProvider style={{ "--sidebar-width": "calc(var(--spacing) * 68)" } as CSSProperties}>
@@ -83,7 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent role="navigation" aria-label={navigationLabel}>
-          {!management && !settings && (
+          {!inSettings && (
             <SidebarGroup>
               <SidebarGroupLabel>{t("dashboards")}</SidebarGroupLabel>
               <SidebarMenu>
@@ -95,39 +94,21 @@ export function Shell({ children }: { children: ReactNode }) {
               </SidebarMenu>
             </SidebarGroup>
           )}
-          {management && (
+          {inSettings && (
             <SidebarGroup>
-              <SidebarGroupLabel>{t("managementCenter")}</SidebarGroupLabel>
+              <SidebarGroupLabel>{t("settings")}</SidebarGroupLabel>
               <SidebarMenu>
-                {sections.map((section) => (
-                  <SidebarMenuItem key={section.id}>
-                    <SidebarLink
-                      href={section.path(auth.org_id)}
-                      icon={section.icon}
-                      isActive={pages.some((page) => page.group === section.id && page.path(auth.org_id) === pathname)}
-                    >
-                      <span>{t(section.id)}</span>
-                    </SidebarLink>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroup>
-          )}
-          {settings && (
-            <SidebarGroup>
-              <SidebarGroupLabel>{t("accountSettings")}</SidebarGroupLabel>
-              <SidebarMenu>
-                {(
-                  [
-                    { id: "profile", title: "profile", icon: UserRound },
-                    { id: "account", title: "account", icon: KeyRound },
-                  ] as const
-                ).map((item) => (
+                <SidebarMenuItem>
+                  <SidebarLink href="/settings" icon={Settings} isActive={pathname === "/settings"}>
+                    <span className="whitespace-nowrap">{t("settingsHome")}</span>
+                  </SidebarLink>
+                </SidebarMenuItem>
+                {settingsItems.map((item) => (
                   <SidebarMenuItem key={item.id}>
                     <SidebarLink
-                      href={`/settings/${item.id}`}
+                      href={item.path(auth.org_id)}
                       icon={item.icon}
-                      isActive={pathname === `/settings/${item.id}`}
+                      isActive={item.path(auth.org_id) === pathname}
                     >
                       <span className="whitespace-nowrap">{t(item.title)}</span>
                     </SidebarLink>
@@ -137,7 +118,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </SidebarGroup>
           )}
         </SidebarContent>
-        {(management || settings) && (
+        {inSettings && (
           <SidebarFooter>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -156,30 +137,29 @@ export function Shell({ children }: { children: ReactNode }) {
               <SidebarTrigger />
               <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
               {!!auth.organizations.length && (
-                <Select
-                  value={auth.org_id || ""}
-                  onValueChange={(org) => {
-                    if (!org) return;
-                    if (pathname.startsWith("/management/orgs/")) {
-                      router.push(pathname.replace(/^(\/management\/orgs\/)[^/]+/, `$1${org}`));
-                      return;
-                    }
-                    router.push(`${settings ? pathname : "/dashboard"}?org_id=${org}`);
-                  }}
-                >
-                  <SelectTrigger aria-label={t("currentOrganization")} className="w-56">
-                    <SelectValue placeholder={t("chooseOrganization")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {auth.organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id}>
-                          {org.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" aria-label={t("currentOrganization")} className="max-w-56 justify-between">
+                      <span className="truncate">
+                        {auth.organizations.find((org) => org.id === auth.org_id)?.name ?? t("chooseOrganization")}
+                      </span>
+                      <ChevronsUpDownIcon className="text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 p-1">
+                    <OrganizationTree
+                      items={auth.organizations}
+                      currentID={auth.org_id}
+                      onSelect={(org) => {
+                        if (pathname.startsWith("/settings/orgs/")) {
+                          router.push(pathname.replace(/^(\/settings\/orgs\/)[^/]+/, `$1${org.id}`));
+                          return;
+                        }
+                        router.push(`${inSettings ? pathname : "/dashboard"}?org_id=${org.id}`);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -200,22 +180,12 @@ export function Shell({ children }: { children: ReactNode }) {
                 >
                   <DropdownMenuGroup>
                     <DropdownMenuItem asChild>
-                      <Link href="/settings/profile">
-                        <UserRound />
-                        {t("accountSettings")}
+                      <Link href="/settings">
+                        <Settings />
+                        {t("settings")}
                       </Link>
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
-                  {!!pages.length && (
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem asChild>
-                        <Link href={pages[0].path(auth.org_id)}>
-                          <Settings />
-                          {t("managementCenter")}
-                        </Link>
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuItem

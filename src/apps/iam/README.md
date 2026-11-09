@@ -1,408 +1,680 @@
 # SecPlexus IAM
 
-> 已实现Go IAM、真实PG会话和组织授权，统一Web管理中心已接入。当前交付范围与验证证据见实施计划；MFA、SSO、公开注册和对象ACL不在本版范围。
+平台的身份与授权服务。管账号、组织、角色、权限、登录会话和身份审计。
 
-[技术架构](../../../docs/architecture/02-technical-architecture.md) · [配置指南](../../../docs/configuration.md) · [测试指南](../../../docs/testing.md)
+所有其他模块都向它要授权结论，自己不做身份判断。
 
-## 1. 产品与服务边界
+![架构](../../../docs/assets/iam/architecture.svg)
 
-IAM负责账号、组织、密码、Session、自定义角色/授权和身份审计；Web提供统一界面；Console负责安全运营业务与必要的查询汇总，未来业务模块拥有各自资源、状态和执行规则；Console不是IAM API的必经中转层。Gin、Argon2id、SCS和CSRF组件嵌入Go进程，不部署独立身份产品。AI Gateway不承担这些控制面HTTP路由。
+## 它是什么
 
-```mermaid
-flowchart LR
-    W[Web Next.js与shadcn] --> E[同源HTTP入口]
-    E -->|/api/v1/iam| I[IAM Go]
-    E -->|/api/v1/console| C[Console Go]
-    C -->|服务凭证鉴权| I
-    I --> A[Gin原生认证入口]
-    I --> S[SCS Cookie及会话存储]
-    I --> P[(PG iam schema)]
-    I --> R[(Redis限流)]
-    C --> B[组织上下文与SSE 业务资源后续按需接入]
-```
+IAM 是整个平台里唯一知道「你是谁、你能干什么」的地方。
 
-PG是身份、角色、授权、Session真源；Redis只存分布式限流等短期计数。Console不能读IAM表或导入IAM internal。全部API固定`/api/v1/{module}`，每个服务只有一个监听，API路径不是可任意修改的环境变量。
+用户登录拿到 HttpOnly Cookie。此后每个请求，业务模块把 Cookie 转给 IAM，IAM 回答两件事，这个人是谁，这个动作允不允许。业务模块不存用户表，不校验密码，不判断角色。
 
-## 2. 授权模型：身份、角色、权限和资源分开
+用 Go + Gin 实现，不部署 Keycloak、Zitadel 这类独立身份产品。认证、用户目录、授权在同一个进程里。大厂拆成独立用户中心是被几十个系统几万员工的规模逼出来的部署拆分，不是领域本该拆。我们是一家公司内部的部门级隔离，拆开只剩同步和一致性成本。Grafana、GitLab、Django、TheHive 都是内置合并的。
 
-### 2.1 三类基础身份与用户自定义角色
+## 它管什么，不管什么
 
-| 身份/角色 | 数据表达 | 边界 |
-|---|---|---|
-| 唯一超级管理员 | bootstrap 配置指定账号，users.is_super_admin 唯一约束 | 平台全局管理和明确指定组织的业务访问；不跳过账号状态、CSRF、业务状态、审批或审计 |
-| 组织管理员 | 绑定本组织受保护系统角色org_admin | 本组织管理、自定义角色和授权；不能授予超级管理员或系统org_admin身份 |
-| 普通成员 | 有效成员关系；默认绑定系统角色member | 基础本人服务；业务权限来自分配的自定义角色 |
-| 用户自定义角色 | roles.kind=custom + role_permissions + membership_roles | 如审计员、安全分析师，由用户自己创建，不预置这些业务角色；一个成员可绑定多个 |
-
-系统member只提供组织身份/界面入口，不附赠任何业务读取、修改、执行或导出权限；本人资料/改密/退出按明确的self-service接口检查本人，不取决于角色是否为空。自定义“审计员”不会因为member默认读写而失去只读意义。没有任何业务角色绑定时业务权限为空，绝不回退静态角色映射。
-
-组织成员不是资源所有者，created_by用于归因，不自动令成员只能看本人创建的告警/Case。数据范围由权限及业务模型定义。超级管理员跨组织也必须提供目标org_id，查询仍带org_id，不能一条无范围查询返回所有组织。
-
-### 2.2 权限目录是代码能力，自定义角色是数据组合
-
-业务模块随实现声明稳定action，例如：
-
-| 模块/资源 | 权限示例 | 作用 |
-|---|---|---|
-| IAM组织 | iam.organizations.read / manage | 当前组织概览与展示信息管理，不改变平台级组织生命周期 |
-| IAM成员 | iam.members.read / manage | 查看、管理普通成员 |
-| IAM自定义角色 | iam.roles.read / manage / assign | 查看、编辑角色定义、为成员绑定角色；编辑与分配是不同动作 |
-| IAM审计 | iam.audit.read | 读取本组织审计 |
-| Console案件 | console.cases.read / update / respond / export | 读、编辑、响应处置、导出独立授权，写不隐含读或导出 |
-
-这是命名示例，不声称尚未实现的Console能力已可授予。只有真实落地的模块动作进入有效目录。权限目录包含模块、资源类型、动作、说明、风险、是否允许组织内委派、近期认证要求；权限key不包含API版本、角色名或菜单ID。当前15个动作见`src/apps/iam/internal/authorization/permissions.json`，其中7个平台动作、8个组织动作。
-
-- **模块开发者定义能做什么，组织管理员决定谁能做。** 用户可创建/改名/组合角色，不能凭空创建后端不存在的权限key。
-- 权限目录在 IAM `internal/authorization/` 中以版本化清单维护，迁移同步到IAM目录表；存储表是运行时投影，禁止管理API修改目录语义。每个业务路由引用生成/校验的action常量，本地业务目录检查及访问测试核对引用和目录；不是每个服务各写一张ROLE_PERMISSIONS表。
-- 自定义角色授权关系只有PG一份。普通成员的决策仅从当前有效绑定/有效角色/精确permission key读取，不存在静态兜底、按角色名称特判或从Cookie取权限。
-- org_admin持有本版全部已实现且有效的organization权限，完整key清单由目录种子显式写入系统角色grants；它可以包含后续新增组织管理能力，但仅在版本升级中显式更新。自定义角色默认不获得新增权限。没有用户可写的`*`通配授权。
-- 平台超级管理员身份仅由配置指定；“能否授予org_admin”是受保护管理行为，不把这些能力开放为可勾选的自定义组织权限。用户创建一个叫“超级管理员”的角色也不能改变此规则；保留系统角色code不能复用。
-- 菜单与按钮引用action，只用于体验；一个菜单可以依赖多个action，不能反过来用菜单授权代替API授权。读取、修改、执行、删除、导出、授权管理分别建模，避免笼统的“能看页面就能做所有动作”。
-
-### 2.3 唯一授权入口及求值语义
-
-所有服务通过类型化`Authorize(subject, action, org_id, resource, request_context)`求值。路由的action/目标组织提取由服务端声明，不能由浏览器选择。允许结果含allowed、decision_id、Principal和结构化scope；拒绝使用统一HTTP错误契约。组织authz_epoch由本人组织列表及权限概要返回，供编辑并发控制使用。
-
-```mermaid
-flowchart TD
-    A[请求与已知action] --> B[校验Session及账号状态]
-    B --> C[Cookie写请求CSRF及Origin]
-    C --> D{action目录作用域}
-    D -->|platform| P[必须受保护超级管理员身份 不要求org_id]
-    D -->|organization| O[必须明确org_id且组织有效]
-    O --> S{超级管理员}
-    S -->|是| G[仅获得指定组织范围]
-    S -->|否| R[有效成员与当前有效角色grants并集]
-    R --> G
-    P --> F[近期认证等安全条件]
-    G --> F
-    F --> H[资源模块最终范围 状态及审批检查]
-```
-
-成员多角色取允许集合并集；首版不引入deny优先级、角色继承或用户直接授权。这不是把将来写死：统一接口隔离求值实现，角色/绑定/权限分表，后续按需求扩展；现在不为假想功能先做脚本语言和插件框架。
-
-目录scope决定求值分支：platform动作不接受org_id或组织角色grants，只允许当前有效超级管理员，输出`{kind:platform}`；organization动作必须显式org_id，先检查组织有效，超级管理员的该组织能力从同一目录的有效organization动作派生，其他用户再检查成员/当前grants。受保护全局身份不是另一份静态ROLE_PERMISSIONS。未知action先拒绝，超级管理员也不能跳过。平台及组织能力只由此中央规则计算。
-
-首版组织数据scope只有organization，返回结构化`{kind:organization,org_id:...}`；platform只是管理动作范围，不可拿来绕过业务组织过滤。业务仓储必须应用此过滤，详情验证真实resource.type/id的组织，批量逐项检查；统计、搜索、导出、异步任务和SSE也覆盖。未知scope拒绝，不吞掉限制当作全组织允许。以后增加“指定项目/对象、本人、用户组继承”时，扩展中央解析和仓储范围适配器，不改每个接口的角色判断；需要独立规格/迁移，不能说当前已支持ABAC/ACL。
-
-这里的“组下面的角色”当前落在组织范围。若实际引入用户组，组是成员集合，角色是权限集合，二者不能合成一个实体；届时增加group_members/group_role_bindings与解析逻辑，不提前建空表或允许无外键的subject_type+subject_id万能绑定。
-
-### 2.4 授权管理自身也要防越权
-
-- 组织管理员通过其系统角色grants管理本组织普通成员、自定义角色及授权；被委派的普通成员也可在持有对应members/roles actions及转授上限内管理，不按角色名称特判；将成员升级/降级为系统org_admin仅超级管理员可做。不能从其他组织的role_id获得权限。
-- 可委派集合统一为“操作者当前有效组织权限 ∩ 目录delegable=true权限”；不存在因持有角色管理权限就自动持有全部业务权限的规则。自定义委派管理员持有iam.roles.manage/assign时，也只能操作此集合内的自定义角色。既有角色和提交的新角色权限都须在其可委派上限内；manage不自动等于assign，assign不等于编辑角色。
-- 角色改名、编辑说明不改变权限；权限替换使用完整集合+version乐观锁，冲突409。停用角色立即停止其授权；在用角色删除409，先明确解绑/替换并展示影响人数，不能静默级联清掉权限。
-- 角色/绑定/成员/账号状态变更与审计同事务，递增组织authz_epoch。首版每次决策读PG，只做请求内合并，不跨请求缓存允许结果；不存在Redis故障后继续用旧权限15秒的降级。
-- 为保证授权时操作者尚有授予资格及最后管理员保护，管理员写用例使用统一事务边界：取得固定IAM管理写advisory事务锁→按UUID顺序锁涉及用户→按UUID顺序锁涉及组织→重新验证操作者Session版本/当前权限→校验目标→提交变更/审计。首版串行化低频管理写，比在多个入口遗漏竞态更简单；登录/普通业务读不持该锁。未来仅在压测证明瓶颈后再细化锁。
-- 配置指定唯一有效超级管理员，其账号和密码禁止平台/运维重置入口修改；每个active组织至少保留一位有效org_admin；判定含用户状态、成员状态和系统角色绑定。全局停用用户须检查其所有受影响组织，不给另一个入口绕过规则。
-- 系统角色grants清空/替换请求同样拒绝；自定义角色清空grants则成功并使其业务权限归零。系统角色不可编辑、停用或删除；普通自定义角色不能授予平台权限、修改超级管理员标识、跳过审批或重置他人的全局密码。
-
-## 3. 认证、Session及跨服务链路
-
-### 3.1 复用库，但不扩成身份产品
-
-Gin承接统一HTTP入口，路由在 internal/router 原生注册。中间件负责请求标识、受控Recovery、IAM会话提交屏障、统一错误、CSRF/Origin、限流及输入边界；Handler单次绑定模块DTO。用户路由加载会话/CSRF；authorize 路由验证服务凭证和 action 白名单，再检查原用户会话及权限，不能通过 Cookie 或来源地址替代服务凭证。
-
-登录和二次认证使用`authentication.Authenticator`的类型化用例。Argon2id负责密码哈希与比较，SCS负责Token、编码、Cookie及PG store；gorilla/csrf负责CSRF机制。IAM保留失败锁定/审计、逻辑会话注册表、身份版本和撤销规则。ulule/limiter的Redis Store负责双桶原子计数及TTL，项目只维护摘要键与策略；故障503并拒绝放行，计数操作禁用自动重试。
-
-Gin使用原生路由、代理IP、错误收集及Recovery，不再保留Chi或Authboss适配栈。HTTP Handler通过Gin Binding/validator绑定并校验结构，再调用业务用例；不重新构造登录JSON请求。SCS的LoadAndSave不能直接保证提交失败后正文不继续写出，因此仅IAM非流式响应保留提交屏障：缓存失败或panic时不发送认证Cookie/成功正文，并补偿撤销新逻辑会话。Console SSE不经过此屏障。
-
-版本以根`go.mod/go.sum`为准。GORM的泛型投影、回调事务、批量关联与错误翻译和现有pgx池共用连接；Goose Provider执行显式迁移。`serve`和`status`先只读确认版本表已初始化，不因状态查询隐式建表。密码保存含参数的PHC格式，比较前限制输入及哈希参数资源。
-
-```mermaid
-sequenceDiagram
-    participant W as Web
-    participant I as IAM
-    participant D as PostgreSQL
-    participant C as Console
-    W->>I: GET auth/context 获取CSRF
-    W->>I: POST auth/login 用户名密码及CSRF
-    I->>D: 校验密码并绑定认证版本快照
-    I->>D: 建逻辑Session与登录审计
-    I-->>W: SCS HttpOnly Cookie与身份摘要
-    W->>C: 请求明确org_id的业务资源
-    C->>I: 服务鉴权 原Cookie及受信任路由上下文
-    I->>D: 检查Session/用户/当前角色与权限
-    I-->>C: Principal与结构化授权结果
-    C->>C: 验证真实资源范围及业务状态
-    C-->>W: 响应
-```
-
-### 3.2 精简后的会话存储与竞态
-
-首版使用SCS官方PG Store，不再先写一整套自定义CtxStore/generation引擎。保留两张各司其职的表：`scs_sessions`是库的序列化存储，`user_sessions`是可枚举、可撤销的逻辑授权记录。逻辑会话才是身份有效性的依据，不能只看SCS里是否有uid。
-
-- SCS显式启用Store键哈希（HashTokenInStore=true，固定版本验证）；token_hash按该版本的SHA-256/base64url格式映射。SCS中保存user_sessions.id，逻辑行绑定user_id、Token摘要和验证时auth_epoch。每次授权同时检查绑定、active状态、用户状态/版本、SCS实际expiry与逻辑idle/absolute。
-- IAM的idle默认30分钟、absolute默认8小时，两个期限由user_sessions统一负责；SCS IdleTimeout=0、Lifetime作为存储期限，不另做一套空闲判断。每次有效授权用条件UPDATE检查原idle/absolute仍有效、账号版本及state，再将idle_expires_at推进到min(DB判定时刻+idle,absolute)，使用取得行锁后的数据库实际时钟校验期限，idle/last_seen单调更新；包括后台轮询，不做前台活动识别或activity接口。SCS加载/延迟保存本身不能推进逻辑idle；过期后旧请求写回字节也无法延长身份。SCS RenewToken不改逻辑absolute。
-- 登录/重新认证轮换时创建新逻辑会话、撤销旧逻辑会话，不复用旧逻辑ID；重新认证提交必须条件确认旧逻辑会话及Token绑定仍有效，两个并发重新认证最多一个消费旧逻辑会话，旧请求失败不清新Cookie。重新认证继承原authenticated_at/absolute，并单独更新reauthenticated_at；近期认证按后者或原登录时间判断。旧请求即使把旧SCS存储行写回，其中绑定的旧逻辑会话仍已撤销，不能恢复认证。验收关注身份不可复活，不要求第三方存储绝无垃圾行。
-- 密码验证读取user.auth_epoch及密码快照；建逻辑会话时锁用户并比较同一版本、当前状态和密码是否仍有效。重置/停用竞态失败必须重新登录，不能读取新版本替旧密码请求签发会话。
-- 逻辑会话/成功审计可在一事务，SCS实际保存与响应Cookie不伪称跨步骤原子。保存失败返回503，不发送成功Cookie，并撤销已建逻辑行；失败补偿未完成时孤立行也不具备可用凭证，按期限清理。传输层缓冲响应，确认SCS保存后才发送成功头及Cookie；相关失败路径有真实数据库集成测试。
-- 退出先提交逻辑撤销，再Destroy SCS；Destroy失败也不能再次授权。改密/重置/全局停用递增auth_epoch并撤销会话。普通统计更新不能把state改回active。
-
-Cookie按配置的公共URL协议确定：HTTPS使用`__Host-spx_session`、Secure、Path=/、HttpOnly、SameSite=Lax、无Domain；本机HTTP使用`spx_session`并保留HttpOnly等约束，不用环境模式决定连接或安全行为。认证响应no-store。CSRF可有辅助Cookie，但不是另一认证系统；登录/轮换后更新CSRF材料。浏览器不存JWT或refresh token。
-
-### 3.3 Console和未来服务接入
-
-Console通过同一IAM HTTP地址及独立服务凭证调用`POST /api/v1/iam/authorize`。凭证由进程环境注入、每服务独立，只能请求白名单中的授权检查，不能作为用户登录。用户 Cookie 不能替代服务凭证；代理清除外部伪造身份头，仅信任配置代理提供的来源IP。
-
-请求传原Cookie、原method、规范化path、Origin、CSRF header及服务端确定的action/org_id。v1仅进行能力与组织范围求值，不接受非空resource上下文；具体对象检查由资源所属模块负责。IAM同时验证CSRF和业务身份；可信外部Origin来自配置，不能用浏览器自报Host。Console不转发IAM鉴权响应Set-Cookie，不自行刷新或生成认证Cookie；服务鉴权路径的续活是IAM对逻辑Session行的条件更新，不依赖浏览器收到新的Set-Cookie；日常不轮换，登录/重新认证经IAM公开路由完成。
-
-Principal仅包含user_id、session_id、authenticated_at等真实身份摘要；组织权限从本次请求求值，不把完整授权写进Session。Authorize对调用服务限制可检查action命名空间；PG或IAM不可用503，不返回allow；调用方不能传入“已允许”标志绕过。
-
-高危业务提交前复核；跨服务授权和业务事务不是分布式原子事务，不声称已执行请求可倒退撤销。SSE建连及每25秒复查（单次IAM请求最多5秒），任务保存actor/decision_id并在危险执行点重新检查，不保存用户Cookie。
-
-## 4. 数据模型和字段字典
-
-### 4.1 约定与关系
-
-一个逻辑PG数据库（默认名称`secplexus`），模块按表/schema管理各自数据，默认共用数据库账号；模块内部强FK，模块之间不跨schema JOIN。主键uuid（应用UUIDv4）；时间timestamptz/UTC，API RFC3339；版本bigint，JSON一律返回十进制字符串，避免JS精度丢失；状态text+CHECK。表名复数snake_case，JSON字段snake_case。
-
-以下`?`为可空，其他NOT NULL；`C/U`分别为created_at/updated_at timestamptz，C默认now、U由更新SQL维护。未列出的字段不隐式存在；文本有明确输入上限。除库管理存储外，业务主键均uuid。
-
-```mermaid
-erDiagram
-    users ||--|| password_credentials : authenticates
-    users ||--o{ memberships : joins
-    organizations ||--o{ memberships : contains
-    organizations ||--o{ roles : owns
-    memberships ||--o{ membership_roles : assigned
-    roles ||--o{ membership_roles : bound
-    roles ||--o{ role_permissions : grants
-    permissions ||--o{ role_permissions : defines
-    users ||--o{ user_sessions : opens
-    user_sessions ||--o| scs_sessions : binds_token_hash
-```
-
-最后的Token关联是逻辑关联，不加外键，避免SCS清理/保存顺序与业务事务耦合。审计保存actor/target快照，不能级联删除历史。
-
-### 4.2 身份、角色及授权
-
-| 表 | 全部字段/类型 | 约束与索引 |
-|---|---|---|
-| users | id uuid PK; username text; username_normalized text; display_name text; email text?; status text; is_super_admin boolean default false; auth_epoch bigint default 1; C/U | UNIQUE(username_normalized)；status=active/disabled；用户名3..64、ASCII字母开头且仅字母数字_.-，规范化去首尾空格并小写；展示名1..100、邮箱<=320；版本>0 |
-| password_credentials | user_id uuid PK/FK users; password_hash text; changed_at timestamptz; failed_attempts integer default 0; locked_until timestamptz?; U | 次数>=0；哈希仅仓储/认证可见；改密/次数递增原子化 |
-| organizations | id uuid PK; slug text; name text; status text; authz_epoch bigint default 1; C/U | UNIQUE(slug)；slug3..63小写字母数字连字符且首尾字母数字；名称1..100；status=active/suspended，版本>0 |
-| memberships | id uuid PK; org_id uuid FK organizations; user_id uuid FK users; status text; C/U | UNIQUE(org_id,user_id)、UNIQUE(org_id,id)；status=active/disabled；索引(user_id,status)；不存一个会与绑定表冲突的role字符串 |
-| roles | id uuid PK; org_id uuid FK; code text; name text; description text; kind text; status text; version bigint default 1; created_by uuid? FK users; C/U | UNIQUE(org_id,code)、UNIQUE(org_id,id)；kind=system/custom，status=active/disabled；code3..64小写标识符，name1..100，说明<=1000；custom禁止保留code；系统org_admin/member不可编辑/删除/停用；code创建后不可改，仅custom的显示name可改 |
-| permissions | permission_key text PK; module text; resource_type text; action text; description text; scope text; risk_level text; delegable boolean; requires_recent_auth boolean; status text; C/U | permission_key<=128；scope=platform/organization，risk=normal/sensitive/high，status=active/deprecated/retired；目录由发布维护，管理API只读；platform项不能加入组织自定义角色 |
-| role_permissions | org_id uuid; role_id uuid; permission_key text FK permissions; created_at timestamptz | PK(role_id,permission_key)；复合FK(org_id,role_id)→roles；索引(permission_key,role_id)；只允许organization权限，retired拒绝求值，deprecated兼容期维持既有授权但禁止新授予 |
-| membership_roles | org_id uuid; membership_id uuid; role_id uuid; created_by uuid FK users; created_at timestamptz | PK(membership_id,role_id)；复合FK(org_id,membership_id)→memberships、(org_id,role_id)→roles；索引(org_id,role_id)；无跨组织绑定 |
-
-权限引用默认RESTRICT；目录废弃先停止新增授权并标注替代项，迁移明确处理既有grants，不把旧key复用于新含义。deprecated在兼容窗口继续生效但不新增；retired拒绝且需上线前清理使用点。action语义变化需要版本化迁移，不能静默将“读取”改成“执行”。系统角色由种子维护，自定义角色和绑定不被启动脚本覆盖。
-
-### 4.3 会话与审计
-
-| 表 | 全部字段/类型 | 约束与索引 |
-|---|---|---|
-| user_sessions | id uuid PK; user_id uuid FK users; token_hash text; auth_epoch bigint; state text; authenticated_at timestamptz; reauthenticated_at timestamptz?; absolute_expires_at timestamptz; idle_expires_at timestamptz; last_seen_at timestamptz; revoked_at timestamptz?; revoke_reason text?; client_ip inet?; user_agent text; created_at timestamptz | UNIQUE(token_hash)；state=active/revoked；版本>0、absolute>authenticated、idle<=absolute；索引(user_id,state)、(absolute_expires_at)；UA<=512，原因<=100；过期由期限判定，无需另跑状态机才能失效 |
-| scs_sessions | token text PK; data bytea; expiry timestamptz | 官方Store表的token字段实际为配置后的Store键摘要；索引(expiry)；具体表名/SQL以P0验证的固定版本为准，不擅自增加Store不维护的字段 |
-| audit_events | id uuid PK; occurred_at timestamptz; org_id uuid?; actor_type text; actor_id uuid?; actor_name text?; action text; target_type text; target_id uuid?; outcome text; reason_code text?; request_id text; decision_id uuid?; metadata jsonb default '{}'; created_at timestamptz | actor_type=user/system/deployment_operator；outcome=success/denied/failure；索引(org_id,occurred_at,id)、(actor_id,occurred_at)、(request_id)；metadata白名单、<=8KiB；不存密码/Cookie/原始请求体 |
-
-共11张业务/库适配表，不建installation、invitations、TOTP、API Key、outbox或security_policies表。Goose版本表由工具维护，不算业务实体。审计写入与维护清理由应用分别控制；默认数据库账号同时具备迁移与维护所需权限。
-
-## 5. 初始化、账号生命周期及配置
-
-### 5.1 没有安装页面的启动流程
-
-```mermaid
-flowchart TD
-    D[部署提供PG数据库及角色] --> M[迁移任务获取PG锁并建表]
-    M --> C[同步权限目录与系统角色种子]
-    C --> E{账号表是否为空}
-    E -->|是| B[在事务内应用管理员配置并创建默认组织]
-    E -->|否| S[同步配置管理员与凭据 撤销变化身份的会话]
-    S --> V[验证唯一配置管理员及结构]
-    B --> V
-    V --> R[serve用运行账号就绪]
-    R --> L[用户直接打开登录页]
-    L --> P[登录成功后进入业务]
-```
-
-数据库由Compose或运维准备。应用迁移只操作本项目schema及版本表，迁移、运行、维护使用同一组数据库连接。迁移/种子/首账号初始化均可重试，并发取锁；初始管理员与默认组织在同一业务事务创建。迁移及启动只会把配置明确指定的账号设置为唯一超级管理员，不按创建顺序提权。旧超管身份在迁移时收回，其会话失效，用户和组织数据保留。
-
-默认组织slug=default、name=默认组织；唯一超级管理员由 `bootstrap.username/password` 及对应 `SPX_IAM_BOOTSTRAP_USERNAME/PASSWORD` 环境变量持续管理，默认样例为 admin/secplexus。显式迁移和 IAM 启动同步配置，密码不变时不重哈希、不撤销会话；配置变更时更新身份版本、撤销相关会话并写审计。所有副本须使用相同配置，修改后重启。明文不进入响应或日志。没有公开 setup/bootstrap 或超级管理员身份授予接口。
-
-新组织创建必须指定有效管理员并原子建立成员/系统角色绑定。超级管理员创建/重置密码可直接指定密码，不在服务端保存可恢复明文；密码由操作者安全交付，未配置邮件也可工作。普通账号丢失由具备部署维护权限的人员运行`iam reset-password --user-id ...`交互命令恢复，密码从安全输入读取、不进命令参数；同一改密用例撤销Session并审计，不跳过密码认证或自动增加超级管理员。配置账号的资料、身份、密码及组织成员关系均禁止应用写入口修改；包括本人改密和运维 reset-password。其密码只能修改配置后重启更新。
-
-密码要求 8–128 个 Unicode 字符；初始化管理员也遵循同一密码策略。创建、重置和主动改密均遵循普通密码策略，登录后直接按实际权限使用平台。主动改密仍验证旧密码并撤销已有会话。
-
-### 5.2 结构化配置与日志
-
-模块实际读取[config.yaml](config.yaml)，没有example复制步骤。app配置监听host和整数port；db/cache配置连接字段；service_clients配置服务凭证及action白名单；auth/bootstrap/retention配置业务策略；logging配置结构化日志和轮转。
-
-环境变量及默认值直接在文件中声明`${NAME:default}`，不另维护Go环境映射或重复默认值。显式空值保留，未知字段和非法类型拒绝；不同模块只声明自身需要的能力。数据库/密码/token直接通过环境或私有.env注入，不使用连接/密码文件。完整规则和启动说明见[配置指南](../../../docs/configuration.md)。
-
-默认从运行目录写`logs/iam.log`，同时输出JSON到stdout；Go slog提供结构化日志，Lumberjack执行50MB、5份、14天压缩轮转。二进制通过工作目录或显式日志路径接入；容器默认stdout，由运行时轮转。多副本不能共享同一个日志文件。
-
-不配置instance_id；限流key由共享 cache/key 模板生成，固定为`spx:iam:ratelimit:<kind>:<sha256-bucket>`，不同平台部署通过独立 Redis 数据库或实例隔离。同平台副本共享PG/Redis，确保会话和限流一致。
-
-## 6. API与Web接入
-
-HTTP 行为以原生 Go DTO、Gin 路由和用例为准，由真实 HTTP 测试核对消费者。全部API以/api/v1/iam为下表根；普通响应统一为 `{code,message,data,request_id}`，失败 data 为 null。身份失效401、授权拒绝403、冲突409、限流429、依赖故障503；限流含Retry-After。登录API不接受返回地址字段；前端只使用自身固定落点。
-
-| 路径/动作 | 边界 |
+| 管 | 不管 |
 |---|---|
-| GET auth/context；POST auth/login、logout、reauthenticate | CSRF上下文、登录、退出及近期认证；无register/forgot/activity占位端点 |
-| GET me、me/organizations；GET me/permissions?org_id=... | me返回本人摘要及platform_actions（普通用户为空）；指定组织权限接口返回organization actions和authz_epoch，无组织成员资格时拒绝（超级管理员显式目标组织除外） |
-| PATCH me | 仅本人、完整登录+CSRF，只允许display_name/email联系信息，不修改用户名/角色/密码/验证标记 |
-| GET/PATCH orgs/{org_id} | 分别iam.organizations.read/manage；PATCH仅name等本组织展示信息，需近期认证；生命周期status仅平台组织管理接口可改 |
-| POST me/password | 本人改密；配置托管管理员不允许自助改密 |
-| GET/POST users；GET/PATCH users/{id}；POST users/{id}/reset-password | 仅超级管理员管理全局账号；DTO明确允许字段，不能通用更新任意列 |
-| GET/POST organizations；PATCH organizations/{id} | 超级管理员，创建含指定组织管理员；不能绕过最后管理员规则。与下面 `orgs/{org_id}` 的区别：`organizations` 是**平台级组织目录**（建组织、改组状态、看全部组织），`orgs/{org_id}` 是**组织内的日常操作**（本组织资料、成员、角色、审计），前者只有超级管理员能用，后者由组织内权限控制 |
-| GET orgs/{org_id}/members；POST同路径；PATCH/DELETE同路径/{membership_id} | 读/管理普通成员需要对应action；持iam.members.manage的组织操作者POST只创建全新普通账号+本组织成员，不接管已有账号；超级管理员另可按user_id加入已有账号 |
-| GET/POST orgs/{org_id}/roles；GET/PATCH/DELETE同路径/{role_id} | 自定义角色CRUD，系统角色只读；PATCH元数据带version；在用删除409 |
-| GET permissions?org_id=... | 返回可见/可委派权限目录与分组、风险、说明，平台权限不进入组织勾选项 |
-| GET orgs/{org_id}/roles/{role_id}/members | iam.roles.read与iam.members.read均满足，同组织分页返回；只有角色读取权时不泄露成员个人资料 |
-| PUT orgs/{org_id}/roles/{role_id}/permissions | 全量替换grants+预期version；同事务权限上限校验、审计和版本更新 |
-| PUT orgs/{org_id}/members/{membership_id}/roles | 全量替换角色集+预期authz_epoch；系统org_admin仅超级管理员能增删；默认业务权限为空，不把清空理解为恢复默认 |
-| POST orgs/{org_id}/permission-preview | 校验同组织、管理权限及候选角色，返回成员有效权限和变化/影响人数；需iam.roles.read、iam.members.read和相应manage/assign；只读评估不落库，不可探测其他组织用户 |
-| GET orgs/{org_id}/audit-events；GET audit-events | 本组织审计action/平台审计；跨组织访问需超级管理员并明确目标，不返回隐式混合列表 |
-| POST /api/v1/iam/authorize | 每服务凭证及action白名单；认证、CSRF、组织授权统一决策；调用方不能伪造subject_id来免凭证认证 |
+| 账号、密码、登录会话 | 业务资源的属主和可见性 |
+| 组织树、用户关系 | 审批状态机 |
+| 自定义角色和权限分配 | 菜单和按钮长什么样 |
+| 登录、改密、身份审计 | 具体某条 Case 该不该给你看 |
+| 回答「这个 action 在哪个组织允不允许」 | 业务模块内部的状态检查 |
 
-角色编辑器按模块→资源→动作展示勾选项；不提供任意SQL/表达式输入。系统角色标识由kind/code决定，不根据名称判断；角色详情展示已分配成员、影响数、有效权限预览及版本冲突提示。平台管理员入口、组织管理员入口和自定义角色授权操作各有后端门禁。
+IAM 回答的是「你有没有这个能力」，不是「这条数据归不归你」。后者必须由资源所属模块自己查真实归属，因为只有它知道那张表长什么样。
 
-Web通过Axios调用同源API，Zustand保存当前身份的内存投影；不另建客户端授权真源。认证状态unknown/loading、anonymous、authenticated、unavailable。认证及业务数据不持久化；仅用户名和UI偏好可localStorage。
+## 业务架构
 
-请求绑定authEpoch/user_id/org_id；退出/账号切换先取消请求、清缓存和敏感表单，再跳转，迟到响应按epoch丢弃。组织切换显式路由/缓存范围；BroadcastChannel只广播变更事件，不传Cookie/密码。401清身份、403显示无权限、503保留显示但禁敏感操作并提示重试，不无限刷新凭证。
+### 三个概念
 
-## 7. Web设置区与授权接入设计
+**用户**是自然人，全局唯一。一个人的账号在整个平台只有一个。
 
-### 7.1 以任务组织管理中心与个人设置
+**组织**是数据隔离的边界。一个用户可以属于多个组织，在每个组织里是独立的用户关系，持有独立的角色。
 
-头像提供“设置”“系统管理”“退出”三个入口，使用一致的图标。设置下 `/settings/profile` 与 `/settings/account` 分别展示资料、组织关系以及密码与身份确认，各自独立路由并共用主体框架。普通成员可改密；配置托管的唯一超级管理员只展示凭据管理说明，敏感操作按需原地确认身份。设备列表、指定设备撤销和退出所有设备的公开接口及调用链已删除；登录、退出、会话过期、凭据变更撤销与身份确认保留。
+用「组织」不用「租户」，因为我们做的是公司内部分层级的数据控制，不是 SaaS 多客户。TheHive 用 organisation，Grafana 用 organization，GitHub 用 organization，同一个意思。
 
-管理中心只有三个侧栏任务，相关页面通过页内 Tabs 切换：
+**角色**是权限的容器。角色只有名称、说明和权限三项，没有业务代码、没有内置与自定义之分，也不预设任何角色；组织需要什么角色，由使用者按需创建并勾选权限。
 
-| 侧栏任务 | 页内标签 | 权限边界 |
-| --- | --- | --- |
-| 人员与权限 | 组织成员、角色与权限、平台账号 | 前两者只作用于当前组织；平台账号管理全局身份，不替代组织成员关系 |
-| 组织 | 组织设置、全部组织 | 当前组织资料与平台组织目录区分，显式显示当前组织/全平台 |
-| 审计日志 | 组织审计、平台审计 | 各自按审计 action 过滤，不混合业务与平台范围 |
+![身份模型](../../../docs/assets/iam/identity-model.svg)
 
-每个 Tab 由原生页面定义和服务端能力投影过滤，侧栏只显示至少有一个可访问 Tab 的任务。无权限深链显示拒绝，不悄悄换组织；`/management` 跳第一个可访问页面，无任何能力时显示拒绝而非永久加载。保留原组织和平台管理深链，删除系统认证与安全概览。组织切换使用 shadcn Select；语言只支持按钮直接切换中英文。保留模板主题与字体，状态 Badge 使用共用颜色语义和明暗令牌。
+### 组织是树，不限深度
 
-| 页面 | 必须满足 |
-| --- | --- |
-| 当前组织概览 / 成员 / 角色 / 审计 | 对应 organization read action 与明确 org_id |
-| 角色权限 / 角色成员 / 成员角色分配 | roles.read、roles.manage、members.read、roles.assign 分别按操作检查 |
-| 平台组织 / 平台账号 / 平台审计 | 对应 platform read action；修改另需 manage 和近期认证 |
-| 配置超级管理员的账号、密码及成员关系 | 应用与运维写入口一律拒绝，无身份授予/撤销 API |
+组织支持父子层级，不设业务深度上限。全局只有一个根，标识固定为 `master`。新建组织不指定父节点时默认挂到根下面。
 
-统一入口不代表统一放权。Console 不接管 IAM 配置；平台账号和组织授权仍由 IAM 各自业务用例拥有。角色编辑器的权限、成员 Tab 继续按各自能力过滤，不自动补授权限。
+约束由数据库触发器强制，不是应用层记得检查
 
-### 7.2 一份页面定义，统一过滤
+- **深度计算**：子节点的 depth 由父节点推导，不能手写
+- **禁止成环**：把自己的后代设成自己的父节点会被拦下
+- **溢出兜底**：`CHECK(depth BETWEEN 0 AND 1000)` 只防 smallint 溢出，不是业务上限
 
-在Web建立薄的AuthBoundary（由Zustand承载身份内存投影）、useCan/Can与RequireAccess。唯一页面清单记录id、path、layout、navSection、scope、requiredActions、allOf/anyOf、图标及标题；同一清单派生管理中心入口、侧栏、路由守卫、默认落点和面包屑，不能为这些各写一份角色判断。
+改挂父组织后，整棵子树的 depth 在同一事务内由服务层重算。
 
-业务组件使用`useCan(action)`或`Can`显示动作；具体资源响应提供`allowed_actions`时优先用于对象按钮，不能拿全组织能力推断每个对象都可修改。前端只投影服务端权限，不能自己实现授予算法、从localStorage生成管理员权限或把菜单权限key当业务权限。
+标识（slug）创建后不可修改，它是 URL 和审计里的稳定引用。名称和父子关系可以改。
 
-后端在路由及用例中声明action、org参数提取和CSRF/近期认证要求；通用中间件调用IAM，再交资源策略/仓储检查真实范围。应用服务也执行必要授权契约，内部任务或其他transport调用不能绕过HTTP中间件就直接执行敏感用例。具体落点统一，避免同一权限被不同层按不同规则重复解释。
+删除组织有两个前置条件，不满足就拒绝：不能是根组织、不能有子组织。组织内的用户关系、角色与授权随组织一并删除，因此不要求先清空用户。
 
-新增业务能力的最小改动：模块权限清单添加真实action→路由/用例声明该action→必要页面声明要求；权限编辑器自动读取目录展示。改变某用户角色只改数据库grants/绑定，无需改代码或发版；新资源数据规则只在拥有该资源的策略/查询适配器实现，不修改所有角色、登录和菜单组件。
+权限沿祖先链向下继承：在任一祖先组织获得的权限对其全部后代生效，反向不成立。
 
-隐藏与禁用区分：无权进入的菜单/模块隐藏；已可进入页面上的不可执行动作，可禁用并展示“需要X权限”，避免误解成功可用。新建角色的空权限、无匹配结果、版本冲突、会话过期、组织切换和权限刚被撤销都要有明确反馈，不以空白页或假保存掩盖。设置无可见子页时齿轮管理入口隐藏，头像本人服务仍可用。
+### 多角色，权限取并集
 
-## 8. 后续数据分权的接入边界
+一个人在一个组织里可以同时是「管理员」和「审计员」。有效权限是所有角色的并集。
 
-Agent、Skill、组织记忆是用户举的扩展例子，不是本版功能或任务。本版仅确定下列可维护性约束，不预建这些模块、对象ACL表、用户组或设置页面。
+刻意这么设计。现实中同一个人经常身兼多职，强制单角色会逼出「为每种组合建一个角色」的组合爆炸，最后角色表里躺着「管理员+审计员」「管理员+只读」这类垃圾。
 
-- 身份/组织边界由IAM认证和成员关系负责；功能能力由IAM目录及角色负责；具体能访问哪些对象/数据由资源模块的策略和查询范围适配器负责；审批/状态由业务用例负责。中央能力允许不等于已完成对象数据授权。
-- Authorize的action/resource/scope使用窄类型，路由及应用服务统一声明要求，资源范围由所属模块的查询入口应用。新资源增加目录和资源适配，不修改每个角色、登录、菜单组件。对象/用户组权限确实落地时仍需局部迁移与测试，不承诺零代码改动。
-- 列表、count、聚合、导出、详情、批量、后台执行共用数据范围规则；过滤必须在查询/检索之前，不能先泄露数据再隐藏UI。未知scope失败，不降级为全组织。
-- 始终保留发起者与执行者身份，不以内部服务的高权限替代用户授权；派生索引/缓存不能丢来源组织和访问范围。具体资源动作、可见性、共享及委派规则在该业务的Spec中决定。
+首版没有 deny 优先级，没有角色继承，没有用户直授。要收回权限就把他从角色里移除。
 
-## 9. 实现结构和维护方式
+### 权限目录在代码里
 
-代码按实际职责划分，根Go module统一管理依赖：
+13 个权限，5 个平台级、8 个组织级。
 
-```text
-src/apps/iam/
-  cmd/main.go                 # 命令参数、配置加载、选择启动或维护入口
-  config.yaml                 # 模块配置、环境占位与默认值
-  migrations/                 # 版本化 SQL 与 embed；已执行脚本不修改
-  internal/
-    bootstrap/                # 创建依赖、组装服务、失败清理和退出关闭
-    config/                   # 仅类型化加载、解析与校验，不创建连接
-    router/                   # 统一注册并按认证规则和业务分组路由
-    handler/                  # 认证和账号请求绑定、统一错误映射
-      management/             # 用户、组织、成员、角色和审计管理接口
-    middleware/               # Session 提交、CSRF/来源、服务身份、契约验证
-    service/                  # 用例、最终授权、组织范围、事务和审计顺序
-    repository/               # GORM 查询/写入、必要锁与 SQL、初始化和维护
-    authentication/           # 类型化凭证用例、SCS 与可撤销逻辑会话
-    authorization/            # 无 HTTP/存储依赖的权限求值和委派规则
-    identity/                 # 账号与密码规则、Argon2id
-    testutil/                 # 集成标签下的隔离测试数据库
+```
+平台级（仅超级管理员）
+  iam.platform.users.read              查看平台用户
+  iam.platform.users.manage            管理平台用户与重置密码
+  iam.platform.organizations.read      查看平台组织
+  iam.platform.organizations.manage    管理组织与组织管理员
+  iam.platform.audit.read              查看全部审计
+
+组织级（组织内授权）
+  iam.organizations.read               查看组织信息
+  iam.organizations.manage             修改组织信息（经平台组织管理入口）
+  iam.users.read                       查看组织用户
+  iam.users.manage                     管理组织用户
+  iam.roles.read                       查看角色及权限
+  iam.roles.manage                     编辑自定义角色
+  iam.roles.assign                     为用户分配自定义角色
+  iam.audit.read                       查看所属组织审计
 ```
 
-[模块 DTO](internal/model/http.go)与原生 Gin 路由/处理器定义 HTTP 行为；权限业务目录归 `internal/authorization`。公共 Result 和错误码归 `src/packages/go/result`；真实共用的服务授权类型归 `src/packages/go/iamclient`。
-`pnpm catalogs:generate` 仅导出跨语言权限/结果码常量，`pnpm catalogs:check` 只读检查产物一致性。Web 使用 Axios 与实际消费的 Zod 模型，字段变化通过 HTTP/边界/E2E 测试同步。
-Console复用[窄客户端](../../packages/go/iamclient/client.go)，不共享IAM仓储或密码实现。
-尚无实际 Python 调用方，不预建客户端。
+清单在 `internal/authorization/permissions.json`，版本化管理。数据库里有一份运行时投影，启动时同步。
 
-核心设计模式及目的：协议边界与类型化认证用例分离；Application Service集中事务/管理员不变量；中央Policy Decision与路由执行点分离；关系模型组合权限而不是角色继承；Repository 使用 GORM、必要的参数化 SQL、org_id 和真实 FK；乐观锁防编辑覆盖。未来换求值实现不改每个接口，但不提前引入Casbin/OpenFGA等第二策略真源。
+同步带校验，如果某个权限的 module、resource_type、action 或 scope 变了但没有配套迁移，启动直接失败 `permission meaning changed without a reviewed migration`。不允许悄悄改变语义。
 
-make公开入口仍dev/build/stop；应用启动与基础组件生命周期分开，默认连接已配置依赖，普通启动不调用Docker；Compose是独立显式部署入口。开发入口先按配置执行迁移/种子，再启动IAM、Console、Web并监听代码热重载；stop按工作区归属识别进程及Compose容器并保留数据，外部组件不受管理。迁移、运行和维护共用同一数据库账号；迁移用显式PG锁，常驻serve检查schema兼容版本。
+模块开发者定义「能做什么」，组织管理员决定「谁能做」。组织管理员没法凭空造出一个后端不存在的权限。
 
-故障：PG/IAM失败不放行；Redis失败时需限流的登录写操作503，既有Cookie授权仍可走PG；没有SMTP依赖。审计写失败安全变更回滚，失败登录用独立审计记录。发布先扩展兼容schema再切应用，禁止自动破坏性down。
+委派有上限。操作者只能把「自己当前持有 且 目录标记 delegable」的组织权限授予别人。持有 `iam.roles.assign` 不等于拥有全部业务权限。
 
-备份恢复验证真实PG；恢复点之后已撤销的Session不能因恢复数据库而复活，恢复后先全量撤销user_sessions/清理SCS再开放。密码/Session/CSRF材料不进日志、截图或示例。详细验收和实际证据仅记录在Plan，不另建重复进度文件。
+### 一次授权判定怎么走的
 
+![授权流程](../../../docs/assets/iam/authorization-flow.svg)
 
-## 10. 迁移与运维
+五个步骤，全在同一个数据库事务里。
 
-模块独立启动、入口HTTPS、数据库准备及Compose方式见[配置指南](../../../docs/configuration.md)。
-当前结构版本为 7。`00005` 把 `permissions.key` 改名为 `permission_key`（SQL 保留字）并重建依赖它的触发器函数；`00006` 把 `auth_version`/`authz_version` 改名为 `auth_epoch`/`authz_epoch`（两者只差一个字母，含义完全不同，易改错）；`00007` 为审计清理补 `occurred_at` 索引。已执行迁移不修改。Goose迁移版本记录在`public.iam_goose_db_version`；`iam` schema包含上述11张表。
-迁移、运行及维护读取同一db连接，不创建独立数据库用户。serve检查schema版本和初始化状态，不再拒绝该账号拥有DDL权限；应用层鉴权、审计事务及管理员保护继续生效。
+只做请求内合并，不跨请求缓存。这是刻意的。一旦缓存「允许」结果，撤权就不是即时的，用户被移出组织后还能继续访问一段时间。不存在 Redis 故障后继续用旧权限的降级路径。
+
+依赖不可用时返回 503，绝不放行。
+
+### 超级管理员由配置指定
+
+唯一超级管理员来自 `config.yaml` 的 `bootstrap.username/password`。
+
+应用里没有接口能创建、删除、改密码或授予这个身份。本人也不能自助改密。换人只能改配置然后重启所有副本。
+
+它是最后的兜底。如果能被页面修改，一个被盗的普通管理员账号就能把自己提权成超管，整个权限体系归零。
+
+改配置会递增身份版本、撤销旧身份的所有会话、写审计。明文不进响应和日志。
+
+## 认证与会话
+
+### 覆盖范围
+
+| 能力 | 状态 |
+|---|---|
+| 用户名密码登录 | ✅ |
+| 登出 | ✅ |
+| 二次认证（高风险操作前重新输密码） | ✅ |
+| 本人改密 | ✅ |
+| 会话校验（每个请求） | ✅ |
+| 滚动续期 | ✅ |
+| 令牌轮换 | ✅ |
+| 即时撤销（改密/停用/恢复后） | ✅ |
+| 并发登录限流 | ✅ |
+| 账号锁定 | ✅ |
+| 公开注册 | ❌ 不做 |
+| SSO（OIDC/SAML） | ❌ 未实现 |
+| MFA | ❌ 未实现 |
+| API Token / SCIM | ❌ 未实现 |
+
+**没有公开注册是刻意的。** 账号由管理员创建，平台超管建全局账号，组织管理员建组织用户。谁能进系统必须有人负责。如果开放注册，任何知道域名的人都能建账号。
+
+### 会话机制
+
+不用 JWT，用服务端会话 + Cookie。
+
+```
+登录
+  → 校验密码（Argon2id）
+  → 建逻辑会话（user_sessions）
+  → SCS 写 Cookie（存会话 ID）
+  → 返回 HttpOnly Cookie
+
+每个后续请求
+  → 加载 Cookie
+  → 查逻辑会话：状态 / token 摘要 / 身份版本 / 双超时
+  → 续期 idle_expires_at（不超过 absolute）
+```
+
+三个机制配合
+
+| 机制 | 作用 |
+|---|---|
+| **滚动续期** | 每次请求把空闲超时往后推，默认 30 分钟 |
+| **令牌轮换** | 登录和二次认证时换新 token，旧逻辑会话标记撤销 |
+| **身份版本** | 改密、停用、撤超管时递增 `auth_epoch`，所有旧会话立即失效 |
+
+`absolute_expires_at` 是硬上限，默认 8 小时，滚动续期不能突破它。
+
+**这套比 JWT 更严格**。JWT 一旦签发无法撤销，而这里每次请求都查库验证，撤权即时生效。
+
+Cookie 特性
+
+```
+HTTP 环境   spx_session          HttpOnly, SameSite=Lax, Path=/
+HTTPS 环境  __Host-spx_session   HttpOnly, SameSite=Lax, Path=/, Secure
+```
+
+CSRF token 放在独立 Cookie `spx_csrf`，写请求必须带 `X-CSRF-Token` header。
+
+### 登录防爆破
+
+三层防护
+
+| 层 | 限制 |
+|---|---|
+| 按来源 IP | 每分钟 60 次 |
+| 按账号 | 每 15 分钟 20 次 |
+| 连续失败锁定 | 默认 5 次失败锁 15 分钟 |
+
+限流计数在 Redis，Redis 故障时登录写操作返回 503，不放行。
+
+密码计算有并发上限，同时最多 4 个 Argon2id 运算。这是防 CPU 打满，不是限用户。
+
+失败登录也写审计（`outcome=denied`，`reason=invalid_credentials`），但只在有明确用户时递增失败计数。不存在的用户名不会暴露差异，实现上走一个假哈希比较，耗时一致。
+
+### 账号规则
+
+**用户名** 3–39 位，字母开头、字母或数字结尾，中间允许 `.` `_` `-`。拒绝连续分隔符（`a--b`、`a..b`）。
+
+保留名单阻止新账号占用系统概念标识，`root`、`system`、`master`、`support`、`security`、`api`、`null`、`undefined`。保留检查只在创建时做，不进入登录路径，否则已存在的账号会登不进去。
+
+**密码** 12–128 个 Unicode 字符，不能含 NUL。用 Argon2id 哈希，存 PHC 格式（含参数）。
+
+**邮箱** 可选，最长 254 字符，本地部分不超过 64。唯一性用小写归一后的生成列加部分唯一索引，空邮箱不参与唯一性。不剥离加号子地址（那是合法的），也不剥离点号（那只对 gmail 消费者账号成立）。
+
+**显示名** 1–100 字符，不能含 NUL。
+
+**时区** 可选，用户展示偏好。接受 `utc`、`browser` 语义值或合法 IANA 时区名。服务端始终以 UTC 存储和传输，这列只影响渲染。
+
+## 技术架构
+
+### 模块间关系
+
+业务模块是**平级**的，没有上下游之分。
+
+```
+                    浏览器
+                       │  Cookie + CSRF
+                       ▼
+                  Web（同源入口）
+                       │  /api/v1/{module}/* 窄代理
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+    Console       llm-gateway    collector…
+        │              │              │
+        └──────────────┴──────────────┘
+                       │  各自独立调用
+                       ▼
+                      IAM（:8081）
+                   ├─▶ PostgreSQL
+                   └─▶ Redis
+```
+
+每个模块从 Web 同源入口进入，各自向 IAM 要授权结论。
+
+**Console 不是网关，不是权限中转站。** 它只是安全运营业务模块，按自身业务需要调用其他模块。其他模块要验权限，直接调 IAM。
+
+这一点在架构文档里写死了（`docs/design/architecture/02-technical-architecture.md` 第 153 行），也是代码事实，Web 的代理白名单里 `iam` 和 `console` 是并列的两个模块前缀，没有谁包着谁。
+
+### IAM 的请求链路
+
+```
+浏览器
+   HttpOnly Cookie（spx_session）+ CSRF token
+      ↓
+Web（Next.js）
+   同源窄代理 /api/v1/iam/*
+      ↓
+IAM（Go + Gin，:8081）
+   ├─▶ PostgreSQL（iam schema）
+   └─▶ Redis（限流计数）
+```
+
+Web 只做转发，不解析身份，不合并权限。Cookie 原样传。
+
+单端口，用户接口和服务接口共用 `/api/v1/iam` 前缀，按路由分别认证。应用内明文 HTTP，HTTPS 由外层反向代理终止。
+
+### 技术选型
+
+| 用途 | 选择 | 为什么 |
+|---|---|---|
+| HTTP | Gin | 原生路由、中间件、错误链、SSE |
+| ORM | GORM | 授权判定要在事务里同时读会话、组织、用户、权限四张表，手写有大量重复字段映射 |
+| 驱动 | pgx v5 | GORM 的 postgres driver 走它，SCS 和原生 SQL 共用同一个池 |
+| 会话 | SCS | Cookie 编码、续期、store 接口现成 |
+| 密码 | Argon2id | 内存硬，抗 GPU 爆破 |
+| CSRF | gorilla/csrf | 标准实现 |
+| 迁移 | Goose | 显式执行，版本记录在库，不做启动自动建表 |
+| 命令 | Cobra | 七个子命令 |
+| 配置 | Viper + mapstructure | YAML 声明环境占位，严格类型解码 |
+
+### 十一张表
+
+```
+iam.users                 用户主表（含 timezone、email_normalized）
+iam.password_credentials   密码哈希、失败计数、锁定
+iam.organizations          组织（含 parent_id、depth 树结构）
+iam.organization_users      用户 ↔ 组织
+iam.roles                  角色（系统 + 自定义）
+iam.permissions            权限目录（运行时投影）
+iam.role_permissions       角色 ↔ 权限
+iam.organization_user_roles 用户 ↔ 角色
+iam.user_sessions          逻辑会话（可枚举、可撤销）
+iam.scs_sessions           SCS 的 Cookie 存储
+iam.audit_events           审计
+```
+
+三条值得知道的设计
+
+**密码单独一张表**：登录失败计数要用 `FOR UPDATE` 锁行。合进 `users` 的话，每次登录都会锁用户行，挡住所有读操作。
+
+**两张会话表不是重复**：`scs_sessions` 只存 Cookie 指向的会话 ID，`user_sessions` 存完整状态（token 摘要、身份版本、双超时）。Cookie 带指针，状态在库里。
+
+**外键都带 org_id 复合约束**：`role_permissions(org_id, role_id)` 指向 `roles(org_id, id)`。从存储层杜绝跨组织串用，比应用层校验可靠。
+
+### 角色和组织没有启用/停用状态
+
+未删除即可用。只有用户和用户关系有 active/disabled。
+
+这个简化是有意的。多一个 status 就多一套状态机，每个查询都要带 `status='active'` 条件，而这些条件经常被忘记。删掉之后「存在即有效」是唯一需要记住的规则。
+
+## 别的服务怎么用
+
+### 一个客户端，一个方法
+
+```go
+import "github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+
+client, _ := iamclient.New(
+    "http://127.0.0.1:8081",
+    os.Getenv("SPX_CONSOLE_IAM_TOKEN"),
+)
+defer client.Close()
+
+decision, err := client.Authorize(
+    ctx, r,
+    iamclient.PermissionIAMOrganizationsRead,
+    orgID,
+    nil,
+)
+```
+
+`r` 是原始 `*http.Request`，client 从里面取 Cookie、CSRF header、method、path、Origin。调用方不用自己拼。
+
+返回的 `decision`
+
+```go
+decision.Allowed       // 允不允许
+decision.DecisionID    // 排障和审计关联
+decision.Principal     // 用户是谁
+decision.Scope         // platform 或 organization + org_id
+```
+
+`iamclient` 包里除 `Authorize` 外只有 `Close`。类型定义在 `types.go`，权限常量是生成代码。
+
+### 两条铁律
+
+**服务凭证不能替代用户身份。** 每个调用方有自己的 token，在 IAM 的 `service_clients` 里配置，同时限定能问哪些 action。token 只证明「我是 Console」，不证明「我是张三」。IAM 验完服务凭证后，还要再验用户 Cookie。
+
+**用户 Cookie 不能替代服务凭证。** 反过来也不行。两条通道独立，缺一不可。
+
+配置长这样
+
+```yaml
+service_clients:
+  console:
+    token: "${SPX_CONSOLE_IAM_TOKEN-}"
+    actions: [iam.organizations.read]
+```
+
+`actions` 是白名单，不在列表里的 action 一律拒绝。token 用 SHA-256 摘要比对，常数时间比较，防时序攻击。
+
+### 当前接入情况
+
+**已接入，Console。** 它调 IAM 验证组织访问和 SSE 授权，是唯一配了 `service_clients` 的模块。
+
+**规划中，其余模块。** 按架构设计，`llm-gateway`、`collector`、`correlator`、`agent-runtime`、`soar`、`scheduler` 等后续模块都会各自接入 IAM，方式完全一样，在自己的 `config.yaml` 里配一个 `service_clients` 条目，拿一个独立 token，声明自己需要问哪些 action。
+
+**它们不经过 Console。** Console 是安全运营业务模块，不是网关，不是权限中转站。每个模块直连 IAM。
+
+模块定义还在演进，具体有哪些、叫什么名字，以后可能变。但接入方式不会变，因为它是 IAM 的契约，不是某个模块的实现细节。
+
+新增一个模块的完整动作只有两步
+
+```yaml
+# 1. IAM 侧加一段配置
+service_clients:
+  your-module:
+    token: "${SPX_YOUR_MODULE_IAM_TOKEN-}"
+    actions: [iam.organizations.read]
+```
+
+```go
+// 2. 调用方用 iamclient
+client, _ := iamclient.New(iamURL, yourToken)
+decision, err := client.Authorize(ctx, r, action, orgID, nil)
+```
+
+不用改 IAM 代码，不用重启其他模块。
+
+### 调用方必须做和不该做
+
+必须做，把返回的 `Scope` 和路由里的 `org_id` 比对，不一致就拒绝。这是防中间人篡改组织范围的最后一道闸。
+
+必须做，真实资源的归属自己查。IAM 说「你在组织 A 有读权限」，不代表「组织 A 里这条 Case 你能看」。
+
+不该做，读 IAM 的表。不该做，导入 IAM 的 `internal` 包。不该做，自己实现一套角色判断。
+
+Console 就是这么接的，`src/apps/console/internal/handler/server.go` 里只有一次 `s.IAM.Authorize` 调用，其余全是业务逻辑。
+
+## 怎么跑起来
+
+### 本地开发
+
+从仓库根目录，用统一入口
 
 ```sh
-go run ./src/apps/iam/cmd migrate --config src/apps/iam/config.yaml
-go run ./src/apps/iam/cmd serve --config src/apps/iam/config.yaml
-go run ./src/apps/iam/cmd maintain --config src/apps/iam/config.yaml
-go run ./src/apps/iam/cmd reset-password --user-id <uuid> --config src/apps/iam/config.yaml
-go run ./src/apps/iam/cmd revoke-after-restore --config src/apps/iam/config.yaml
+cp .env.example .env
+chmod 600 .env
+# 填数据库密码、管理员密码、CSRF key、Console 的 IAM token
+
+pnpm compose:up postgres redis   # 或者连已有实例
+make dev
 ```
 
-维护命令与HTTP服务、迁移命令使用相同的db配置。
-`maintain`每次每表最多清理1000条过期记录，可由部署调度重复执行；应用管理API不提供审计历史修改入口。
-`reset-password`要求交互终端、二次无回显输入，更新密码并撤销旧会话，不授予管理员身份。
-恢复数据库后必须先运行`revoke-after-restore`再开放流量，避免备份中旧会话恢复有效。
+`make dev` 先跑迁移和初始化，再启动 IAM、Console、Web。
 
-请求日志记录request_id、状态、耗时；内部授权日志记录decision_id及决定。
-不记录请求体、Cookie、密码、连接字符串或服务凭证。未承诺吞吐和延迟SLA；上线容量需按真实负载测量。
+### 七个命令
 
-### 启动与路由代码
+```sh
+go run ./src/apps/iam/cmd check-config         --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd serve                --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd migrate              --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd status               --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd maintain             --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd revoke-after-restore --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd reset-password --user-id <uuid> --config src/apps/iam/config.yaml
+```
 
-`cmd/main.go` 读取并校验配置、选择运行命令；`internal/bootstrap/serve.go` 依次初始化数据库、Redis、会话、鉴权和 HTTP 服务，并在退出时释放连接。依赖通过构造参数显式交给使用者，`context.Context` 用于取消、超时及请求范围信息。用户、服务鉴权及管理接口统一在 `internal/router/routes.go` 注册，请求处理位于 handler，安全与 Session 中间件位于 internal/middleware。环境变量仅由配置加载器解析，YAML 是映射与默认值的唯一声明位置。
+`check-config` 离线校验，不连数据库不建日志。改完配置先跑这个。
 
+`status` 只读，不因状态查询隐式建表。
 
-## 统一响应与资源归属
+`maintain` 清理过期数据，每次每表最多 1000 条，由部署侧定时调度。
 
-普通 JSON API 使用 `{code, message, data, request_id}`，HTTP 状态仍表示真实成功/失败。通过 `result.Success`、`result.Created`、`result.NoContent`、`result.Fail` 写入，业务代码不拼状态/消息；仅需特定公开提示时使用 `FailWithMessage`。Result 由公共 Go 类型定义，稳定结果码从公共目录派生；204、SSE 等按各自协议处理。
+`revoke-after-restore` 必须在数据库恢复后、开放流量前跑。否则备份里的旧会话会复活。
 
-config 只处理文件、环境占位、类型和校验。bootstrap 创建并释放数据库、缓存和 HTTP 服务；repository.NewStore 的 database/sql 适配复用 pgxpool，Store 关闭适配，启动装配关闭池。SCS 使用同一个池但独立提交，业务修改与审计在同一 GORM 事务内；会话提交失败不发送成功 Cookie，失败登录会撤销逻辑会话。普通 API 缓冲位于 IAM 中间件内，Console SSE 不经过该缓冲。
+`reset-password` 是运维兜底，交互式无回显输入，走和普通改密一样的用例，撤销会话、写审计，不会顺便提权。
 
-`cache` 配置分组直接保留 Redis 连接字段；当前没有第二后端，不设驱动注册框架。模板在 `src/packages/go/cache/key/iam.go`，默认显式含 spx 前缀。数据库迁移仍为显式 Goose 命令，已执行版本与现有数据保持；源码重构不代表可以重建用户库。
+### 首次启动做了什么
 
-## Web 模板替换
+```
+迁移建表
+      ↓
+同步权限目录和系统角色
+      ↓
+账号表为空？
+   ├─ 是 → 建超管 + 根组织（slug=master）
+   └─ 否 → 同步配置里的超管，身份变了就撤会话
+      ↓
+校验 schema 版本和唯一超管存在
+      ↓
+serve 就绪
+```
 
-Web采用Next.js/shadcn，统一组件与样式基准。真实登录及管理页面在新增的`src/spx/`和产品路由中重建，API仍遵循本模块契约。上游`/auth`和`/dashboard`保留演示语义，不作为身份或权限来源。具体入口和上游基准校验见[Web README](../web/README.md)。
+没有安装页面。管理员是配置给的，直接去登录页登。
 
-运行诊断见 [日志与错误定位](../../../docs/observability.md)。管理事务、鉴权、认证/会话与数据库诊断通过 request_id 关联；运行日志不替代事务审计。
+迁移、种子、首账号初始化都可重试，并发取 advisory 锁。初始管理员和根组织在同一事务创建。
 
-## 框架重构后的开发入口
+### 配置
 
-- [Cobra命令](cmd/main.go)：`serve`、`migrate`、`status`、`maintain`、`revoke-after-restore`、`reset-password`。`--print-endpoints`只加载配置，不访问数据库/Redis。
-- [Gin公开入口](internal/handler/server.go)与[路由注册](internal/router/routes.go)：路由显式注册，业务错误统一进入 Gin 错误链；处理器注释派生文档。
-- [角色开发贯通示例](../../../docs/development/role-management.md)：从协议、事务、仓储到Axios/Zod、Query/RHF和验收。
+配置在 `src/apps/iam/config.yaml`，每项都有中文注释说明是什么、默认值为什么这么定、改了会怎样。
 
+必填四项，由环境变量或私有 `.env` 提供
 
-## 组织输入与就地身份确认
+```
+SPX_IAM_CSRF_KEY            32 字节，签名 CSRF token
+SPX_IAM_BOOTSTRAP_PASSWORD  超管密码，12–128 字符
+SPX_CONSOLE_IAM_TOKEN       Console 调 IAM 凭证，32–512 字节
+SPX_POSTGRES_PASSWORD       数据库密码
+```
 
-组织管理的“当前组织”始终取顶栏选择的组织 ID，与“全部组织”范围区分。组织名称在模块请求模型中规范化首尾空白，允许中文及正常展示字符，长度为 1–30 个 Unicode 码点，拒绝控制字符；标识为 3–30 位小写字母、数字、下划线和连字符，字母开头、字母或数字结尾，唯一且创建后不变。Go 请求模型、Web Zod 与数据库约束保持一致。`00004` 校验已有数据，发现不合规组织会原子中止，不自动改名或截断。
+关键默认值
 
-平台成员管理与平台组织管理两类写权限保留近期认证；默认 `auth.reauth_window` 为 30 分钟，普通业务操作不自动延长窗口。仅凭读取权限、选择成员或本组织名称更新不增加二次确认。IAM 返回 `iam.recent_auth_required` 后，Web 在当前 Dialog 确认密码，错误密码保留有效身份和草稿，确认成功更新同一身份的会话作用域并返回原表单，由成员继续提交；不会重放 HTTP 或自动写入。Account 不再提供独立确认入口。真实 401 及权限撤销仍按原边界处理，配置管理员的不可修改规则不变。
+| 配置 | 默认 | 约束 |
+|---|---|---|
+| `session_idle_timeout` | 30m | > 0 |
+| `session_absolute_timeout` | 8h | ≥ idle，≤ 168h |
+| `reauth_window` | 30m | > 0 |
+| `login_max_failures` | 5 | 1–100 |
+| `login_lock_duration` | 15m | > 0 |
+| `audit_days` | 365 | 1–36500 |
+| `session_days` | 30 | 1–36500 |
 
-## 离线配置检查
+改配置要重启，不热更新。
 
-运行 `go run ./src/apps/iam/cmd check-config --config src/apps/iam/config.yaml` 校验完整运行配置；不连接依赖、不执行迁移、不创建业务日志。根目录 `pnpm config:check` 按模块注入统一环境并校验所有选中模块；必须先填写根 `.env`。配置字段、优先级、默认值与重启要求见[配置指南](../../../docs/configuration.md)。
+## API 一览
+
+35 个业务路由加 1 个服务路由，全部在 `/api/v1/iam` 下。另有 `/health/ready` 就绪检查。
+
+**认证**
+
+```
+GET  /auth/context           CSRF 上下文
+POST /auth/login             登录
+POST /auth/logout            登出
+POST /auth/reauthenticate    二次认证
+```
+
+**本人**
+
+```
+GET   /me                    本人摘要 + 组织列表 + 能力投影
+PATCH /me                    更新时区偏好
+POST  /me/password           本人改密
+```
+
+**平台账号（超管）**
+
+```
+GET   /users                 列表
+POST  /users                 创建
+GET   /users/:id             详情
+PATCH /users/:id             更新
+POST  /users/:id/reset-password   重置密码
+```
+
+**平台组织（超管）**
+
+```
+GET    /organizations        列表
+GET    /organizations/tree   组织树
+POST   /organizations        创建
+PATCH  /organizations/:id    更新
+DELETE /organizations/:id    删除（需无子组织）
+```
+
+**组织内（组织权限）**
+
+```
+GET    /orgs/:org_id/users                        用户列表
+POST   /orgs/:org_id/users                        添加用户
+PATCH  /orgs/:org_id/users/:id                    更新用户
+DELETE /orgs/:org_id/users/:id                    移除用户
+GET    /orgs/:org_id/roles                        角色列表
+POST   /orgs/:org_id/roles                        创建角色
+GET    /orgs/:org_id/roles/:id                    角色详情
+PATCH  /orgs/:org_id/roles/:id                    更新角色
+DELETE /orgs/:org_id/roles/:id                    删除角色
+GET    /orgs/:org_id/roles/:id/users              角色下的用户
+PUT    /orgs/:org_id/roles/:id/permissions        全量替换角色权限
+PUT    /orgs/:org_id/users/:id/roles              全量替换用户角色
+POST   /orgs/:org_id/permission-preview           权限变更预览
+```
+
+**平台 / 目录**
+
+```
+GET  /permissions            权限目录
+GET  /audit-events           审计日志（服务端按权限裁剪可见范围）
+```
+
+**服务接口**
+
+```
+POST /authorize              服务凭证 + action 白名单 + 原用户上下文
+```
+
+统一响应 `{code, message, data, request_id}`。401 身份失效、403 授权拒绝、409 冲突、429 限流、503 依赖故障。
+
+## 数据
+
+### 审计
+
+`iam.audit_events` 记录谁、什么时候、对什么、做了什么、结果如何。
+
+```sql
+org_id          -- 组织范围，平台操作为 NULL
+actor_type      -- user / system / deployment_operator
+actor_id        -- 操作者
+actor_name      -- 快照，防止用户改名后追溯困难
+action          -- 如 iam.roles.manage
+target_type     -- user / role / membership / organization / platform
+target_id       -- 目标 ID
+outcome         -- success / denied / failure
+reason_code     -- 受控原因码
+request_id      -- 跨服务关联
+decision_id     -- 授权判定关联
+metadata        -- 白名单字段，8KiB 以内
+```
+
+审计和业务变更在同一事务，要么都成要么都不成。审计写入失败会导致安全变更回滚。
+
+不记录密码、Cookie、原始请求体。
+
+### 保留期
+
+| 数据 | 默认 | 说明 |
+|---|---|---|
+| 审计 | 365 天 | 《网络安全法》第二十一条要求日志留存不少于六个月。180 天正好是法定下限没有余量，所以默认一年 |
+| 已失效会话 | 30 天 | 只影响审计排查用的历史，会话有效性由 `absolute_expires_at` 判定 |
+| SCS Cookie 行 | 过期即清 | 临时存储 |
+
+都可配置。清理是物理删除，删掉之后追溯不了。
+
+### 组织命名
+
+名称 1–30 个 Unicode 码点，允许中文和正常展示字符，拒绝控制字符。
+
+标识 3–30 位，小写字母、数字、下划线、连字符，字母开头字母或数字结尾，唯一，创建后不可改。
+
+Go 请求模型、Web 的 Zod、数据库 CHECK 三处保持一致。
+
+## 实现结构
+
+```
+src/apps/iam/
+  cmd/main.go              命令解析、配置加载、选择启动或维护入口
+  config.yaml              配置、环境占位、默认值
+  migrations/              版本化 SQL，已执行的脚本不修改
+  internal/
+    bootstrap/             创建依赖、组装服务、失败清理
+    config/                类型化加载和校验，不建连接
+    router/                路由注册
+    handler/               请求绑定、统一错误映射
+      management/          用户、组织、角色、审计管理
+    middleware/            Session 提交屏障、CSRF、服务身份、契约校验
+    service/               用例、最终授权、组织范围、事务、审计顺序
+    repository/            GORM 查询、锁、SQL、初始化、维护
+    authentication/        凭证用例、SCS、可撤销逻辑会话、限流
+    authorization/         权限求值和委派规则（不依赖 HTTP 和存储）
+    identity/              账号、密码、邮箱、显示名、时区规则
+    model/                 HTTP DTO 和请求边界校验
+    testutil/              集成测试的隔离数据库
+```
+
+分层原则，handler 只管 HTTP，service 管事务和业务不变量，repository 管 SQL，authorization 是纯函数不碰 IO。
+
+想换授权求值引擎（比如将来上 Casbin 或 OpenFGA），改 `authorization` 一个包就行。
+
+### 会话提交屏障
+
+IAM 独有的一处机制。
+
+SCS 的 `LoadAndSave` 不能保证「会话写库失败时不发送成功响应」，所以 IAM 的非流式响应先写进缓冲区，确认 SCS 持久化成功后才发给浏览器。
+
+失败时补偿撤销已创建的逻辑会话，然后返回 503。不会出现「浏览器拿到 Cookie 但服务端没这个会话」的哑状态。
+
+Console 的 SSE 是流式，不经过这个屏障。
+
+### 管理写操作用统一事务边界
+
+所有管理写走同一个 `Manage` 方法
+
+```
+取 advisory 事务锁（串行化低频管理写）
+  ↓
+按 UUID 顺序锁涉及的用户
+  ↓
+按 UUID 顺序锁涉及的组织
+  ↓
+重新验证操作者会话版本和当前权限
+  ↓
+校验目标
+  ↓
+执行业务变更 + 写审计
+  ↓
+提交
+```
+
+串行化低频管理写，比在多个入口分别处理竞态简单。登录和普通业务读不持这把锁。
+
+### 超级管理员保护
+
+平台始终至少保留一个 active 的超级管理员。会破坏这条的写操作返回 409，并发场景也覆盖。
+
+组织层不强制保留管理员：管理员能力由「自定义角色 + 相应权限」达成，超级管理员是最终兜底。这样组织不会因为角色被清空而永久卡死。
+
+## 几个容易被误解的点
+
+**它不是 OAuth 服务器。** 没有 client credentials、没有 scope、没有 refresh token 这套 OAuth 词汇。有登录、有会话、有滚动续期和令牌轮换，但不是 OAuth 协议。
+
+**它也做用户登录。** `POST /auth/login` 是真账号密码登录，返回 HttpOnly Cookie。不只是服务间认证。
+
+**它不缓存授权结果。** 每次判定都读数据库。将来如果压测证明是瓶颈，也只会考虑缓存拒绝结果，不会缓存允许结果。
+
+**Console 不是必经中转。** 其他模块要验权限直接调 IAM，不用经过 Console。
+
+**组织是树且不限深度。** 全局唯一根，单父、禁止成环由数据库触发器强制，不设业务深度上限。
+
+**角色和用户关系的状态语义不同。** 角色没有 status（存在即可用），组织内的用户关系有 active/disabled。
+
+## 相关文档
+
+- [技术架构](../../../docs/design/architecture/02-technical-architecture.md) 全景服务划分和数据流
+- [配置指南](../../../docs/development/configuration.md) 字段、优先级、重启要求
+- [测试指南](../../../docs/development/testing.md) 怎么跑单元、集成、E2E
+- [角色管理开发示例](../../../docs/development/role-management.md) 从协议到前端的一条完整链路
+- [日志与错误定位](../../../docs/development/observability.md) 用 request_id 串起跨服务排障

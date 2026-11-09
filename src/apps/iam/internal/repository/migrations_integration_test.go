@@ -98,7 +98,7 @@ func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
 	// v1 阶段的列名还是 auth_version；Seed 面向迁移完成后的 schema，不能用来构造历史数据。
 	// 这里直接写入"升级前就存在的管理员"，正是本用例要验证的起点。
 	beforeID := uuid.New()
-	beforeHash, err := (identity.PasswordHasher{}).GenerateHash("secplexus")
+	beforeHash, err := (identity.PasswordHasher{}).GenerateHash("SecPlexus#2026")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,13 +258,13 @@ func TestOrganizationUpgradeRejectsInvalidExistingDataWithoutRewriting(t *testin
 	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,'soc_team-01',$2,'active')`, uuid.NewString(), strings.Repeat("😀", 30)); err != nil {
+	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,'soc_team-01',$2,(SELECT id FROM iam.organizations WHERE parent_id IS NULL))`, uuid.NewString(), strings.Repeat("😀", 30)); err != nil {
 		t.Fatal(err)
 	}
 	for _, input := range []struct{ slug, name string }{
 		{"boundary-org", strings.Repeat("中", 31)}, {"boundary-org", "Ops\nTeam"}, {"boundary-org", "Ops\u0085Team"}, {legacy, "Ops"}, {"soc_", "Ops"}, {"1soc", "Ops"},
 	} {
-		if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,$2,$3,'active')`, uuid.NewString(), input.slug, input.name); err == nil {
+		if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,$2,$3,(SELECT id FROM iam.organizations WHERE parent_id IS NULL))`, uuid.NewString(), input.slug, input.name); err == nil {
 			t.Fatalf("invalid organization accepted: %q", input.slug)
 		}
 	}

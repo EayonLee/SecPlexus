@@ -28,24 +28,8 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 		return nil, err
 	}
 
-	rows, err := repository.VisibleOrganizations(ctx, s.Store.DB, userID, p.IsSuperAdmin)
+	organizations, err := repository.VisibleOrganizations(ctx, s.Store.DB, userID, p.IsSuperAdmin)
 	if err != nil {
-		return nil, err
-	}
-
-	organizations := []map[string]string{}
-	for rows.Next() {
-		var id, slug, name, version string
-		if err = rows.Scan(&id, &slug, &name, &version); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-
-		organizations = append(organizations, map[string]string{"id": id, "slug": slug, "name": name, "authz_epoch": version})
-	}
-
-	_ = rows.Close()
-	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 
@@ -73,7 +57,7 @@ func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, e
 	if orgID != "" {
 		allowed := false
 		for _, org := range organizations {
-			if org["id"] == orgID {
+			if org.ID == orgID {
 				allowed = true
 			}
 		}

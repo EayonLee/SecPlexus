@@ -11,10 +11,10 @@
 
 ### 第一组：规范落地
 
-- [x] `docs/testing.md` 增加「改动类型与必需测试层」判定表，含「不需要」列，明确纯样式与文案不补测试。
-- [x] `docs/testing.md` 补强制规则：先失败测试、禁止 sleep 掩盖、禁止删测试变绿、禁止断言实现细节、集成测试隔离清理。
-- [x] `docs/testing.md` 补「集成测试缺 `SPX_TEST_POSTGRES_URL` 时跳过而非失败」的明确约定，避免被误判为缺陷。
-- [x] `AGENTS.md` 的 Testing 段增加强制最低要求与禁止清单，保持三到五条，继续指向 `docs/testing.md` 作为唯一细节来源。
+- [x] `docs/development/testing.md` 增加「改动类型与必需测试层」判定表，含「不需要」列，明确纯样式与文案不补测试。
+- [x] `docs/development/testing.md` 补强制规则：先失败测试、禁止 sleep 掩盖、禁止删测试变绿、禁止断言实现细节、集成测试隔离清理。
+- [x] `docs/development/testing.md` 补「集成测试缺 `SPX_TEST_POSTGRES_URL` 时跳过而非失败」的明确约定，避免被误判为缺陷。
+- [x] `AGENTS.md` 的 Testing 段增加强制最低要求与禁止清单，保持三到五条，继续指向 `docs/development/testing.md` 作为唯一细节来源。
 - [x] 检查 `CONTRIBUTING.md` 与 `CONTRIBUTING.zh-CN.md` 是否需要同步一句话指向判定表；两份文档保持一致。
 
 ### 第二组：基线

@@ -11,10 +11,10 @@ func TestPasswordPolicy(t *testing.T) {
 		password string
 		valid    bool
 	}{
-		{"1234567", false},
-		{"12345678", true},
+		{"12345678901", false},
+		{"123456789012", true},
 		{"admin", false},
-		{"安全密码八个字符", true},
+		{"这是一个足够长的安全密码", true},
 		{"a sufficiently long password", true},
 		{strings.Repeat("a", 128), true},
 		{strings.Repeat("a", 129), false},
@@ -30,12 +30,12 @@ func TestPasswordPolicy(t *testing.T) {
 // TestPasswordHash 验证哈希比对和参数资源限制。
 func TestPasswordHash(t *testing.T) {
 	h := PasswordHasher{}
-	encoded, err := h.GenerateHash("12345678")
+	encoded, err := h.GenerateHash("123456789012")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err = h.CompareHashAndPassword(encoded, "12345678"); err != nil {
+	if err = h.CompareHashAndPassword(encoded, "123456789012"); err != nil {
 		t.Fatal(err)
 	}
 

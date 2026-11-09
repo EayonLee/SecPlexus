@@ -116,12 +116,12 @@ type GetOrganizationPermissionsParams struct {
 	UserID uuid.UUID // 会话所属用户。
 }
 
-// GetOrganizationPermissions 查询有效成员通过有效角色获得的权限。
+// GetOrganizationPermissions 查询有效用户通过有效角色获得的权限。
 func (q *Queries) GetOrganizationPermissions(ctx context.Context, input GetOrganizationPermissionsParams) ([]string, error) {
 	items := []string{}
-	err := q.db.WithContext(ctx).Table("iam.memberships AS m").Distinct("p.permission_key").
-		Joins("JOIN iam.membership_roles mr ON mr.org_id=m.org_id AND mr.membership_id=m.id").
-		Joins("JOIN iam.roles r ON r.org_id=mr.org_id AND r.id=mr.role_id AND r.status='active'").
+	err := q.db.WithContext(ctx).Table("iam.organization_users AS m").Distinct("p.permission_key").
+		Joins("JOIN iam.organization_user_roles mr ON mr.org_id=m.org_id AND mr.organization_user_id=m.id").
+		Joins("JOIN iam.roles r ON r.org_id=mr.org_id AND r.id=mr.role_id").
 		Joins("JOIN iam.role_permissions rp ON rp.org_id=r.org_id AND rp.role_id=r.id").
 		Joins("JOIN iam.permissions p ON p.permission_key=rp.permission_key AND p.status IN ('active','deprecated')").
 		Where("m.org_id = ? AND m.user_id = ? AND m.status='active'", input.OrgID, input.UserID).Pluck("p.permission_key", &items).Error

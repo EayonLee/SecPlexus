@@ -63,7 +63,7 @@ YAML字段直接声明环境变量和默认值，参数组件逐值展开，Vipe
 
 默认本机日志为`logs/console.log`，同时输出stdout；容器默认仅stdout，由Docker轮转。与IAM及其他副本使用不同日志文件，不能共写同一个轮转文件。
 
-源码、二进制和Compose的路径/配置规则见[配置指南](../../../docs/configuration.md)。
+源码、二进制和Compose的路径/配置规则见[配置指南](../../../docs/development/configuration.md)。
 
 ### 启动与路由代码
 
@@ -72,8 +72,8 @@ YAML字段直接声明环境变量和默认值，参数组件逐值展开，Vipe
 
 普通接口通过 `src/packages/go/result` 返回统一 Result，SSE 直接使用流协议。公共请求标识、日志和异常恢复在共享 HTTP middleware；组织访问由 IAM 内部客户端校验，不读取 IAM 私表。config 只解析/校验文件，bootstrap 按配置创建客户端并负责关闭空闲连接。Console 没有实际 DB/cache 依赖，不增加占位配置。
 
-运行诊断见 [日志与错误定位](../../../docs/observability.md)。内部 IAM 调用记录 upstream_request_id 和受控失败阶段，SSE 记录建立/结束及撤权原因，不记录请求凭据。
+运行诊断见 [日志与错误定位](../../../docs/development/observability.md)。内部 IAM 调用记录 upstream_request_id 和受控失败阶段，SSE 记录建立/结束及撤权原因，不记录请求凭据。
 
 ## 离线配置检查
 
-运行 `go run ./src/apps/console/cmd check-config --config src/apps/console/config.yaml` 校验完整运行配置；不连接依赖、不执行迁移、不创建业务日志。根目录 `pnpm config:check` 按模块注入统一环境并校验所有选中模块；必须先填写根 `.env`。配置字段、优先级、默认值与重启要求见[配置指南](../../../docs/configuration.md)。
+运行 `go run ./src/apps/console/cmd check-config --config src/apps/console/config.yaml` 校验完整运行配置；不连接依赖、不执行迁移、不创建业务日志。根目录 `pnpm config:check` 按模块注入统一环境并校验所有选中模块；必须先填写根 `.env`。配置字段、优先级、默认值与重启要求见[配置指南](../../../docs/development/configuration.md)。
