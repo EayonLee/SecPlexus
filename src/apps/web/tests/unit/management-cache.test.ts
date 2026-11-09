@@ -57,7 +57,7 @@ test("a management mutation invalidates all cached pages and related projections
     [{ _id: "listUsers" }, "session", 1],
     [{ _id: "listUsers" }, "session", 2],
     [{ _id: "listRoles" }, "org", "version"],
-    [{ _id: "getOrganization" }, "org", "version"],
+    [{ _id: "listOrganizations" }, "org", "version"],
   ];
   for (const key of keys) queryClient.setQueryData(key, { previous: "projection" });
   const mutation = queryClient.getMutationCache().build(queryClient, {

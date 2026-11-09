@@ -3,7 +3,6 @@ package identity
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -12,23 +11,11 @@ import (
 
 var ErrPasswordMismatch = errors.New("current password does not match")
 
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{2,63}$`)
-
-// NormalizeUsername 校验用户名并返回规范化的小写形式。
-func NormalizeUsername(username string) (string, error) {
-	username = strings.TrimSpace(username)
-	if !usernamePattern.MatchString(username) {
-		return "", errors.New("username must be 3–64 ASCII letters, digits, underscores, periods or hyphens, starting with a letter")
-	}
-
-	return strings.ToLower(username), nil
-}
-
 // ValidatePassword 校验密码长度和字符编码。
 func ValidatePassword(password string) error {
 	length := utf8.RuneCountInString(password)
-	if !utf8.ValidString(password) || length < 8 || length > 128 || len(password) > 512 || strings.ContainsRune(password, 0) {
-		return errors.New("password must contain 8–128 Unicode characters")
+	if !utf8.ValidString(password) || length < 12 || length > 128 || len(password) > 512 || strings.ContainsRune(password, 0) {
+		return errors.New("password must contain 12–128 Unicode characters")
 	}
 
 	return nil

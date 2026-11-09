@@ -71,7 +71,7 @@ func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (iamclient.Principal
 	return s.Sessions.ResolveTx(ctx, tx, id, s.Sessions.Manager.Token(ctx))
 }
 
-// authorizeTx 根据最新组织、成员和权限状态计算动作范围。
+// authorizeTx 根据最新组织、用户和权限状态计算动作范围。
 func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Principal, action, orgID string) (iamclient.AuthorizedScope, error) {
 	permission, err := repository.ReadPermission(ctx, tx, action)
 	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
@@ -95,7 +95,7 @@ func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Prin
 		}
 
 		if err = repository.OrgAuthSnapshot(ctx, tx, org, userID,
-			&snapshot.OrganizationActive, &snapshot.MembershipActive, &snapshot.Permissions); err != nil {
+			&snapshot.OrganizationActive, &snapshot.OrganizationUserActive, &snapshot.Permissions); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
 				return iamclient.AuthorizedScope{}, authorization.ErrDenied
 			}

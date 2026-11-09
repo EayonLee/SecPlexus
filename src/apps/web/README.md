@@ -39,7 +39,7 @@ Root builds use the same filtered environment, falling back to non-secret exampl
 
 For independent Web development, copy [.env.example](.env.example) to `.env.local`, configure the public API origins, and run `pnpm dev` here. This uses Next.js native environment loading and the default port 3000. Keep IAM's public origin consistent with the browser entry. Never place secrets in `NEXT_PUBLIC_*`.
 
-Production uses `next build` followed by `next start`, including server components and API routes. It is not a static export. The Web Dockerfile runs Next.js as an unprivileged Node user. See [configuration](../../../docs/configuration.md) and [testing](../../../docs/testing.md).
+Production uses `next build` followed by `next start`, including server components and API routes. It is not a static export. The Web Dockerfile runs Next.js as an unprivileged Node user. See [configuration](../../../docs/development/configuration.md) and [testing](../../../docs/development/testing.md).
 
 ## Contracts and skills
 
@@ -93,7 +93,7 @@ IAM lists use Query and the existing TanStack Table with controlled server pagin
 
 ## 可信入口与协议边界
 
-直接使用根 `pnpm dev` / `pnpm preview`。根 `.env` 控制公开 origin 和监听地址，后端地址由实际 Go 配置推导；不需要安装独立入口或配置内部 Web 端口。详见[配置说明](../../../docs/configuration.md)。
+直接使用根 `pnpm dev` / `pnpm preview`。根 `.env` 控制公开 origin 和监听地址，后端地址由实际 Go 配置推导；不需要安装独立入口或配置内部 Web 端口。详见[配置说明](../../../docs/development/configuration.md)。
 
 本机链路为浏览器 → Next → IAM/Console。Next 不透传客户端来源头；当前来源限流按代理连接来源计数，多人公网真实来源隔离尚未实现。Cookie/CSRF、Allow/Retry-After、多 Set-Cookie 与 SSE 保留各自协议，IAM API 不绕行 Console。
 
@@ -117,4 +117,4 @@ Member selection uses the template's existing Combobox with server search and Ta
 
 ## Offline configuration check
 
-Root startup injects the shared environment; run `pnpm config:check` from the repository root before starting services. For standalone Web, copy this module’s `.env.example` to `.env.local`, then run `pnpm config:check` in the module directory. Use `pnpm config:check --development` to include `.env.development*`; the default checks the production environment used by `start`. This validates listener and upstream fields without starting Next.js or connecting to IAM/Console. Restart after environment changes. See [configuration](../../../docs/configuration.md) for required values and service boundaries.
+Root startup injects the shared environment; run `pnpm config:check` from the repository root before starting services. For standalone Web, copy this module’s `.env.example` to `.env.local`, then run `pnpm config:check` in the module directory. Use `pnpm config:check --development` to include `.env.development*`; the default checks the production environment used by `start`. This validates listener and upstream fields without starting Next.js or connecting to IAM/Console. Restart after environment changes. See [configuration](../../../docs/development/configuration.md) for required values and service boundaries.

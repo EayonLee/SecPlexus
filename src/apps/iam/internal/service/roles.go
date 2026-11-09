@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,8 +15,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-var roleCode = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
-
 // RoleInput 是修改角色的请求参数。
 type RoleInput = model.APIRoleInput
 
@@ -27,21 +24,17 @@ type RoleCreateInput = model.APIRoleCreate
 // GrantsInput 是角色权限变更的请求参数。
 type GrantsInput = model.APIGrantsInput
 
-// MemberRolesInput 是成员角色变更的请求参数。
-type MemberRolesInput = model.APIMemberRolesInput
+// OrganizationUserRolesInput 是用户角色变更的请求参数。
+type OrganizationUserRolesInput = model.APIOrganizationUserRolesInput
 
 // validName 拒绝只有空白的业务名称；字段长度由入口绑定约束。
 func validName(name string) bool {
 	return strings.TrimSpace(name) != ""
 }
 
-// CreateRole 创建组织自定义角色。
+// CreateRole 创建组织角色。
 func (s *Service) CreateRole(ctx context.Context, orgID string, input RoleCreateInput, requestID string) (string, error) {
-	if input.Status == "" {
-		input.Status = "active"
-	}
-
-	if !roleCode.MatchString(input.Code) || slices.Contains([]string{"org_admin", "member", "super_admin"}, input.Code) || !validName(input.Name) {
+	if !validName(input.Name) {
 		return "", repository.ErrInvalid
 	}
 
@@ -55,9 +48,17 @@ func (s *Service) CreateRole(ctx context.Context, orgID string, input RoleCreate
 		"role",
 		&id,
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
-			metadata["code"] = input.Code
+			// 新角色没有任何既有授权，这里只需确认调用方有权授予这些权限。
+			if err := s.delegation(ctx, tx, p, orgID, nil, input.Permissions); err != nil {
+				return err
+			}
+
 			metadata["name"] = input.Name
-			return repository.CreateRole(ctx, tx, id, orgID, input.Code, input.Name, description, input.Status, p.UserID)
+			if err := repository.CreateRole(ctx, tx, id, orgID, input.Name, description, p.UserID); err != nil {
+				return err
+			}
+
+			return repository.GrantRolePermissions(ctx, tx, orgID, id.String(), input.Permissions)
 		},
 	)
 	return id.String(), err
@@ -116,10 +117,6 @@ func (s *Service) UpdateRole(ctx context.Context, orgID, roleID string, input Ro
 				return err
 			}
 
-			if role.Kind != "custom" {
-				return authorization.ErrDenied
-			}
-
 			if role.Version != input.Version {
 				return repository.ErrConflict
 			}
@@ -130,9 +127,8 @@ func (s *Service) UpdateRole(ctx context.Context, orgID, roleID string, input Ro
 
 			metadata["previous_version"] = strconv.FormatInt(role.Version, 10)
 			metadata["name"] = input.Name
-			metadata["status"] = input.Status
 			description := input.Description.GetOr(role.Description)
-			return repository.UpdateRole(ctx, tx, orgID, roleID, input.Name, description, input.Status)
+			return repository.UpdateRole(ctx, tx, orgID, roleID, input.Name, description)
 		},
 	)
 }
@@ -151,10 +147,6 @@ func (s *Service) ReplaceGrants(ctx context.Context, orgID, roleID string, input
 			role, err := repository.RoleGrants(ctx, tx, orgID, roleID)
 			if err != nil {
 				return err
-			}
-
-			if role.Kind != "custom" {
-				return authorization.ErrDenied
 			}
 
 			if role.Version != input.Version {
@@ -188,11 +180,7 @@ func (s *Service) DeleteRole(ctx context.Context, orgID, roleID string, version 
 				return err
 			}
 
-			if role.Kind != "custom" {
-				return authorization.ErrDenied
-			}
-
-			if role.Version != version || role.MemberCount > 0 {
+			if role.Version != version || role.UserCount > 0 {
 				return repository.ErrConflict
 			}
 
@@ -205,8 +193,8 @@ func (s *Service) DeleteRole(ctx context.Context, orgID, roleID string, version 
 	)
 }
 
-// ReplaceMemberRoles 替换成员角色并检查可委派范围。
-func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID string, input MemberRolesInput, requestID string) error {
+// ReplaceOrganizationUserRoles 替换用户角色并检查可委派范围。
+func (s *Service) ReplaceOrganizationUserRoles(ctx context.Context, orgID, organizationUserID string, input OrganizationUserRolesInput, requestID string) error {
 
 	return s.Manage(
 		ctx,
@@ -214,7 +202,7 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 		orgID,
 		requestID,
 		"membership",
-		uuidPointer(membershipID),
+		uuidPointer(organizationUserID),
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			// 先锁定组织并核对版本，防止覆盖其他管理员刚提交的变更。
 			version, err := repository.OrganizationVersion(ctx, tx, orgID)
@@ -226,8 +214,8 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 				return repository.ErrConflict
 			}
 
-			// 成员必须属于当前组织；不能只凭客户端提交的 ID 分配角色。
-			exists, err := repository.MemberExists(ctx, tx, orgID, membershipID)
+			// 用户必须属于当前组织；不能只凭客户端提交的 ID 分配角色。
+			exists, err := repository.OrganizationUserExists(ctx, tx, orgID, organizationUserID)
 			if err != nil {
 				return err
 			}
@@ -237,20 +225,19 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 			}
 
 			var targetID uuid.UUID
-			var administrator bool
-			if err := repository.LockMembershipAdministrator(ctx, tx, orgID, membershipID, &targetID, &administrator); err != nil {
+			if err := repository.LockOrganizationUser(ctx, tx, orgID, organizationUserID, &targetID); err != nil {
 				return err
 			}
 			if _, err := repository.NewQueries(tx).LockMutableUser(ctx, targetID); err != nil {
 				return err
 			}
 
-			previous, err := repository.MemberRoleIDs(ctx, tx, orgID, membershipID)
+			previous, err := repository.OrganizationUserRoleIDs(ctx, tx, orgID, organizationUserID)
 			if err != nil {
 				return err
 			}
 
-			// 普通组织管理员不能调整管理员身份，也不能撤销自己无权管理的授权。
+			// 不能授予自己无权管理的授权。
 			for _, set := range [][]string{previous, input.RoleIDs} {
 				for _, id := range set {
 					role, err := repository.RoleGrants(ctx, tx, orgID, id)
@@ -258,16 +245,7 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 						return err
 					}
 
-					if role.Kind == "system" && role.Code == "org_admin" && !p.IsSuperAdmin &&
-						slices.Contains(previous, id) != slices.Contains(input.RoleIDs, id) {
-						return authorization.ErrDenied
-					}
-
-					if role.Kind == "custom" {
-						if role.Status != "active" && slices.Contains(input.RoleIDs, id) {
-							return repository.ErrInvalid
-						}
-
+					{
 						existingGrants := role.Permissions
 						if !slices.Contains(previous, id) {
 							existingGrants = nil
@@ -289,11 +267,11 @@ func (s *Service) ReplaceMemberRoles(ctx context.Context, orgID, membershipID st
 			metadata["before_role_ids"] = previous
 			metadata["after_role_ids"] = input.RoleIDs
 			metadata["expected_authz_epoch"] = strconv.FormatInt(input.AuthzEpoch, 10)
-			if err := repository.ReplaceMemberRoles(ctx, tx, orgID, membershipID, input.RoleIDs, p.UserID); err != nil {
+			if err := repository.ReplaceOrganizationUserRoles(ctx, tx, orgID, organizationUserID, input.RoleIDs, p.UserID); err != nil {
 				return err
 			}
 
-			return repository.ProtectLastAdministrators(ctx, tx)
+			return nil
 		},
 	)
 }

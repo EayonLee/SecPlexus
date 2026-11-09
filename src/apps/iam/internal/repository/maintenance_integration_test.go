@@ -20,7 +20,7 @@ func TestMaintainKeepsRecordsInsideRetentionWindow(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "retain-member", "retain-member", "保留成员", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "retain-member", "retain-member", "保留用户", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,7 +78,7 @@ func TestRevokeAfterRestoreRevokesEverySession(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "restore-member", "restore-member", "恢复成员", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "restore-member", "restore-member", "恢复用户", ""); err != nil {
 		t.Fatal(err)
 	}
 

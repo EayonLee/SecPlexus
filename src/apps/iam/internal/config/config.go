@@ -3,11 +3,13 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"slices"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
@@ -230,7 +232,12 @@ func (c Config) ValidateAdministrator() error {
 		return errors.New("bootstrap.username must identify the configured administrator")
 	}
 	if err := identity.ValidatePassword(c.Bootstrap.Password); err != nil {
-		return errors.New("bootstrap.password must contain a valid 8–128 character administrator password")
+		// 报出实际长度而非密码值：截断（例如 .env 中未加引号的 '#' 之后被当作
+		// 注释丢弃）会因此立刻自解释，且长度不是机密信息。
+		return fmt.Errorf(
+			"bootstrap.password must contain a valid 12–128 character administrator password (got %d)",
+			utf8.RuneCountInString(c.Bootstrap.Password),
+		)
 	}
 	return nil
 }

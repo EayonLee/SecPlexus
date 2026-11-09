@@ -51,7 +51,7 @@ const server = createServer((request, response) => {
             auth_epoch: "1",
             authenticated_at: "2026-10-29T08:30:00Z",
           },
-          organizations: [{ id: org, name: "Ops", slug: "ops", status: "active", authz_epoch: version }],
+          organizations: [{ id: org, name: "Ops", slug: "ops", authz_epoch: version, depth: 0, parent_id: null }],
           org_id: org,
           capabilities: [],
           platform_capabilities: [],

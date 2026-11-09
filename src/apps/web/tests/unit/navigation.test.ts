@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { ApiMe } from "../../src/spx/api/iam/schemas";
-import { organizationFromPath, visibleManagementPages, visibleManagementSections } from "../../src/spx/iam/navigation";
+import { organizationFromPath, settingsPageFor, visibleSettingsPages } from "../../src/spx/iam/navigation";
 
 const identity: ApiMe = {
   principal: {
@@ -15,40 +15,39 @@ const identity: ApiMe = {
   },
   organizations: [],
   org_id: "one",
-  capabilities: ["iam.members.read"],
+  capabilities: ["iam.users.read"],
   platform_capabilities: [],
 };
 
-describe("organization and management navigation", () => {
-  test("an explicit organization in the URL owns the tab context", () => {
-    expect(organizationFromPath("/management/orgs/two/members", "?org_id=one")).toBe("two");
+describe("settings area navigation", () => {
+  test("an explicit organization in the settings URL wins over the query fallback", () => {
+    expect(organizationFromPath("/settings/orgs/two/users", "?org_id=one")).toBe("two");
     expect(organizationFromPath("/dashboard", "?org_id=one")).toBe("one");
-    expect(organizationFromPath("/settings/account", "")).toBeUndefined();
+    expect(organizationFromPath("/settings", "")).toBeUndefined();
   });
-  test("organization actions do not grant platform navigation", () => {
-    expect(visibleManagementPages(identity).map((page) => page.id)).toEqual(["members"]);
-    expect(visibleManagementPages({ ...identity, org_id: undefined })).toEqual([]);
-    expect(
-      visibleManagementPages({ ...identity, capabilities: [], platform_capabilities: ["iam.platform.users.read"] }).map(
-        (page) => page.id,
-      ),
-    ).toEqual(["users"]);
-  });
-});
 
-test("management consolidates tasks without granting inaccessible tabs", () => {
-  const admin = {
-    ...identity,
-    capabilities: ["iam.members.read", "iam.roles.read", "iam.organizations.read", "iam.audit.read"],
-    platform_capabilities: [
-      "iam.platform.users.read",
-      "iam.platform.organizations.read",
-      "iam.platform.audit.read",
-      "iam.platform.security.read",
-    ],
-  };
-  expect(visibleManagementSections(admin).map((section) => section.id)).toEqual(["people", "organization", "activity"]);
-  expect(visibleManagementPages(admin).map((page) => page.id)).not.toContain("security");
-  expect(visibleManagementSections(identity).map((section) => section.id)).toEqual(["people"]);
-  expect(visibleManagementSections({ ...identity, org_id: undefined })).toEqual([]);
+  test("organization actions do not grant platform pages", () => {
+    // 组织成员与平台成员已合并为「用户管理」一页，组织级权限即可见。
+    expect(visibleSettingsPages(identity).map((page) => page.id)).toEqual(["users"]);
+    expect(visibleSettingsPages({ ...identity, org_id: undefined })).toEqual([]);
+    expect(visibleSettingsPages({ ...identity, capabilities: [], platform_capabilities: ["iam.platform.users.read"] })).toEqual([]);
+  });
+
+  test("page resolution is flat: every settings page maps to one path", () => {
+    expect(settingsPageFor("/settings/orgs/one/roles", "one")?.id).toBe("roles");
+    expect(settingsPageFor("/settings/orgs/one/audit", "one")?.id).toBe("audit");
+    expect(settingsPageFor("/settings/platform/organizations", "one")?.id).toBe("organizations");
+    expect(settingsPageFor("/settings", "one")).toBeUndefined();
+    expect(settingsPageFor("/management/orgs/one/roles", "one")).toBeUndefined();
+  });
+
+  test("audit is a single entry, not split by scope", () => {
+    const ids = visibleSettingsPages({
+      ...identity,
+      capabilities: ["iam.audit.read"],
+      platform_capabilities: ["iam.platform.audit.read"],
+    }).map((page) => page.id);
+
+    expect(ids.filter((id) => id === "audit")).toHaveLength(1);
+  });
 });

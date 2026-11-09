@@ -106,3 +106,15 @@ test('one shared service location reaches Web and Console without forwarding IAM
  assert.deepEqual(webEnvironment(environment),{SPX_IAM_HOST:'10.0.0.12',SPX_IAM_PORT:'18081',SPX_CONSOLE_HOST:'console.corp',SPX_CONSOLE_PORT:'18080',SPX_WEB_PORT:'15173'});
  assert.deepEqual(moduleEnvironment(environment,'console'),{SPX_IAM_HOST:'10.0.0.12',SPX_IAM_PORT:'18081',SPX_CONSOLE_HOST:'console.corp',SPX_CONSOLE_PORT:'18080',SPX_CONSOLE_IAM_TOKEN:'service-only'});
 });
+
+test('quoted hash and comment-only lines load unchanged', (t) => {
+  const root = workspace(t);
+  writeFileSync(
+    path.join(root, '.env'),
+    '# 注释行允许出现 #\nSPX_IAM_BOOTSTRAP_PASSWORD="SecPlexus#2026"\nSPX_WEB_PORT=5173\n',
+  );
+
+  const env = loadEnvironment(root, {});
+  assert.equal(env.SPX_IAM_BOOTSTRAP_PASSWORD, 'SecPlexus#2026');
+  assert.equal(env.SPX_WEB_PORT, '5173');
+});

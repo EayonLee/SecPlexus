@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
-	"net/mail"
 	"strings"
 
+	"github.com/aarondl/opt/omit"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
@@ -26,26 +27,35 @@ type OrganizationInput = model.APIOrganizationInput
 // OrganizationUpdate 是更新组织的请求参数。
 type OrganizationUpdate = model.APIOrganizationUpdate
 
-// MemberInput 是创建组织成员的请求参数。
-type MemberInput = model.APIMemberInput
+// OrganizationUserInput 是创建组织用户的请求参数。
+type OrganizationUserInput = model.APIOrganizationUserInput
 
-// MemberUpdate 是更新组织成员的请求参数。
-type MemberUpdate = model.APIMemberUpdate
+// OrganizationUserUpdate 是更新组织用户的请求参数。
+type OrganizationUserUpdate = model.APIOrganizationUserUpdate
 
-// validEmail 校验账号邮件地址的业务约束。
-func validEmail(value string) bool {
-	if value == "" {
-		return true
-	}
-
-	address, err := mail.ParseAddress(value)
-	return err == nil && address.Address == value && len(value) <= 320
-}
-
-// CreateUser 创建用户并写入审计记录。
+// CreateUser 创建账号、用户关系与角色绑定；三者同一事务，任一失败全部回滚。
+// 账号必须属于一个组织：不允许创建无组织用户。
 func (s *Service) CreateUser(ctx context.Context, input UserInput, requestID string) (string, error) {
 	normalized, err := identity.NormalizeUsername(input.Username)
-	if err != nil || !validName(input.DisplayName) || !validEmail(input.Email) {
+	if err != nil {
+		return "", repository.ErrInvalid
+	}
+
+	if err = identity.ValidateUsernameAvailable(normalized); err != nil {
+		return "", repository.ErrInvalid
+	}
+
+	displayName, err := identity.ValidateDisplayName(input.DisplayName)
+	if err != nil {
+		return "", repository.ErrInvalid
+	}
+
+	if err = identity.ValidateEmail(input.Email); err != nil {
+		return "", repository.ErrInvalid
+	}
+
+	orgID, err := uuid.Parse(input.OrgID)
+	if err != nil {
 		return "", repository.ErrInvalid
 	}
 
@@ -63,10 +73,85 @@ func (s *Service) CreateUser(ctx context.Context, input UserInput, requestID str
 		"user",
 		&id,
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
-			return insertUser(ctx, tx, id, input, normalized, hash)
+			metadata["org_id"] = input.OrgID
+
+			input.DisplayName = displayName
+			input.Email = identity.NormalizeEmail(input.Email)
+			if err := insertUser(ctx, tx, id, input, normalized, hash); err != nil {
+				return err
+			}
+
+			organizationUserID := uuid.New()
+			if err := repository.InsertOrganizationUser(ctx, tx, organizationUserID, input.OrgID, id); err != nil {
+				return err
+			}
+
+			// 角色必须属于同一组织，且授予范围不得超过操作者自身权限。
+			// 允许空角色：创建组织时先建账号再把它设为组织管理员，
+			// 此时该账号在目标组织内尚无角色可授。
+			if len(input.RoleIDs) > 0 {
+				if err := s.assignRolesWithinScope(ctx, tx, p, orgID, organizationUserID, input.RoleIDs); err != nil {
+					return err
+				}
+			}
+
+			return nil
 		},
 	)
 	return id.String(), err
+}
+
+// assignRolesWithinScope 校验角色归属组织并复用委派上限，再写入用户角色关系。
+func (s *Service) assignRolesWithinScope(ctx context.Context, tx *gorm.DB, p iamclient.Principal, orgID uuid.UUID, organizationUserID uuid.UUID, roleIDs []string) error {
+	catalog, err := repository.Permissions(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	granted := []string{}
+	for _, raw := range roleIDs {
+		roleID, err := uuid.Parse(raw)
+		if err != nil {
+			return repository.ErrInvalid
+		}
+
+		role, err := repository.RoleGrants(ctx, tx, orgID.String(), roleID.String())
+		if err != nil {
+			return repository.ErrInvalid
+		}
+
+		granted = append(granted, role.Permissions...)
+	}
+
+	effective, err := repository.NewQueries(tx).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: orgID, UserID: uuid.MustParse(p.UserID)})
+	if err != nil {
+		return err
+	}
+
+	if p.IsSuperAdmin {
+		for _, permission := range catalog {
+			if permission.Scope == "organization" {
+				effective = append(effective, permission.Key)
+			}
+		}
+	}
+
+	if err = authorization.CheckDelegation(effective, nil, granted, catalog); err != nil {
+		return err
+	}
+
+	for _, raw := range roleIDs {
+		roleID, err := uuid.Parse(raw)
+		if err != nil {
+			return repository.ErrInvalid
+		}
+
+		if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.organization_user_roles(org_id,organization_user_id,role_id,created_by) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, orgID, organizationUserID, roleID, p.UserID).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // insertUser 在当前管理事务内创建资料与密码。
@@ -81,9 +166,17 @@ func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserInput,
 
 // UpdateUser 更新用户信息并检查版本。
 func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdate, requestID string) error {
-	if !validName(input.DisplayName) || !validEmail(input.Email.GetOrZero()) {
+	displayName, err := identity.ValidateDisplayName(input.DisplayName)
+	if err != nil {
 		return repository.ErrInvalid
 	}
+
+	if err = identity.ValidateEmail(input.Email.GetOrZero()); err != nil {
+		return repository.ErrInvalid
+	}
+
+	input.DisplayName = displayName
+	input.Email = omit.Map(input.Email, identity.NormalizeEmail)
 
 	return s.Manage(
 		ctx,
@@ -117,7 +210,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 				return err
 			}
 
-			return repository.ProtectLastAdministrators(ctx, tx)
+			return repository.ProtectPlatformAdministrator(ctx, tx)
 		},
 	)
 }

@@ -12,15 +12,31 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-// CreateMember 在组织中创建成员关系。
-func (s *Service) CreateMember(ctx context.Context, orgID string, input MemberInput, requestID string) (string, error) {
+// CreateOrganizationUser 在组织中创建用户关系。
+func (s *Service) CreateOrganizationUser(ctx context.Context, orgID string, input OrganizationUserInput, requestID string) (string, error) {
 	var hash, normalized string
 	var err error
 	if input.UserID == "" {
 		normalized, err = identity.NormalizeUsername(input.Username)
-		if err != nil || !validName(input.DisplayName) || !validEmail(input.Email) {
+		if err != nil {
 			return "", repository.ErrInvalid
 		}
+
+		if err = identity.ValidateUsernameAvailable(normalized); err != nil {
+			return "", repository.ErrInvalid
+		}
+
+		displayName, err := identity.ValidateDisplayName(input.DisplayName)
+		if err != nil {
+			return "", repository.ErrInvalid
+		}
+
+		if err = identity.ValidateEmail(input.Email); err != nil {
+			return "", repository.ErrInvalid
+		}
+
+		input.DisplayName = displayName
+		input.Email = identity.NormalizeEmail(input.Email)
 
 		hash, err = (identity.PasswordHasher{}).GenerateHash(input.Password)
 		if err != nil {
@@ -38,14 +54,14 @@ func (s *Service) CreateMember(ctx context.Context, orgID string, input MemberIn
 		}
 	}
 
-	membershipID := uuid.New()
+	organizationUserID := uuid.New()
 	err = s.Manage(
 		ctx,
-		iamclient.PermissionIAMMembersManage,
+		iamclient.PermissionIAMUsersManage,
 		orgID,
 		requestID,
 		"membership",
-		&membershipID,
+		&organizationUserID,
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			userID := uuid.New()
 			if input.UserID != "" {
@@ -76,28 +92,28 @@ func (s *Service) CreateMember(ctx context.Context, orgID string, input MemberIn
 				return err
 			}
 
-			if err := repository.InsertMembership(ctx, tx, membershipID, orgID, userID); err != nil {
+			if err := repository.InsertOrganizationUser(ctx, tx, organizationUserID, orgID, userID); err != nil {
 				return err
 			}
 
-			err := repository.AssignMemberRole(ctx, tx, orgID, membershipID, p.UserID)
-			return err
+			// 新建用户不自动获得任何角色：权限完全由使用者按需授予。
+			return nil
 		},
 		existingUser,
 	)
-	return membershipID.String(), err
+	return organizationUserID.String(), err
 }
 
-// UpdateMember 更新或移除组织成员。
-func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, input MemberUpdate, remove bool, requestID string) error {
+// UpdateOrganizationUser 更新或移除组织用户。
+func (s *Service) UpdateOrganizationUser(ctx context.Context, orgID, organizationUserID string, input OrganizationUserUpdate, remove bool, requestID string) error {
 
 	return s.Manage(
 		ctx,
-		iamclient.PermissionIAMMembersManage,
+		iamclient.PermissionIAMUsersManage,
 		orgID,
 		requestID,
 		"membership",
-		uuidPointer(memberID),
+		uuidPointer(organizationUserID),
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
 			var version int64
 			if err := repository.LockOrganizationVersion(ctx, tx, orgID, &version); err != nil {
@@ -108,9 +124,8 @@ func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, inpu
 				return repository.ErrConflict
 			}
 
-			var admin bool
 			var userID uuid.UUID
-			if err := repository.LockMembershipAdministrator(ctx, tx, orgID, memberID, &userID, &admin); err != nil {
+			if err := repository.LockOrganizationUser(ctx, tx, orgID, organizationUserID, &userID); err != nil {
 				return err
 			}
 
@@ -118,25 +133,21 @@ func (s *Service) UpdateMember(ctx context.Context, orgID, memberID string, inpu
 				return err
 			}
 
-			if admin && !p.IsSuperAdmin {
-				return authorization.ErrDenied
-			}
-
 			if remove {
-				if err := repository.DeleteMemberRoles(ctx, tx, orgID, memberID); err != nil {
+				if err := repository.DeleteOrganizationUserRoles(ctx, tx, orgID, organizationUserID); err != nil {
 					return err
 				}
 
-				if err := repository.DeleteMembership(ctx, tx, orgID, memberID); err != nil {
+				if err := repository.DeleteOrganizationUsership(ctx, tx, orgID, organizationUserID); err != nil {
 					return err
 				}
 			} else {
-				if err := repository.UpdateMembership(ctx, tx, orgID, memberID, input.Status); err != nil {
+				if err := repository.UpdateOrganizationUsership(ctx, tx, orgID, organizationUserID, input.Status); err != nil {
 					return err
 				}
 			}
 
-			return repository.ProtectLastAdministrators(ctx, tx)
+			return nil
 		},
 	)
 }

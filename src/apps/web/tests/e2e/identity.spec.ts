@@ -47,6 +47,40 @@ async function adminClient() {
   administratorState = await api.storageState();
   return api;
 }
+// 创建账号必须指定组织与至少一个角色；这两个调用点复用当前管理员的组织上下文。
+// 侧栏分组名与标签页标签的对应关系；集中一处避免散落的嵌套三元。
+function sectionFor(tab: string): string {
+  if (tab === "组织审计") return "审计日志";
+  if (tab === "组织用户") return "组织管理";
+  return "角色与权限";
+}
+
+// organizationFromPlatformList 从平台组织列表取目标组织的公开投影；
+// 按组织读取详情的端点已随「当前组织」页面移除。
+async function organizationFromPlatformList(api: APIRequestContext, orgID: string) {
+  const items = (await (await api.get("/api/v1/iam/organizations?limit=100")).json()).data.items as {
+    id: string;
+    name: string;
+    authz_epoch: string;
+  }[];
+  const organization = items.find((item) => item.id === orgID);
+  if (!organization) throw new Error(`organization ${orgID} missing from platform list`);
+
+  return organization;
+}
+
+async function accountScope(api: APIRequestContext) {
+  const me = (await (await api.get("/api/v1/iam/me")).json()).data;
+  const orgID = me.organizations[0].id as string;
+  // 组织不再自带内置角色，这里显式创建一个只读用户角色供用例使用。
+  const created = await mutate(api, "post", `/api/v1/iam/orgs/${orgID}/roles`, {
+    name: `只读用户 ${randomBytes(3).toString("hex")}`,
+    permissions: ["iam.users.read"],
+  });
+
+  return { orgID, roleID: (created as { id: string }).id };
+}
+
 async function browserLogin(page: Page, username: string, password: string) {
   await page
     .context()
@@ -96,8 +130,8 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
   const member = await mutate(
     admin,
     "post",
-    `/api/v1/iam/orgs/${org}/members`,
-    { username, display_name: "浏览器测试成员", password: initial },
+    `/api/v1/iam/orgs/${org}/users`,
+    { username, display_name: "浏览器测试用户", password: initial },
     201,
   );
   const role = await mutate(
@@ -111,15 +145,15 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
     permissions: ["iam.organizations.read"],
     version: "1",
   });
-  const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
-  await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
+  const organization = await organizationFromPlatformList(admin, org);
+  await mutate(admin, "put", `/api/v1/iam/orgs/${org}/users/${member.id}/roles`, {
     role_ids: [role.id],
     authz_epoch: organization.authz_epoch,
   });
   await browserLogin(page, username, initial);
   await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
   expect((await page.request.get(`/api/v1/console/orgs/${org}/context`)).status()).toBe(200);
-  await page.goto("/settings/account");
+  await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/account$/);
   await page.getByLabel("当前密码", { exact: true }).fill(initial);
   await page.getByLabel("新密码", { exact: true }).fill(password);
@@ -127,12 +161,12 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
   await page.getByRole("button", { name: "修改密码并退出" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await browserLogin(page, username, password);
-  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toHaveText(organization.name);
+  await expect(page.getByRole("button", { name: "当前组织", exact: true })).toHaveText(organization.name);
   await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
   expect((await page.request.get(`/api/v1/console/orgs/${org}/context`)).status()).toBe(200);
   const second = await page.request.get(`${process.env.SPX_E2E_CONSOLE_SECOND_URL}/api/v1/console/orgs/${org}/context`);
   expect(second.status()).toBe(200);
-  await page.goto(`/management/platform/users`);
+  await page.goto(`/settings/platform/users`);
   await expect(page.getByText("当前账号没有访问该页面的权限", { exact: true })).toBeVisible();
   await page.goto(`/dashboard?org_id=${org}`);
   const context = (await (await page.request.get("/api/v1/iam/auth/context")).json()).data;
@@ -151,17 +185,22 @@ test("新用户直接登录并可主动改密，组织权限贯穿 Web、Console
 test("系统管理保留应用外壳，自定义角色可创建、配置权限和查看影响", async ({ page }) => {
   await browserLogin(page, adminUsername, adminPassword);
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "当前组织", exact: true })).toBeVisible();
   const workspace = page.getByRole("navigation", { name: "主导航" });
-  for (const label of ["平台成员", "组织管理", "角色与权限", "组织成员", "账号安全"])
+  for (const label of ["账号", "组织管理", "角色与权限", "组织用户", "账号安全"])
     await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
   await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "成员菜单", exact: true }).click();
+  await page.getByRole("button", { name: "用户菜单", exact: true }).click();
   await page.getByRole("menuitem", { name: "系统管理", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("navigation", { name: "管理导航" })).toBeVisible();
-  await page.getByRole("tab", { name: "角色与权限", exact: true }).click();
+  // 重载后落在默认分组；先切到「角色与权限」分组再选「角色」标签。
+  await page
+    .getByRole("navigation", { name: "管理导航" })
+    .getByRole("link", { name: "角色与权限", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "角色", exact: true }).click();
   await page.getByRole("button", { name: "创建角色", exact: true }).click();
   await page.getByPlaceholder("例如 security_auditor").fill(`audit_${randomBytes(4).toString("hex")}`);
   const roleName = `审计角色 ${randomBytes(3).toString("hex")}`;
@@ -174,7 +213,7 @@ test("系统管理保留应用外壳，自定义角色可创建、配置权限�
   await page.getByText("查看组织审计", { exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "查看组织审计", exact: true })).toBeChecked();
   await page.getByRole("button", { name: "预览变更影响", exact: true }).click();
-  await expect(page.getByText(/影响 0 位成员/)).toBeVisible();
+  await expect(page.getByText(/影响 0 位用户/)).toBeVisible();
   await page.getByRole("button", { name: "保存权限", exact: true }).click();
   await expect(page.getByText("权限已保存，后续请求立即生效")).toBeVisible();
   await page.screenshot({ path: "test-results/management-role-editor.png", fullPage: true });
@@ -186,21 +225,21 @@ test("系统管理保留应用外壳，自定义角色可创建、配置权限�
 test("跨标签退出清除身份，浏览器不持久化认证材料", async ({ page, context }) => {
   await browserLogin(page, adminUsername, adminPassword);
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "当前组织", exact: true })).toBeVisible();
   const workspace = page.getByRole("navigation", { name: "主导航" });
-  for (const label of ["平台成员", "组织管理", "角色与权限", "组织成员", "账号安全"])
+  for (const label of ["账号", "组织管理", "角色与权限", "组织用户", "账号安全"])
     await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
   await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
   const other = await context.newPage();
   await other.goto("/dashboard");
-  await other.getByRole("button", { name: "成员菜单", exact: true }).click();
+  await other.getByRole("button", { name: "用户菜单", exact: true }).click();
   await expect(other.getByRole("menuitem", { name: "系统管理", exact: true })).toBeVisible();
   await other.keyboard.press("Escape");
   const stored = await page.evaluate(() =>
     Object.keys(localStorage).filter((key) => /token|session|userStatus|userRole/i.test(key)),
   );
   expect(stored).toEqual([]);
-  await page.getByLabel("成员菜单").click();
+  await page.getByLabel("用户菜单").click();
   await page.getByRole("menuitem", { name: "退出登录", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   await expect(other).toHaveURL(/\/login$/);
@@ -208,40 +247,55 @@ test("跨标签退出清除身份，浏览器不持久化认证材料", async ({
 });
 
 test("基础身份与自定义角色各自获得正确的管理导航", async ({ browser }) => {
+  // 四个场景各自新建浏览器上下文、登录并改密，稳定超过默认 60s；
+  // 给这条用例单独预算，而不是压缩场景覆盖。
+  test.setTimeout(180_000);
+
   const admin = await adminClient();
   const me = (await (await admin.get("/api/v1/iam/me")).json()).data;
   const org = me.organizations[0].id;
-  const roles: ApiRole[] = (await (await admin.get(`/api/v1/iam/orgs/${org}/roles?limit=100`)).json()).data.items;
-  const orgAdmin = roles.find((role) => role.kind === "system" && role.code === "org_admin");
-  if (!orgAdmin) throw new Error("Built-in organization administrator role is missing");
+  // 组织不再有内置管理员角色：这里创建一个拥有全部组织权限的角色替代。
+  const orgAdmin = (await mutate(admin, "post", `/api/v1/iam/orgs/${org}/roles`, {
+    name: `组织管理员 ${randomBytes(3).toString("hex")}`,
+    permissions: [
+      "iam.organizations.read",
+      "iam.organizations.manage",
+      "iam.users.read",
+      "iam.users.manage",
+      "iam.roles.read",
+      "iam.roles.manage",
+      "iam.roles.assign",
+      "iam.audit.read",
+    ],
+  })) as { id: string };
   for (const scenario of [
     {
-      name: "普通成员",
+      name: "普通用户",
       actions: [],
       role: undefined,
       visible: [],
-      hidden: ["组织成员", "角色与权限", "组织审计", "平台成员"],
+      hidden: ["组织用户", "角色", "组织审计", "账号"],
     },
     {
       name: "组织管理员",
       actions: [],
       role: orgAdmin.id,
-      visible: ["组织成员", "角色与权限", "组织审计"],
-      hidden: ["平台成员"],
+      visible: ["组织用户", "角色", "组织审计"],
+      hidden: ["账号"],
     },
     {
       name: "自定义审计员",
       actions: ["iam.audit.read"],
       role: undefined,
       visible: ["组织审计"],
-      hidden: ["组织成员", "角色与权限", "平台成员"],
+      hidden: ["组织用户", "角色", "账号"],
     },
     {
       name: "自定义角色管理员",
-      actions: ["iam.roles.read", "iam.roles.manage", "iam.roles.assign", "iam.members.read"],
+      actions: ["iam.roles.read", "iam.roles.manage", "iam.roles.assign", "iam.users.read"],
       role: undefined,
-      visible: ["组织成员", "角色与权限"],
-      hidden: ["组织审计", "平台成员"],
+      visible: ["组织用户", "角色"],
+      hidden: ["组织审计", "账号"],
     },
   ]) {
     const suffix = randomBytes(4).toString("hex");
@@ -251,7 +305,7 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
     const member = await mutate(
       admin,
       "post",
-      `/api/v1/iam/orgs/${org}/members`,
+      `/api/v1/iam/orgs/${org}/users`,
       { username, display_name: scenario.name, password: initial },
       201,
     );
@@ -271,8 +325,8 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
       assignedRole = created.id;
     }
     if (assignedRole) {
-      const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
-      await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
+      const organization = await organizationFromPlatformList(admin, org);
+      await mutate(admin, "put", `/api/v1/iam/orgs/${org}/users/${member.id}/roles`, {
         role_ids: [assignedRole],
         authz_epoch: organization.authz_epoch,
       });
@@ -286,19 +340,19 @@ test("基础身份与自定义角色各自获得正确的管理导航", async ({
     await browserLogin(page, username, password);
     await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
     if (!scenario.visible.length) {
-      await page.getByRole("button", { name: "成员菜单", exact: true }).click();
+      await page.getByRole("button", { name: "用户菜单", exact: true }).click();
       await expect(page.getByRole("menuitem", { name: "系统管理", exact: true })).toHaveCount(0);
       await page.keyboard.press("Escape");
-      await page.goto("/management");
+      await page.goto("/settings");
       await expect(page.getByText("当前账号没有访问该页面的权限", { exact: true })).toBeVisible();
-      await page.goto(`/management/orgs/${org}/audit`);
+      await page.goto(`/settings/orgs/${org}/audit`);
       await expect(page.getByText("当前账号没有访问该页面的权限", { exact: true })).toBeVisible();
     } else {
-      await page.getByRole("button", { name: "成员菜单", exact: true }).click();
+      await page.getByRole("button", { name: "用户菜单", exact: true }).click();
       await page.getByRole("menuitem", { name: "系统管理", exact: true }).click();
       const sidebar = page.getByRole("navigation", { name: "管理导航" });
       for (const label of scenario.visible) {
-        const section = label === "组织审计" ? "审计日志" : "成员与权限";
+        const section = sectionFor(label);
         await sidebar.getByRole("link", { name: section, exact: true }).click();
         await expect(page.getByRole("tab", { name: label, exact: true })).toBeVisible();
       }
@@ -320,8 +374,8 @@ test("长连接在组织权限撤销后停止访问", async ({ page }) => {
   const member = await mutate(
     admin,
     "post",
-    `/api/v1/iam/orgs/${org}/members`,
-    { username, display_name: "长连接测试成员", password: initial },
+    `/api/v1/iam/orgs/${org}/users`,
+    { username, display_name: "长连接测试用户", password: initial },
     201,
   );
   const role = await mutate(
@@ -335,8 +389,8 @@ test("长连接在组织权限撤销后停止访问", async ({ page }) => {
     permissions: ["iam.organizations.read"],
     version: "1",
   });
-  const organization = (await (await admin.get(`/api/v1/iam/orgs/${org}`)).json()).data;
-  await mutate(admin, "put", `/api/v1/iam/orgs/${org}/members/${member.id}/roles`, {
+  const organization = await organizationFromPlatformList(admin, org);
+  await mutate(admin, "put", `/api/v1/iam/orgs/${org}/users/${member.id}/roles`, {
     role_ids: [role.id],
     authz_epoch: organization.authz_epoch,
   });
@@ -361,7 +415,7 @@ test("长连接在组织权限撤销后停止访问", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.streamAuthorized)).toBe(true);
   await mutate(admin, "put", `/api/v1/iam/orgs/${org}/roles/${role.id}/permissions`, { permissions: [], version: "2" });
   await expect.poll(() => page.evaluate(() => window.streamRevoked), { timeout: 31000 }).toBe(true);
-  await page.goto(`/management/orgs/${org}/overview`);
+  await page.goto(`/settings/orgs/${org}/audit`);
   await expect(page.getByText("当前账号没有访问该页面的权限", { exact: true })).toBeVisible();
   await admin.dispose();
 });
@@ -373,13 +427,13 @@ test("组织创建选择已有管理员，两个标签各自保留组织上下�
   const name = `浏览器组织 ${suffix}`;
   await browserLogin(page, adminUsername, adminPassword);
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "当前组织", exact: true })).toBeVisible();
   const workspace = page.getByRole("navigation", { name: "主导航" });
-  for (const label of ["平台成员", "组织管理", "角色与权限", "组织成员", "账号安全"])
+  for (const label of ["账号", "组织管理", "角色与权限", "组织用户", "账号安全"])
     await expect(workspace.getByRole("link", { name: label, exact: true })).toHaveCount(0);
   await expect(workspace.getByRole("link", { name: "安全智驾工作台", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "成员菜单", exact: true }).click();
-  await page.goto("/management/platform/organizations");
+  await page.getByRole("button", { name: "用户菜单", exact: true }).click();
+  await page.goto("/settings/platform/organizations");
   await page.getByRole("button", { name: "创建组织", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("组织名称", { exact: true }).fill(name);
@@ -400,8 +454,8 @@ test("组织创建选择已有管理员，两个标签各自保留组织上下�
   await expect(other.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
   await page.goto(`/dashboard?org_id=${created.id}`);
   await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "当前组织", exact: true })).toHaveText(name);
-  await expect(other.getByRole("combobox", { name: "当前组织", exact: true })).toHaveText(initial.name);
+  await expect(page.getByRole("button", { name: "当前组织", exact: true })).toHaveText(name);
+  await expect(other.getByRole("button", { name: "当前组织", exact: true })).toHaveText(initial.name);
   expect((await other.request.get(`/api/v1/console/orgs/${initial.id}/context`)).status()).toBe(200);
   await other.reload();
   await expect(other).toHaveURL(new RegExp(`org_id=${initial.id}`));
@@ -415,7 +469,7 @@ test("敏感操作在原弹框确认身份并完整保留草稿", async ({ page 
   const admin = await adminClient();
   const me = (await (await admin.get("/api/v1/iam/me")).json()).data;
   await browserLogin(page, adminUsername, adminPassword);
-  await page.goto("/management/platform/organizations");
+  await page.goto("/settings/platform/organizations");
   await page.getByRole("button", { name: "创建组织", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const suffix = randomBytes(4).toString("hex");
@@ -469,49 +523,54 @@ test("敏感操作在原弹框确认身份并完整保留草稿", async ({ page 
   await expect(dialog).not.toBeVisible();
   const orgs = (await (await admin.get("/api/v1/iam/organizations?limit=100")).json()).data.items as { slug: string }[];
   expect(orgs.filter((org) => org.slug === slug)).toHaveLength(1);
-  await page.goto(`/management/orgs/${me.organizations[0].id}/overview`);
-  await expect(page.getByRole("tab", { name: "当前组织", exact: true })).toBeVisible();
+  await page.goto(`/settings/orgs/${me.organizations[0].id}/users`);
+  await expect(page.getByRole("tab", { name: "组织用户", exact: true })).toBeVisible();
   await admin.dispose();
 });
 
 test("设置使用独立的 Profile 和 Account 页面并保持单行菜单", async ({ page }) => {
   await browserLogin(page, adminUsername, adminPassword);
-  await page.getByRole("button", { name: "成员菜单", exact: true }).click();
-  await page.getByRole("menuitem", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "用户菜单", exact: true }).click();
+  await page.getByRole("menuitem", { name: "个人中心", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/);
   await expect(page.getByRole("heading", { name: "个人资料", exact: true })).toBeVisible();
-  const navigation = page.getByRole("navigation", { name: "设置", exact: true });
+  const navigation = page.getByRole("navigation", { name: "个人中心", exact: true });
   await expect(navigation.getByRole("link", { name: "登录设备", exact: true })).toHaveCount(0);
-  await navigation.getByRole("link", { name: "账号", exact: true }).click();
+  await navigation.getByRole("link", { name: "账号安全", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/account$/);
-  await expect(page.getByRole("heading", { name: "账号", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "账号安全", exact: true })).toBeVisible();
   await expect(page.getByLabel("当前密码", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "密码由系统配置管理", exact: true }).focus();
   await expect(page.getByRole("tooltip")).toHaveText("请在 IAM 配置中更新密码");
   await page.getByRole("button", { name: "语言", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account security", exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account security", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Member menu", exact: true }).click();
-  for (const label of ["Settings", "System", "Sign out"]) {
+  for (const label of ["Account center", "System", "Sign out"]) {
     const item = page.getByRole("menuitem", { name: label, exact: true });
     await expect(item).toBeVisible();
     expect(await item.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   }
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Language", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "账号", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "成员菜单", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "账号安全", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "用户菜单", exact: true }).click();
   await page.getByRole("menuitem", { name: "系统管理", exact: true }).click();
-  await page.getByRole("tab", { name: "平台成员", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "管理导航" })
+    .getByRole("link", { name: "角色与权限", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "账号", exact: true }).click();
   const configuredAccount = page.getByRole("row").filter({ hasText: adminUsername });
   await expect(configuredAccount.getByText("由配置管理", { exact: true })).toBeVisible();
   await expect(configuredAccount.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
   await expect(configuredAccount.getByRole("button", { name: "重置密码", exact: true })).toHaveCount(0);
 });
 
-test("所有成员列表默认十条且修改每页数量后回到第一页", async ({ page }) => {
+test("所有用户列表默认十条且修改每页数量后回到第一页", async ({ page }) => {
   const api = await adminClient();
+  const scope = await accountScope(api);
   for (let index = 0; index < 11; index++) {
     await mutate(
       api,
@@ -521,6 +580,8 @@ test("所有成员列表默认十条且修改每页数量后回到第一页", as
         username: `paging_${randomBytes(5).toString("hex")}`,
         display_name: `Pagination member ${index}`,
         password: randomBytes(18).toString("hex"),
+        org_id: scope.orgID,
+        role_ids: [scope.roleID],
       },
       201,
     );
@@ -529,7 +590,7 @@ test("所有成员列表默认十条且修改每页数量后回到第一页", as
   const firstPage = page.waitForResponse(
     (response) => response.url().includes("/api/v1/iam/users?") && response.request().method() === "GET",
   );
-  await page.goto("/management/platform/users");
+  await page.goto("/settings/platform/users");
   const response = await firstPage;
   expect(new URL(response.url()).searchParams.get("limit")).toBe("10");
   await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(10);
@@ -552,18 +613,25 @@ test("所有成员列表默认十条且修改每页数量后回到第一页", as
   await api.dispose();
 });
 
-test("成员组合框通过服务器搜索和滚动加载后续候选", async ({ page }) => {
+test("用户组合框通过服务器搜索和滚动加载后续候选", async ({ page }) => {
   const admin = await adminClient();
+  const scope = await accountScope(admin);
   const prefix = `picker_${randomBytes(4).toString("hex")}`;
   let disabled = "";
   for (let index = 0; index < 11; index++) {
     const username = `${prefix}_${String(index).padStart(2, "0")}`;
-    const display_name = `候选成员 ${index}`;
+    const display_name = `候选用户 ${index}`;
     const created = await mutate(
       admin,
       "post",
       "/api/v1/iam/users",
-      { username, display_name, password: randomBytes(16).toString("hex") },
+      {
+        username,
+        display_name,
+        password: randomBytes(16).toString("hex"),
+        org_id: scope.orgID,
+        role_ids: [scope.roleID],
+      },
       201,
     );
     if (index === 4) {
@@ -576,7 +644,7 @@ test("成员组合框通过服务器搜索和滚动加载后续候选", async ({
     }
   }
   await browserLogin(page, adminUsername, adminPassword);
-  await page.goto("/management/platform/organizations");
+  await page.goto("/settings/platform/organizations");
   await page.getByRole("button", { name: "创建组织", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const picker = dialog.getByRole("combobox", { name: "组织管理员", exact: true });
@@ -622,51 +690,61 @@ test("成员组合框通过服务器搜索和滚动加载后续候选", async ({
     .getByRole("option")
     .filter({ hasText: `(${prefix}_10)` })
     .click();
-  await expect(picker).toHaveValue(`候选成员 10 (${prefix}_10)`);
+  await expect(picker).toHaveValue(`候选用户 10 (${prefix}_10)`);
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await admin.dispose();
 });
 
-test("身份确认保留原业务密码且不自动创建成员", async ({ page }) => {
+// 创建用户不再要求二次输入当前密码：此前该流程会把「新用户密码」误当成
+// 「当前密码」提交，导致必然失败。改为验证「密码 + 确认密码」的表单校验。
+test("创建用户只校验两次密码一致，不要求当前密码", async ({ page }) => {
   await browserLogin(page, adminUsername, adminPassword);
-  await page.goto("/management/platform/users");
-  await page.getByRole("button", { name: "添加成员", exact: true }).click();
+  await page.goto("/settings/platform/users");
+  await page.getByRole("button", { name: "添加用户", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const username = `draft_${randomBytes(4).toString("hex")}`;
   const password = randomBytes(16).toString("hex");
   await dialog.getByLabel("用户名", { exact: true }).fill(username);
-  await dialog.getByLabel("显示名称", { exact: true }).fill("密码草稿成员");
+  await dialog.getByLabel("显示名称", { exact: true }).fill("密码草稿用户");
   await dialog.getByLabel("密码", { exact: true }).fill(password);
+  await dialog.getByLabel("确认密码", { exact: true }).fill(`${password}-mismatch`);
+  await dialog.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(dialog.getByText("两次输入的密码不一致", { exact: true })).toBeVisible();
+
+  await dialog.getByLabel("确认密码", { exact: true }).fill(password);
+  // 新用户必须至少获得一个角色：勾选当前组织的内置用户角色。
+  const scope = await accountScope(await adminClient());
+  await dialog.locator(`#create-role-${scope.roleID}`).click();
   await expireAuthentication(page);
   await dialog.getByRole("button", { name: "确定", exact: true }).click();
-  await dialog.getByLabel("当前密码", { exact: true }).fill(adminPassword);
-  await dialog.getByRole("button", { name: "确认并继续", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "添加平台成员", exact: true })).toBeVisible();
-  const retained = (await dialog.getByLabel("密码", { exact: true }).inputValue()) === password;
-  expect(retained).toBe(true);
-  const api = await adminClient();
-  expect((await (await api.get(`/api/v1/iam/users?q=${username}`)).json()).data.total).toBe(0);
-  await dialog.getByRole("button", { name: "确定", exact: true }).click();
+
+  // 全程不应出现「当前密码」确认页。
+  await expect(dialog.getByLabel("当前密码", { exact: true })).toHaveCount(0);
   await expect(dialog).not.toBeVisible();
+
+  // 列表按 10 条分页，新账号不一定落在第一页；用服务端查询确认创建结果。
+  const verify = await adminClient();
+  expect((await (await verify.get(`/api/v1/iam/users?q=${username}`)).json()).data.total).toBe(1);
+  await verify.dispose();
+
   const member = await request.newContext({ baseURL });
   await mutate(member, "post", "/api/v1/iam/auth/login", { username, password }, 200);
   await member.dispose();
-  await api.dispose();
 });
 
 // 时区只影响显示：切换后同一记录的时间必须随之改变，且不依赖浏览器时区。
 test("展示时区可切换并在刷新与清除本地缓存后保持", async ({ page, context }) => {
   await browserLogin(page, adminUsername, adminPassword);
 
-  await page.goto("/settings/profile");
+  await page.goto("/settings");
   const selector = page.getByRole("combobox", { name: "时区", exact: true });
   await expect(selector).toBeVisible();
 
   // 时区只影响显示：同一条审计记录在不同时区下渲染的时间必须不同。
   // 切换时区本身会写入新审计，所以必须按 request_id 锁定同一条记录再比较。
   const auditRows = async () => {
-    await page.goto("/management/platform/audit");
+    await page.goto("/settings/platform/audit");
     // 表格先渲染加载占位行；等到真实数据行（五个单元格且带请求 ID）出现再取值。
     const dataRow = page
       .locator("tbody tr")
@@ -684,7 +762,7 @@ test("展示时区可切换并在刷新与清除本地缓存后保持", async ({
   };
 
   const setZone = async (label: string) => {
-    await page.goto("/settings/profile");
+    await page.goto("/settings");
     await selector.click();
     // 时区候选按输入过滤后截断渲染，必须先输入才能在列表中命中靠后的时区。
     if (label !== "UTC" && label !== "跟随浏览器") await selector.fill(label);
@@ -737,14 +815,14 @@ test("展示时区可切换并在刷新与清除本地缓存后保持", async ({
   expect(restored?.time).toBe(shanghaiAnchor?.time);
 });
 
-// 组织边界必须由服务端裁决：在 A 组织有权限的成员，不能读取 B 组织的任何管理数据。
+// 组织边界必须由服务端裁决：在 A 组织有权限的用户，不能读取 B 组织的任何管理数据。
 test("跨组织访问被服务端拒绝而不是仅在前端隐藏", async ({ page }) => {
   const admin = await adminClient();
   const me = (await (await admin.get("/api/v1/iam/me")).json()).data;
   const owned = me.organizations[0];
   const suffix = randomBytes(4).toString("hex");
 
-  // 用管理员身份创建第二个组织，确认它确实存在但对其他成员不可访问。
+  // 用管理员身份创建第二个组织，确认它确实存在但对其他用户不可访问。
   const foreign = await mutate(
     admin,
     "post",
@@ -753,7 +831,7 @@ test("跨组织访问被服务端拒绝而不是仅在前端隐藏", async ({ pa
     201,
   );
 
-  // 新建一个只属于 A 组织的普通成员。
+  // 新建一个只属于 A 组织的普通用户。
   const username = `boundary_${suffix}`;
   const password = "boundary member password";
   const role = await mutate(
@@ -770,12 +848,12 @@ test("跨组织访问被服务端拒绝而不是仅在前端隐藏", async ({ pa
   const member = await mutate(
     admin,
     "post",
-    `/api/v1/iam/orgs/${owned.id}/members`,
-    { username, display_name: "边界成员", password },
+    `/api/v1/iam/orgs/${owned.id}/users`,
+    { username, display_name: "边界用户", password },
     201,
   );
   const organization = (await (await admin.get(`/api/v1/iam/orgs/${owned.id}`)).json()).data;
-  await mutate(admin, "put", `/api/v1/iam/orgs/${owned.id}/members/${member.id}/roles`, {
+  await mutate(admin, "put", `/api/v1/iam/orgs/${owned.id}/users/${member.id}/roles`, {
     role_ids: [role.id],
     authz_epoch: organization.authz_epoch,
   });
@@ -789,7 +867,7 @@ test("跨组织访问被服务端拒绝而不是仅在前端隐藏", async ({ pa
   // 另一个组织的管理数据必须被拒绝，而不是返回空列表。
   for (const path of [
     `/api/v1/iam/orgs/${foreign.id}`,
-    `/api/v1/iam/orgs/${foreign.id}/members`,
+    `/api/v1/iam/orgs/${foreign.id}/users`,
     `/api/v1/iam/orgs/${foreign.id}/roles`,
     `/api/v1/iam/orgs/${foreign.id}/audit-events`,
   ]) {

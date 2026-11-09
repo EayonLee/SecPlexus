@@ -92,7 +92,7 @@ bootstrap:
   username: "${SPX_IAM_BOOTSTRAP_USERNAME-admin}"
   # 超级管理员密码，8-128 个字符。
   # 这是"持续权威凭据"：改这个值并重启 → 密码被更新、旧会话全部撤销。明文不会出现在响应或日志里。
-  password: "${SPX_IAM_BOOTSTRAP_PASSWORD-secplexus}"
+  password: "${SPX_IAM_BOOTSTRAP_PASSWORD}"
 
 # ---- 数据保留期 ----
 # 过期数据由 `iam maintain` 命令分批清理（每次每表最多 1000 条），需要由部署侧定时调度。

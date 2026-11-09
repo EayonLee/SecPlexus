@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,7 +32,7 @@ func domainFixture(t *testing.T) (*Service, context.Context, string) {
 
 	service := &Service{Store: store, Sessions: authentication.NewSessions(store, cfg), Config: cfg}
 	var org string
-	if err = store.Pool.QueryRow(ctx, `SELECT id::text FROM iam.organizations WHERE slug='default'`).Scan(&org); err != nil {
+	if err = store.Pool.QueryRow(ctx, `SELECT id::text FROM iam.organizations WHERE parent_id IS NULL`).Scan(&org); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +76,7 @@ func authzVersion(t *testing.T, s *Service, org string) int64 {
 func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T) {
 	s, admin, org := domainFixture(t)
 	ctx := context.Background()
-	member, err := s.CreateMember(admin, org, MemberInput{Username: "delegated", DisplayName: "委派管理员", Password: "temporary delegated password"}, uuid.NewString())
+	member, err := s.CreateOrganizationUser(admin, org, OrganizationUserInput{Username: "delegated", DisplayName: "委派管理员", Password: "temporary delegated password"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,36 +86,28 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal("default member unexpectedly has business grants")
 	}
 
-	managerRole, err := s.CreateRole(admin, org, RoleCreateInput{Code: "role_manager", Name: "角色管理"}, uuid.NewString())
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	grants := []string{"iam.roles.read", "iam.roles.manage", "iam.roles.assign", "iam.audit.read"}
-	if err = s.ReplaceGrants(admin, org, managerRole, GrantsInput{Version: 1, Permissions: grants}, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-
-	readRole, err := s.CreateRole(admin, org, RoleCreateInput{Code: "member_reader", Name: "成员读取"}, uuid.NewString())
+	managerRole, err := s.CreateRole(admin, org, RoleCreateInput{Name: "角色管理", Permissions: grants}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err = s.ReplaceGrants(admin, org, readRole, GrantsInput{Version: 1, Permissions: []string{"iam.members.read"}}, uuid.NewString()); err != nil {
+	readRole, err := s.CreateRole(admin, org, RoleCreateInput{Name: "用户读取", Permissions: []string{"iam.users.read"}}, uuid.NewString())
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{managerRole, readRole}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
+	if err = s.ReplaceOrganizationUserRoles(admin, org, member, OrganizationUserRolesInput{RoleIDs: []string{managerRole, readRole}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, action := range []string{"iam.audit.read", "iam.members.read"} {
+	for _, action := range []string{"iam.audit.read", "iam.users.read"} {
 		if _, err = s.Authorize(actor, action, org); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	target, err := s.CreateRole(admin, org, RoleCreateInput{Code: "target_role", Name: "目标角色"}, uuid.NewString())
+	target, err := s.CreateRole(admin, org, RoleCreateInput{Name: "目标角色"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,93 +156,83 @@ func TestCustomRoleUnionEmptyGrantsAndImmediateDelegationRevocation(t *testing.T
 		t.Fatal("revoked authority granted a permission")
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: []string{}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
+	if err = s.ReplaceOrganizationUserRoles(admin, org, member, OrganizationUserRolesInput{RoleIDs: []string{}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, action := range []string{"iam.roles.manage", "iam.members.read"} {
+	for _, action := range []string{"iam.roles.manage", "iam.users.read"} {
 		if _, err = s.Authorize(actor, action, org); !errors.Is(err, authorization.ErrDenied) {
 			t.Fatal("empty bindings retained a fallback grant")
 		}
 	}
 }
 
-func TestConcurrentDisablesRetainAnEffectiveOrganizationAdministrator(t *testing.T) {
-	s, first, _ := domainFixture(t)
-	ctx := context.Background()
-	firstID, err := s.CreateUser(first, UserInput{Username: "firstadmin", DisplayName: "第一管理员", Password: "regular first password"}, uuid.NewString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	org, err := s.CreateOrganization(first, OrganizationInput{Slug: "concurrent-admins", Name: "并发管理员", AdminUserID: firstID}, uuid.NewString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstUser, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "firstadmin")
-	if err != nil {
-		t.Fatal(err)
-	}
+// TestDeleteRoleRejectsWhenUsersBound 固定「角色仍有绑定用户时不可删除」。
+//
+// 数据库外键 23503 也会兜底成 409，因此仅断言状态码无法区分是哪一层拒绝的。
+// 这里直接调用 service，断言 ErrConflict，锁死应用层的前置校验。
+func TestDeleteRoleRejectsWhenUsersBound(t *testing.T) {
+	s, admin, org := domainFixture(t)
 
-	member, err := s.CreateMember(first, org, MemberInput{Username: "secondadmin", DisplayName: "第二管理员", Password: "temporary second password"}, uuid.NewString())
+	organizationUser, err := s.CreateOrganizationUser(admin, org, OrganizationUserInput{
+		Username: "bounduser", DisplayName: "绑定用户", Password: "temporary bound password",
+	}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var adminRole string
-	if err = s.Store.Pool.QueryRow(ctx, `SELECT id::text FROM iam.roles WHERE org_id=$1 AND code='org_admin'`, org).Scan(&adminRole); err != nil {
-		t.Fatal(err)
-	}
-
-	if err = s.ReplaceMemberRoles(first, org, member, MemberRolesInput{RoleIDs: []string{adminRole}, AuthzEpoch: authzVersion(t, s, org)}, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-
-	second := actorContext(t, s, "admin")
-	secondUser, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "secondadmin")
+	role, err := s.CreateRole(admin, org, RoleCreateInput{
+		Name: "绑定角色", Permissions: []string{"iam.audit.read"},
+	}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	results := make(chan error, 2)
-	var wg sync.WaitGroup
-	for _, actor := range []struct {
-		ctx  context.Context
-		user repository.LoginUser
-	}{{first, firstUser}, {second, secondUser}} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			results <- s.UpdateUser(actor.ctx, actor.user.ID.String(), UserUpdate{DisplayName: actor.user.DisplayName, Status: "disabled", AuthEpoch: actor.user.AuthEpoch}, uuid.NewString())
-		}()
+	if err := s.ReplaceOrganizationUserRoles(admin, org, organizationUser, OrganizationUserRolesInput{
+		RoleIDs: []string{role}, AuthzEpoch: authzVersion(t, s, org),
+	}, uuid.NewString()); err != nil {
+		t.Fatal(err)
 	}
 
-	wg.Wait()
-	close(results)
-	successes, conflicts := 0, 0
-	for err := range results {
-		if err == nil {
-			successes++
-		} else if errors.Is(err, repository.ErrConflict) {
-			conflicts++
-		} else {
-			t.Fatal(err)
-		}
+	// 版本直接取自库中角色行：列表投影与 RoleGrants 的取值口径可能不同，
+	// 只有拿到 DeleteRole 内部读到的同一个版本，才能证明拦截来自「仍有绑定用户」。
+	var current int64
+	if err := s.Store.DB.Raw(`SELECT version FROM iam.roles WHERE org_id=$1 AND id=$2`, org, role).Row().Scan(&current); err != nil {
+		t.Fatal(err)
 	}
 
-	if successes != 1 || conflicts != 1 {
-		t.Fatal("concurrent disables bypassed last administrator protection")
+	if current == 0 {
+		t.Fatal("created role missing from role table")
+	}
+
+	if err := s.DeleteRole(admin, org, role, current, uuid.NewString()); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("delete role with bound users = %v, want ErrConflict", err)
+	}
+
+	// 解除绑定后同样的版本应能删除，证明上面的拒绝确实来自用户绑定。
+	if err := s.ReplaceOrganizationUserRoles(admin, org, organizationUser, OrganizationUserRolesInput{
+		RoleIDs: []string{}, AuthzEpoch: authzVersion(t, s, org),
+	}, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Store.DB.Raw(`SELECT version FROM iam.roles WHERE org_id=$1 AND id=$2`, org, role).Row().Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteRole(admin, org, role, current, uuid.NewString()); err != nil {
+		t.Fatalf("delete unbound role = %v, want nil", err)
 	}
 }
 
 func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 	s, admin, org := domainFixture(t)
-	member, err := s.CreateMember(admin, org, MemberInput{Username: "previewuser", DisplayName: "Preview member", Password: "temporary preview password"}, uuid.NewString())
+	member, err := s.CreateOrganizationUser(admin, org, OrganizationUserInput{Username: "previewuser", DisplayName: "Preview member", Password: "temporary preview password"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	role, err := s.CreateRole(admin, org, RoleCreateInput{Code: "preview_reader", Name: "Preview reader"}, uuid.NewString())
+	role, err := s.CreateRole(admin, org, RoleCreateInput{Name: "Preview reader"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,13 +242,13 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 	}
 
 	roles := []string{role}
-	input := PreviewInput{MembershipID: member, RoleIDs: &roles, AuthzEpoch: authzVersion(t, s, org)}
+	input := PreviewInput{OrganizationUserID: member, RoleIDs: &roles, AuthzEpoch: authzVersion(t, s, org)}
 	preview, err := s.Preview(admin, org, input)
 	if err != nil || len(preview.Added) != 1 || preview.Added[0] != "iam.audit.read" {
 		t.Fatalf("new binding preview: %#v %v", preview, err)
 	}
 
-	if err = s.ReplaceMemberRoles(admin, org, member, MemberRolesInput{RoleIDs: roles, AuthzEpoch: input.AuthzEpoch}, uuid.NewString()); err != nil {
+	if err = s.ReplaceOrganizationUserRoles(admin, org, member, OrganizationUserRolesInput{RoleIDs: roles, AuthzEpoch: input.AuthzEpoch}, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,7 +261,7 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 		t.Fatal("existing deprecated binding cannot be previewed", err)
 	}
 
-	if err = s.UpdateMember(admin, org, member, MemberUpdate{Status: "disabled", AuthzEpoch: input.AuthzEpoch}, false, uuid.NewString()); err != nil {
+	if err = s.UpdateOrganizationUser(admin, org, member, OrganizationUserUpdate{Status: "disabled", AuthzEpoch: input.AuthzEpoch}, false, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -290,12 +271,12 @@ func TestPermissionPreviewTracksEffectiveBindings(t *testing.T) {
 		t.Fatalf("disabled member has effective grants: %#v %v", preview, err)
 	}
 
-	other, err := s.CreateMember(admin, org, MemberInput{Username: "previewother", DisplayName: "Other member", Password: "temporary preview password"}, uuid.NewString())
+	other, err := s.CreateOrganizationUser(admin, org, OrganizationUserInput{Username: "previewother", DisplayName: "Other member", Password: "temporary preview password"}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	input.MembershipID = other
+	input.OrganizationUserID = other
 	input.AuthzEpoch = authzVersion(t, s, org)
 	if _, err = s.Preview(admin, org, input); !errors.Is(err, authorization.ErrDenied) {
 		t.Fatalf("new deprecated binding preview allowed: %v", err)
@@ -325,4 +306,14 @@ func TestConfiguredAdministratorRejectsApplicationAndOperatorWrites(t *testing.T
 			}
 		})
 	}
+}
+
+// rootOrganizationID 读取迁移创建的根组织，供需要组织上下文的用例使用。
+func rootOrganizationID(t *testing.T, s *Service) string {
+	t.Helper()
+	var id string
+	if err := s.Store.Pool.QueryRow(context.Background(), `SELECT id::text FROM iam.organizations WHERE parent_id IS NULL`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

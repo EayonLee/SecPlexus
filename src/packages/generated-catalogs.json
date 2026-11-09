@@ -1,4 +1,5 @@
 [
+  "src/apps/web/src/auth/permission-groups.gen.ts",
   "src/apps/web/src/auth/permissions.gen.ts",
   "src/apps/web/src/auth/result.gen.ts",
   "src/packages/go/iamclient/permissions.gen.go",

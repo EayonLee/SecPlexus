@@ -1,156 +1,388 @@
 "use client";
+
 import { useState } from "react";
 
-import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { PencilIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Controller, useForm } from "react-hook-form";
-import { toast } from "sonner";
-import { z } from "zod";
 
 import { permissions } from "@/auth/permissions.gen";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createRole,
   deleteRole,
-  getRole,
-  listRoleMembers,
+  listRoleUsers,
   listRoles,
   permissions as permissionCatalog,
-  previewPermission,
   setRolePermissions,
   updateRole,
 } from "@/spx/api/iam/management";
-import type { ApiPreview, ApiRole } from "@/spx/api/iam/schemas";
-import {
-  zCreateRoleBody,
-  zPreviewPermissionBody,
-  zSetRolePermissionsBody,
-  zUpdateRoleBody,
-} from "@/spx/api/iam/schemas";
+import type { ApiOrganizationUser, ApiRole } from "@/spx/api/iam/schemas";
 
 import { Can, useCan } from "../components/access";
 import { DataTable, useAction, usePagedQuery } from "../components/data";
-import { FormDialog, FormInput } from "../components/forms";
-import { StatusBadge } from "../components/status-badge";
 import { managementChanged } from "../iam/management";
-import { identityScope, queryClient } from "../iam/query";
+import { identityScope } from "../iam/query";
 import { useIdentity } from "../iam/session";
-import { useRoleLabel } from "../iam/use-role-label";
 
-export function RolesPage() {
-  const roleLabel = useRoleLabel();
-  const roleForm = useForm<z.infer<typeof zUpdateRoleBody>>({ resolver: zodResolver(zUpdateRoleBody) });
-  const perform = useAction();
+type PermissionCatalog = ReturnType<typeof usePermissionCatalog>;
 
-  const t = useTranslations("Management");
-  const errors = useTranslations("Errors");
-  const permissionText = useTranslations("Permissions");
-  const permissionLabels = Object.fromEntries(Object.values(permissions).map((key) => [key, permissionText(key)]));
-
+function usePermissionCatalog() {
   const auth = useIdentity();
   const org = auth.org_id ?? "";
-  const state = usePagedQuery<ApiRole>(["iam", "roles", org], (query, signal) => listRoles(org, query, signal));
-  const canMembers = useCan(permissions.IAMMembersRead);
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<ApiRole | undefined>(undefined);
-  const [removing, setRemoving] = useState<ApiRole | undefined>(undefined);
-
-  const [grants, setGrants] = useState<string[]>([]);
-
-  const [preview, setPreview] = useState<ApiPreview | undefined>(undefined);
-  const canEdit = editing?.allowed_actions.includes(permissions.IAMRolesManage) ?? false;
-  const catalogQuery = useQuery({
+  const query = useQuery({
     queryKey: ["iam", "permissions", org, ...identityScope(auth)],
     queryFn: ({ signal }) => permissionCatalog(org, signal),
     enabled: auth.status === "authenticated",
   });
-  const catalog = catalogQuery.data?.items ?? [];
+
+  return query.data?.items ?? [];
+}
+
+// PermissionPicker 是创建与编辑共用的权限勾选区，按资源类型分组。
+function PermissionPicker({
+  catalog,
+  selected,
+  onChange,
+  disabled,
+}: {
+  catalog: PermissionCatalog;
+  selected: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+}) {
+  const t = useTranslations("Management");
+  const resources = [...new Set(catalog.map((item) => item.permission.resource_type))];
+
+  return (
+    <div className="flex flex-col gap-5">
+      {resources.map((resource) => (
+        <FieldSet key={resource}>
+          {/* 分组标题必须弱于上方的「权限」标题，否则层级倒挂。 */}
+          <FieldLegend variant="label" className="text-muted-foreground font-medium">
+            {(
+              {
+                organizations: t("organization"),
+                users: t("user"),
+                roles: t("role"),
+                audit: t("audit"),
+              } as Record<string, string>
+            )[resource] || resource}
+          </FieldLegend>
+          {catalog
+            .filter((item) => item.permission.resource_type === resource)
+            .map(({ permission, can_delegate }) => (
+              <Field key={permission.key} orientation="horizontal">
+                <Checkbox
+                  id={`permission-${permission.key}`}
+                  checked={selected.includes(permission.key)}
+                  disabled={disabled || !can_delegate}
+                  onCheckedChange={(checked) =>
+                    onChange(
+                      checked === true
+                        ? [...selected, permission.key]
+                        : selected.filter((key) => key !== permission.key),
+                    )
+                  }
+                />
+                <FieldLabel htmlFor={`permission-${permission.key}`}>
+                  {permission.description || permission.key}
+                </FieldLabel>
+              </Field>
+            ))}
+        </FieldSet>
+      ))}
+    </div>
+  );
+}
+
+function RoleMembers({ orgID, roleID }: { orgID: string; roleID: string }) {
+  const t = useTranslations("Management");
+  const state = usePagedQuery<ApiOrganizationUser>(["iam", "role-users", orgID, roleID], (query, signal) =>
+    listRoleUsers(orgID, roleID, query, signal),
+  );
+
+  return (
+    <DataTable
+      state={state}
+      columns={[
+        { title: t("username"), cell: (member) => member.username },
+        { title: t("displayName"), cell: (member) => member.display_name },
+      ]}
+    />
+  );
+}
+
+// CreateRoleSheet 从右侧创建角色：名称、说明与权限一次提交。
+function CreateRoleSheet({
+  orgID,
+  catalog,
+  onClose,
+}: {
+  orgID: string;
+  catalog: PermissionCatalog;
+  onClose: () => void;
+}) {
+  const t = useTranslations("Management");
+  const perform = useAction();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [grants, setGrants] = useState<string[]>([]);
   const create = useMutation({ mutationFn: createRole, onSuccess: managementChanged });
+  const canSubmit = name.trim().length > 0 && !create.isPending;
+
+  return (
+    <Sheet
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{t("createRole")}</SheetTitle>
+          <SheetDescription>{t("createRoleDescription")}</SheetDescription>
+        </SheetHeader>
+
+        <div className="flex flex-1 flex-col gap-6 px-4 pb-4">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="new-role-name">{t("roleName")}</FieldLabel>
+              <Input
+                id="new-role-name"
+                value={name}
+                maxLength={100}
+                placeholder={t("exampleRoleName")}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="new-role-description">{t("description")}</FieldLabel>
+              <Textarea
+                id="new-role-description"
+                value={description}
+                maxLength={1000}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </Field>
+          </FieldGroup>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">{t("permissions")}</h3>
+            <PermissionPicker catalog={catalog} selected={grants} onChange={setGrants} />
+          </section>
+        </div>
+
+        <SheetFooter>
+          <Button
+            disabled={!canSubmit}
+            onClick={() =>
+              void perform(async () => {
+                await create.mutateAsync({
+                  orgId: orgID,
+                  body: { name, description: description || undefined, permissions: grants },
+                });
+                onClose();
+              })
+            }
+          >
+            {t("createRole")}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// EditRoleSheet 按「角色信息 / 角色权限 / 角色成员」三段展示；
+// 信息与权限可改，成员只读。
+function EditRoleSheet({
+  orgID,
+  role,
+  catalog,
+  onClose,
+}: {
+  orgID: string;
+  role: ApiRole;
+  catalog: PermissionCatalog;
+  onClose: () => void;
+}) {
+  const t = useTranslations("Management");
+  const perform = useAction();
+  const canMembers = useCan(permissions.IAMUsersRead);
+
+  const [name, setName] = useState(role.name);
+  const [description, setDescription] = useState(role.description);
+  const [grants, setGrants] = useState(role.permissions);
+
+  const edit = useMutation({ mutationFn: updateRole, onSuccess: managementChanged });
+  const grantsMutation = useMutation({ mutationFn: setRolePermissions, onSuccess: managementChanged });
+  const busy = edit.isPending || grantsMutation.isPending;
+
+  return (
+    <Sheet
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>{t("editRole")}</SheetTitle>
+          <SheetDescription>{role.name}</SheetDescription>
+        </SheetHeader>
+
+        <div className="flex flex-1 flex-col gap-8 px-4 pb-4">
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">{t("roleInfo")}</h3>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="role-name">{t("roleName")}</FieldLabel>
+                <Input id="role-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="role-description">{t("description")}</FieldLabel>
+                <Textarea
+                  id="role-description"
+                  value={description}
+                  maxLength={1000}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </Field>
+              <Field orientation="horizontal">
+                <Button
+                  disabled={busy || (name === role.name && description === role.description)}
+                  onClick={() =>
+                    void perform(async () => {
+                      await edit.mutateAsync({
+                        orgId: orgID,
+                        id: role.id,
+                        body: { name, description, version: role.version },
+                      });
+                    })
+                  }
+                >
+                  {t("saveRole")}
+                </Button>
+              </Field>
+            </FieldGroup>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">{t("permissions")}</h3>
+            <PermissionPicker catalog={catalog} selected={grants} onChange={setGrants} disabled={busy} />
+            <div>
+              <Button
+                disabled={busy || [...grants].sort().join() === [...role.permissions].sort().join()}
+                onClick={() =>
+                  void perform(async () => {
+                    await grantsMutation.mutateAsync({
+                      orgId: orgID,
+                      id: role.id,
+                      body: { permissions: grants, version: role.version },
+                    });
+                  })
+                }
+              >
+                {t("savePermissions")}
+              </Button>
+            </div>
+          </section>
+
+          {canMembers && (
+            <section className="flex flex-col gap-3">
+              <h3 className="text-sm font-medium">{t("roleMembers")}</h3>
+              <RoleMembers orgID={orgID} roleID={role.id} />
+            </section>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function RolesPage() {
+  const t = useTranslations("Management");
+  const perform = useAction();
+
+  const auth = useIdentity();
+  const org = auth.org_id ?? "";
+  const catalog = usePermissionCatalog();
+
+  const [term, setTerm] = useState("");
+  const [applied, setApplied] = useState("");
+  const state = usePagedQuery<ApiRole>(["iam", "roles", org, applied], (query, signal) =>
+    listRoles(org, { ...query, q: applied || undefined }, signal),
+  );
+
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<ApiRole>();
   const remove = useMutation({ mutationFn: deleteRole, onSuccess: managementChanged });
-  const edit = useMutation({
-    mutationFn: updateRole,
-    onSuccess: async (_data, variables) => {
-      await managementChanged();
-      await reloadRole(variables.id);
-    },
-  });
-  const impact = useMutation({
-    mutationFn: previewPermission,
-    onSuccess: (response) => setPreview(response),
-  });
-  const grantsMutation = useMutation({
-    mutationFn: setRolePermissions,
-    onSuccess: async (_data, variables) => {
-      await managementChanged();
-      await reloadRole(variables.id);
-      toast.success(t("permissionsSaved"));
-    },
-  });
-  function open(role: ApiRole) {
-    roleForm.reset({ name: role.name, description: role.description, status: role.status, version: role.version });
-    setEditing(role);
-    setGrants(role.permissions);
-    setPreview(undefined);
-  }
-  async function reloadRole(id: string) {
-    if (!useIdentity.getState().capabilities.includes(permissions.IAMRolesRead)) {
-      setEditing(undefined);
-      return;
-    }
-    const role = await queryClient.fetchQuery({
-      queryKey: ["iam", "role", org, id, ...identityScope(useIdentity.getState())],
-      queryFn: ({ signal }) => getRole(org, id, signal),
-    });
-    roleForm.reset({ name: role.name, description: role.description, status: role.status, version: role.version });
-    setEditing(role);
-    setGrants(role.permissions);
-    setPreview(undefined);
-  }
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex gap-2">
+      <h2 className="text-base font-medium">{t("rolesTitle")}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Input
+            className="h-9 w-56"
+            value={term}
+            placeholder={t("searchRolesPlaceholder")}
+            onChange={(event) => setTerm(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") setApplied(term);
+            }}
+          />
+          <Button variant="outline" onClick={() => setApplied(term)}>
+            <SearchIcon data-icon="inline-start" />
+            {t("auditSearch")}
+          </Button>
+        </div>
         <Can action={permissions.IAMRolesManage}>
-          <Button onClick={() => setCreating(true)}>{t("createRole")}</Button>
+          <Button onClick={() => setCreating(true)}>
+            <PlusIcon data-icon="inline-start" />
+            {t("createRole")}
+          </Button>
         </Can>
-        <Button variant="outline" onClick={state.reload}>
-          {t("refresh")}
-        </Button>
       </div>
+
       <DataTable
         state={state}
         columns={[
-          { title: t("roleName"), cell: (role) => roleLabel(role) },
-          { title: t("key"), cell: (role) => role.code },
-          {
-            title: t("type"),
-            cell: (role) => (
-              <StatusBadge status={role.kind}>{role.kind === "system" ? t("systemRole") : t("customRole")}</StatusBadge>
-            ),
-          },
+          { title: t("roleName"), cell: (role) => role.name },
+          { title: t("description"), cell: (role) => role.description || "—" },
           { title: t("memberCount"), cell: (role) => role.member_count },
-          {
-            title: t("status"),
-            cell: (role) => (
-              <StatusBadge status={role.status}>{role.status === "active" ? t("active") : t("disabled")}</StatusBadge>
-            ),
-          },
           {
             title: t("action"),
             cell: (role) => (
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => open(role)}>
-                  {t("view")}
+                <Button variant="ghost" onClick={() => setEditing(role)}>
+                  <PencilIcon data-icon="inline-start" />
+                  {t("edit")}
                 </Button>
                 {role.allowed_actions.includes(permissions.IAMRolesManage) && (
-                  <Button variant="ghost" onClick={() => setRemoving(role)}>
+                  <Button
+                    variant="ghost"
+                    disabled={role.member_count > 0 || remove.isPending}
+                    title={role.member_count > 0 ? t("deleteRoleHasMembers") : undefined}
+                    onClick={() =>
+                      void perform(async () => {
+                        await remove.mutateAsync({ orgId: org, id: role.id, version: role.version });
+                      })
+                    }
+                  >
                     {t("delete")}
                   </Button>
                 )}
@@ -159,270 +391,9 @@ export function RolesPage() {
           },
         ]}
       />
-      {creating && (
-        <FormDialog
-          title={t("createCustomRole")}
-          schema={zCreateRoleBody.required({ code: true })}
-          defaultValues={{ code: "", name: "", description: "" }}
-          onClose={() => setCreating(false)}
-          onSubmit={async (values) => {
-            await create.mutateAsync({ orgId: org, body: values });
-          }}
-        >
-          {(form) => (
-            <>
-              <FormInput
-                label={t("roleCode")}
-                registration={form.register("code")}
-                error={form.formState.errors.code}
-                placeholder={t("exampleRoleCode")}
-                description={t("roleCodeDescription")}
-              />
-              <FormInput
-                label={t("roleName")}
-                registration={form.register("name")}
-                error={form.formState.errors.name}
-                placeholder={t("exampleRoleName")}
-              />
-              <FormInput
-                label={t("description")}
-                type="textarea"
-                registration={form.register("description")}
-                error={form.formState.errors.description}
-              />
-            </>
-          )}
-        </FormDialog>
-      )}
-      {removing && (
-        <FormDialog
-          title={t("deleteRole")}
-          description={t("deleteRoleDescription", { name: removing.name })}
-          schema={z.object({})}
-          defaultValues={{}}
-          onClose={() => setRemoving(undefined)}
-          onSubmit={async () => {
-            await remove.mutateAsync({
-              orgId: org,
-              id: removing.id,
-              version: removing.version,
-            });
-          }}
-        />
-      )}
-      {editing && (
-        <Dialog
-          open
-          onOpenChange={(value) => {
-            if (!value && !grantsMutation.isPending && !roleForm.formState.isSubmitting) {
-              setEditing(undefined);
-              setPreview(undefined);
-            }
-          }}
-        >
-          <DialogContent aria-describedby={undefined} className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>{roleLabel(editing)}</DialogTitle>
-            </DialogHeader>
-            <Tabs defaultValue="information">
-              <TabsList>
-                <TabsTrigger value="information">{t("roleInfo")}</TabsTrigger>
-                <TabsTrigger value="permissions">{t("permissions")}</TabsTrigger>
-                {canMembers && (
-                  <TabsTrigger value="members">{t("membersTab", { count: editing.member_count })}</TabsTrigger>
-                )}
-              </TabsList>
-              <TabsContent value="information">
-                <form
-                  noValidate
-                  onSubmit={roleForm.handleSubmit(async (body) => {
-                    await perform(async () => {
-                      await edit.mutateAsync({
-                        orgId: org,
-                        id: editing.id,
-                        body,
-                      });
-                    }, t("roleSaved"));
-                  })}
-                >
-                  <fieldset disabled={!canEdit || roleForm.formState.isSubmitting || grantsMutation.isPending}>
-                    <FieldGroup>
-                      <Field>
-                        <FieldLabel htmlFor="role-code">{t("roleCode")}</FieldLabel>
-                        <Input id="role-code" disabled value={editing.code} />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="role-name">{t("roleName")}</FieldLabel>
-                        <Input
-                          key={editing.version}
-                          id="role-name"
-                          {...roleForm.register("name")}
-                          required
-                          maxLength={100}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="role-description">{t("description")}</FieldLabel>
-                        <Textarea
-                          key={editing.version}
-                          id="role-description"
-                          {...roleForm.register("description")}
-                          maxLength={1000}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="roles-status">{t("status")}</FieldLabel>
-                        <Controller
-                          control={roleForm.control}
-                          name="status"
-                          render={({ field }) => (
-                            <Select value={field.value} onValueChange={field.onChange} name={field.name}>
-                              <SelectTrigger
-                                id="roles-status"
-                                aria-label={t("status")}
-                                onBlur={field.onBlur}
-                                ref={field.ref}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectGroup>
-                                  <SelectItem value="active">{t("active")}</SelectItem>
-                                  <SelectItem value="disabled">{t("disabled")}</SelectItem>
-                                </SelectGroup>
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                      </Field>
-                      {Object.keys(roleForm.formState.errors).length > 0 && (
-                        <FieldError>{errors("invalidRequest")}</FieldError>
-                      )}
-                      {canEdit && (
-                        <Field orientation="horizontal">
-                          <Button type="submit">{t("saveRole")}</Button>
-                        </Field>
-                      )}
-                    </FieldGroup>
-                  </fieldset>
-                </form>
-              </TabsContent>
-              <TabsContent value="permissions" className="flex flex-col gap-5">
-                <p className="text-muted-foreground text-sm">{t("permissionDescription")}</p>
-                {[...new Set(catalog.map((item) => item.permission.resource_type))].map((resource) => (
-                  <FieldSet key={resource}>
-                    <FieldLegend>
-                      {(
-                        {
-                          organizations: t("organization"),
-                          members: t("member"),
-                          roles: t("role"),
-                          audit: t("audit"),
-                        } as Record<string, string>
-                      )[resource] || resource}
-                    </FieldLegend>
-                    {catalog
-                      .filter((item) => item.permission.resource_type === resource)
-                      .map(({ permission, can_delegate }) => (
-                        <Field key={permission.key} orientation="horizontal">
-                          <Checkbox
-                            id={`permission-${permission.key}`}
-                            checked={grants.includes(permission.key)}
-                            disabled={!canEdit || (!can_delegate && !editing.permissions.includes(permission.key))}
-                            onCheckedChange={(checked) => {
-                              setGrants((current) =>
-                                checked === true
-                                  ? [...current, permission.key]
-                                  : current.filter((key) => key !== permission.key),
-                              );
-                              setPreview(undefined);
-                            }}
-                          />
-                          <FieldLabel htmlFor={`permission-${permission.key}`}>
-                            {permissionLabels[permission.key] ?? permission.key}
-                          </FieldLabel>
-                        </Field>
-                      ))}
-                  </FieldSet>
-                ))}
-                {canEdit && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      disabled={grantsMutation.isPending || roleForm.formState.isSubmitting}
-                      onClick={() =>
-                        void perform(async () => {
-                          await grantsMutation.mutateAsync({
-                            orgId: org,
-                            id: editing.id,
-                            body: zSetRolePermissionsBody.parse({ permissions: grants, version: editing.version }),
-                          });
-                        })
-                      }
-                    >
-                      {t("savePermissions")}
-                    </Button>
-                    {canMembers && (
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          void perform(async () => {
-                            await impact.mutateAsync({
-                              orgId: org,
-                              body: zPreviewPermissionBody.parse({
-                                role_id: editing.id,
-                                permissions: grants,
-                                version: editing.version,
-                              }),
-                            });
-                          })
-                        }
-                      >
-                        {t("previewImpact")}
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {preview && (
-                  <p>
-                    {t("impact", {
-                      count: preview.affected_members,
-                      added: preview.added.map((key) => permissionLabels[key] ?? key).join(", ") || t("none"),
-                      removed: preview.removed.map((key) => permissionLabels[key] ?? key).join(", ") || t("none"),
-                    })}
-                  </p>
-                )}
-              </TabsContent>
-              {canMembers && (
-                <TabsContent value="members">
-                  <RoleMembersTable key={editing.id} orgID={org} roleID={editing.id} />
-                </TabsContent>
-              )}
-            </Tabs>
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
-  );
-}
 
-function RoleMembersTable({ orgID, roleID }: { orgID: string; roleID: string }) {
-  const t = useTranslations("Management");
-  const state = usePagedQuery(["iam", "role-members", orgID, roleID], (query, signal) =>
-    listRoleMembers(orgID, roleID, query, signal),
-  );
-  return (
-    <DataTable
-      state={state}
-      columns={[
-        { title: t("username"), cell: (member) => member.username },
-        { title: t("displayName"), cell: (member) => member.display_name },
-        {
-          title: t("status"),
-          cell: (member) => (
-            <StatusBadge status={member.status}>{t(member.status === "active" ? "active" : "disabled")}</StatusBadge>
-          ),
-        },
-      ]}
-    />
+      {creating && <CreateRoleSheet orgID={org} catalog={catalog} onClose={() => setCreating(false)} />}
+      {editing && <EditRoleSheet orgID={org} role={editing} catalog={catalog} onClose={() => setEditing(undefined)} />}
+    </div>
   );
 }

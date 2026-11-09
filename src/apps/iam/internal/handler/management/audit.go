@@ -9,40 +9,20 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// ListOrganizationAuditEvents 读取当前组织的审计列表。
-func (s *Handler) ListOrganizationAuditEvents(c *gin.Context) {
-	orgId := c.Param("org_id")
-	var params model.ListQuery
-	if err := c.ShouldBindQuery(&params); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
-	limit, offset := params.Limit, params.Offset
-	s.auditEvents(c, orgId, false, limit, offset)
-}
-
-// ListAuditEvents 读取平台管理员可见的审计范围。
+// ListAuditEvents 读取审计日志。可见范围由业务用例按授权结果裁剪，
+// 客户端只能收窄结果（操作者、时间范围、结果），不能扩大范围。
 func (s *Handler) ListAuditEvents(c *gin.Context) {
-	var params model.ListQuery
+	var params model.AuditQuery
 	if err := c.ShouldBindQuery(&params); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
-	orgID := params.OrgID
-	limit, offset := params.Limit, params.Offset
-	s.auditEvents(c, orgID, true, limit, offset)
-}
 
-// auditEvents 绑定分页与范围参数，查询和授权由业务用例处理。
-func (s *Handler) auditEvents(c *gin.Context, orgID string, platform bool, limit, offset int) {
-	w := c.Writer
-	r := c.Request
-
-	response, err := s.Service.ListAuditEvents(r.Context(), orgID, platform, limit, offset)
+	response, err := s.Service.ListAuditEvents(c.Request.Context(), params)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, response)
+	result.Success(c.Writer, response)
 }

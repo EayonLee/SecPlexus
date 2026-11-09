@@ -79,6 +79,16 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = result.CodePermissionDenied
 	case errors.Is(err, repository.ErrInvalid):
 		code = result.CodeInvalidRequest
+	case errors.Is(err, repository.ErrRootOrganization):
+		code = result.CodeRootOrganizationImmutable
+	case errors.Is(err, repository.ErrHasChildren):
+		code = result.CodeOrganizationHasChildren
+	case errors.Is(err, repository.ErrHasUsers):
+		code = result.CodeOrganizationHasMembers
+	case errors.Is(err, repository.ErrUsernameTaken):
+		code = result.CodeUsernameTaken
+	case errors.Is(err, repository.ErrEmailTaken):
+		code = result.CodeEmailTaken
 	case errors.Is(err, repository.ErrConflict):
 		code = result.CodeConflict
 	case errors.Is(err, repository.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, sql.ErrNoRows):

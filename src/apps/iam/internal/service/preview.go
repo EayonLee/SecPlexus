@@ -12,13 +12,13 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-// PreviewInput 描述拟预览的角色或成员权限变更。
+// PreviewInput 描述拟预览的角色或用户权限变更。
 type PreviewInput = model.APIPreviewInput
 
 // Preview 描述权限变更前后的差异及影响范围。
 type Preview = model.APIPreview
 
-// Preview 比较角色权限或成员角色变更前后的权限。
+// Preview 比较角色权限或用户角色变更前后的权限。
 func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput) (Preview, error) {
 	response := Preview{
 		Before:  []string{},
@@ -39,13 +39,13 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 		return response, err
 	}
 
-	for _, action := range []string{iamclient.PermissionIAMRolesRead, iamclient.PermissionIAMMembersRead} {
+	for _, action := range []string{iamclient.PermissionIAMRolesRead, iamclient.PermissionIAMUsersRead} {
 		if _, err = s.authorizeTx(ctx, tx, p, action, orgID); err != nil {
 			return response, err
 		}
 	}
 
-	if input.RoleID != "" && input.Permissions != nil && input.MembershipID == "" && input.RoleIDs == nil {
+	if input.RoleID != "" && input.Permissions != nil && input.OrganizationUserID == "" && input.RoleIDs == nil {
 		if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesManage, orgID); err != nil {
 			return response, err
 		}
@@ -55,7 +55,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			return response, err
 		}
 
-		if role.Kind != "custom" || role.Version != input.Version {
+		if role.Version != input.Version {
 			return response, repository.ErrConflict
 		}
 
@@ -63,16 +63,16 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			return response, err
 		}
 
-		response.Before, response.After, response.AffectedMembers = role.Permissions, *input.Permissions, role.MemberCount
-	} else if input.MembershipID != "" && input.RoleIDs != nil && input.RoleID == "" && input.Permissions == nil {
+		response.Before, response.After, response.AffectedUsers = role.Permissions, *input.Permissions, role.UserCount
+	} else if input.OrganizationUserID != "" && input.RoleIDs != nil && input.RoleID == "" && input.Permissions == nil {
 		if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesAssign, orgID); err != nil {
 			return response, err
 		}
 
 		var userID uuid.UUID
 		var version int64
-		var memberActive, systemAdmin bool
-		if err = repository.MemberPreviewState(ctx, tx, orgID, input.MembershipID, &userID, &version, &memberActive, &systemAdmin); err != nil {
+		var organizationUserActive, systemAdmin bool
+		if err = repository.OrganizationUserPreviewState(ctx, tx, orgID, input.OrganizationUserID, &userID, &version, &organizationUserActive, &systemAdmin); err != nil {
 			return response, err
 		}
 
@@ -95,7 +95,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			return response, err
 		}
 
-		previous, err := repository.MemberRoleIDs(ctx, tx, orgID, input.MembershipID)
+		previous, err := repository.OrganizationUserRoleIDs(ctx, tx, orgID, input.OrganizationUserID)
 		if err != nil {
 			return response, err
 		}
@@ -109,15 +109,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 				}
 
 				included := slices.Contains(*input.RoleIDs, id)
-				if role.Kind == "system" && role.Code == "org_admin" && !p.IsSuperAdmin && slices.Contains(previous, id) != included {
-					return response, authorization.ErrDenied
-				}
-
-				if included && role.Status != "active" {
-					return response, repository.ErrInvalid
-				}
-
-				if role.Kind == "custom" {
+				{
 					existing, candidate := role.Permissions, []string{}
 					if !slices.Contains(previous, id) {
 						existing = nil
@@ -132,7 +124,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 					}
 				}
 
-				if included && memberActive {
+				if included && organizationUserActive {
 					for _, key := range role.Permissions {
 						if !slices.Contains(response.After, key) {
 							response.After = append(response.After, key)
@@ -142,7 +134,7 @@ func (s *Service) Preview(ctx context.Context, orgID string, input PreviewInput)
 			}
 		}
 
-		response.AffectedMembers = 1
+		response.AffectedUsers = 1
 	} else {
 		return response, repository.ErrInvalid
 	}

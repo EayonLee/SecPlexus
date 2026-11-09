@@ -1,73 +1,166 @@
 "use client";
 import { useState } from "react";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Controller } from "react-hook-form";
+import { Building2Icon, PlusIcon } from "lucide-react";
 
 import { permissions } from "@/auth/permissions.gen";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { createOrganization, listOrganizations, updateOrganization } from "@/spx/api/iam/management";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { createOrganization, listOrganizationTree, updateOrganization } from "@/spx/api/iam/management";
 import type { ApiOrganization } from "@/spx/api/iam/schemas";
 import { zCreateOrganizationBody, zUpdateOrganizationBody } from "@/spx/api/iam/schemas";
 
 import { Can } from "../components/access";
-import { DataTable, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
-import { StatusBadge } from "../components/status-badge";
+import { OrganizationTree, descendantIDs } from "../components/organization-tree";
+import { OrganizationSplitPane } from "../components/organization-split-pane";
 import { UserPicker } from "../components/user-picker";
 import { managementChanged } from "../iam/management";
+
+// subtreeOf 返回选定组织及其全部后代；根节点为空时视为全部组织。
+// 组织树接口一次返回全部节点，因此这里在客户端展开，不再额外请求。
+function subtreeOf(items: ApiOrganization[], rootID: string | undefined) {
+  if (!rootID) return items;
+
+  const children = new Map<string, ApiOrganization[]>();
+  for (const item of items) {
+    const key = item.parent_id ?? "";
+    children.set(key, [...(children.get(key) ?? []), item]);
+  }
+
+  const collected: ApiOrganization[] = [];
+  const walk = (id: string) => {
+    const node = items.find((item) => item.id === id);
+    if (!node) return;
+    collected.push(node);
+    for (const child of children.get(id) ?? []) walk(child.id);
+  };
+  walk(rootID);
+
+  return collected;
+}
 
 export function OrganizationsPage() {
   const t = useTranslations("Management");
 
-  const state = usePagedQuery<ApiOrganization>(["iam", "organizations"], listOrganizations);
-  const create = useMutation({
-    mutationFn: createOrganization,
-    onSuccess: managementChanged,
+  const tree = useQuery({
+    queryKey: ["iam", "organizations", "tree"],
+    queryFn: ({ signal }) => listOrganizationTree(signal),
   });
-  const edit = useMutation({
-    mutationFn: updateOrganization,
-    onSuccess: managementChanged,
-  });
+  const items = tree.data?.items ?? [];
+  const truncated = tree.data?.truncated ?? false;
+
   const [dialog, setDialog] = useState<"create" | ApiOrganization>();
 
+  const create = useMutation({ mutationFn: createOrganization, onSuccess: managementChanged });
+  const edit = useMutation({ mutationFn: updateOrganization, onSuccess: managementChanged });
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex gap-2">
-        <Can action={permissions.IAMPlatformOrganizationsManage}>
-          <Button onClick={() => setDialog("create")}>{t("createOrg")}</Button>
-        </Can>
-        <Button variant="outline" onClick={state.reload}>
-          {t("refresh")}
-        </Button>
+    <div className="flex flex-col gap-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-medium">{t("organizationManage")}</h2>
+          {truncated && <p className="text-muted-foreground text-sm">{t("truncatedOrganizations")}</p>}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Can action={permissions.IAMPlatformOrganizationsManage}>
+            <Button onClick={() => setDialog("create")}>
+              <PlusIcon data-icon="inline-start" />
+              {t("createOrg")}
+            </Button>
+          </Can>
+          <Button variant="outline" onClick={() => void tree.refetch()} disabled={tree.isFetching}>
+            {t("refresh")}
+          </Button>
+        </div>
       </div>
-      <DataTable
-        state={state}
-        columns={[
-          { title: t("orgName"), cell: (org) => org.name },
-          { title: t("key"), cell: (org) => org.slug },
-          {
-            title: t("status"),
-            cell: (org) => (
-              <StatusBadge status={org.status}>{org.status === "active" ? t("active") : t("disabled")}</StatusBadge>
-            ),
-          },
-          { title: t("orgId"), cell: (org) => org.id },
-          {
-            title: t("action"),
-            cell: (org) => (
-              <Can action={permissions.IAMPlatformOrganizationsManage}>
-                <Button variant="ghost" onClick={() => setDialog(org)}>
-                  {t("edit")}
-                </Button>
-              </Can>
-            ),
-          },
-        ]}
-      />
+
+      {tree.isError && <p role="alert">{t("loadOrganizationFailed")}</p>}
+
+      {!tree.isPending && items.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Building2Icon aria-hidden />
+            </EmptyMedia>
+            <EmptyTitle>{t("organizationTree")}</EmptyTitle>
+            <EmptyDescription>{t("createOrg")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <OrganizationSplitPane
+          items={items}
+          loading={tree.isPending}
+          heading={t("organizationTree")}
+          description={t("organizationTreeDescription")}
+        >
+          {(selected) => {
+            const rows = subtreeOf(items, selected?.id);
+            return (
+              <>
+                <div className="text-muted-foreground flex items-center justify-between text-sm">
+                  <span>{selected ? selected.name : t("rootOrganization")}</span>
+                  <span>{t("organizationCount", { count: rows.length })}</span>
+                </div>
+                <div className="overflow-hidden rounded-md border">
+                  <Table>
+                    <TableHeader className="bg-muted">
+                      <TableRow>
+                        <TableHead>{t("orgName")}</TableHead>
+                        <TableHead>{t("orgCode")}</TableHead>
+                        <TableHead className="w-0">{t("action")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.length ? (
+                        rows.map((org) => (
+                          <TableRow key={org.id}>
+                            <TableCell>{org.name}</TableCell>
+                            <TableCell className="text-muted-foreground">{org.slug}</TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => setDialog(org)}>
+                                  {t("edit")}
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setDialog(org)}>
+                                  {t("delete")}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={3}>
+                            <Empty>
+                              <EmptyHeader>
+                                <EmptyTitle>{t("organizationEmpty")}</EmptyTitle>
+                                <EmptyDescription>{t("organizationEmptyDescription")}</EmptyDescription>
+                              </EmptyHeader>
+                            </Empty>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            );
+          }}
+        </OrganizationSplitPane>
+      )}
+
       {dialog === "create" && (
         <FormDialog
           title={t("createOrg")}
@@ -93,6 +186,21 @@ export function OrganizationsPage() {
                 error={form.formState.errors.slug}
                 placeholder={t("exampleOrg")}
               />
+              <Field>
+                <FieldLabel>{t("parentOrganization")}</FieldLabel>
+                {items.length ? (
+                  <div className="bg-muted/30 rounded-md border p-2">
+                    <OrganizationTree
+                      items={items}
+                      selectedID={form.watch("parent_id")}
+                      variant="selectable"
+                      onSelect={(node) => form.setValue("parent_id", node.id, { shouldDirty: true })}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-sm">{t("rootOrganization")}</p>
+                )}
+              </Field>
               <Field data-invalid={!!form.formState.errors.admin_user_id}>
                 <FieldLabel htmlFor="organization-administrator">{t("initialAdmin")}</FieldLabel>
                 <Controller
@@ -118,11 +226,16 @@ export function OrganizationsPage() {
           )}
         </FormDialog>
       )}
+
       {typeof dialog === "object" && (
         <FormDialog
           title={t("editOrg")}
           schema={zUpdateOrganizationBody}
-          defaultValues={{ name: dialog.name, status: dialog.status, authz_epoch: dialog.authz_epoch }}
+          defaultValues={{
+            name: dialog.name,
+            authz_epoch: dialog.authz_epoch,
+            parent_id: dialog.parent_id ?? undefined,
+          }}
           onClose={() => setDialog(undefined)}
           onSubmit={async (body) => {
             await edit.mutateAsync({ id: dialog.id, body });
@@ -137,29 +250,16 @@ export function OrganizationsPage() {
                 error={form.formState.errors.name}
               />
               <Field>
-                <FieldLabel>{t("status")}</FieldLabel>
-                <Controller
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange} name={field.name}>
-                      <SelectTrigger
-                        id="organizations-status"
-                        aria-label={t("status")}
-                        onBlur={field.onBlur}
-                        ref={field.ref}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="active">{t("active")}</SelectItem>
-                          <SelectItem value="suspended">{t("disabled")}</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
+                <FieldLabel>{t("changeParent")}</FieldLabel>
+                <div className="bg-muted/30 rounded-md border p-2">
+                  <OrganizationTree
+                    items={items}
+                    selectedID={form.watch("parent_id")}
+                    variant="selectable"
+                    disabledIDs={descendantIDs(items, dialog.id)}
+                    onSelect={(node) => form.setValue("parent_id", node.id, { shouldDirty: true })}
+                  />
+                </div>
               </Field>
             </>
           )}

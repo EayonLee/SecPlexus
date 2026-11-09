@@ -18,7 +18,7 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "tz-member", "tz-member", "时区成员", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "tz-member", "tz-member", "时区用户", ""); err != nil {
 		t.Fatal(err)
 	}
 
