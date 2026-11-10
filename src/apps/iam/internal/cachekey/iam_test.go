@@ -1,4 +1,4 @@
-package key
+package cachekey
 
 import "testing"
 

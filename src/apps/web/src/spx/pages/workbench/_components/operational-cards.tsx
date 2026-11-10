@@ -9,13 +9,13 @@ import { ChartContainer } from "@/components/ui/chart";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 
-import { useCRMData } from "./crm.config";
+import { useWorkbenchData } from "./workbench.config";
 
 export function OperationalCards() {
   const t = useTranslations("Dashboard");
   const format = useFormatter();
 
-  const { actionItems, regionSalesData, salesPipelineChartConfig, salesPipelineChartData } = useCRMData();
+  const { actionItems, regionSalesData, salesPipelineChartConfig, salesPipelineChartData } = useWorkbenchData();
   const totalSales = regionSalesData.reduce((sum, region) => sum + region.sales, 0);
   return (
     <div className="grid grid-cols-1 gap-4 *:data-[slot=card]:shadow-xs sm:grid-cols-2 xl:grid-cols-3">

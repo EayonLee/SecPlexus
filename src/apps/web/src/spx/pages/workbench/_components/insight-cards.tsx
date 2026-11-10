@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
-import { useCRMData } from "./crm.config";
+import { useWorkbenchData } from "./workbench.config";
 
 export function InsightCards() {
   const t = useTranslations("Dashboard");
   const format = useFormatter();
 
   const { leadsBySourceChartConfig, leadsBySourceChartData, projectRevenueChartConfig, projectRevenueChartData } =
-    useCRMData();
+    useWorkbenchData();
   const totalLeads = leadsBySourceChartData.reduce((acc, curr) => acc + curr.leads, 0);
 
   return (

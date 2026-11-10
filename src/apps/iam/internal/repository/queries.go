@@ -31,9 +31,9 @@ type UserRow struct {
 // LoginUser 在 UserRow 之上补齐登录所需的凭据状态，密码哈希禁止写入响应和日志。
 type LoginUser struct {
 	UserRow
-	PasswordHash   string             // 仅供内部校验的密码哈希。
-	FailedAttempts int32              // 连续失败次数。
-	LockedUntil    pgtype.Timestamptz // 账户锁定截止时间。
+	PasswordHash   string     // 仅供内部校验的密码哈希。
+	FailedAttempts int32      // 连续失败次数。
+	LockedUntil    *time.Time // 账户锁定截止时间；空表示未锁定。
 }
 
 // GetLoginUser 读取账号和密码状态，不对外序列化凭据。
@@ -75,20 +75,21 @@ func (q *Queries) LockSession(ctx context.Context, id uuid.UUID) (Session, error
 
 // TouchSessionParams 是会话续期需要的当前版本和空闲时长。
 type TouchSessionParams struct {
-	ID          uuid.UUID       // 资源标识。
-	TokenHash   string          // 会话令牌摘要，不包含原始凭据。
-	AuthEpoch   int64           // 账号版本；变化后旧会话失效。
-	IdleTimeout pgtype.Interval // 允许空闲的时间间隔。
+	ID          uuid.UUID     // 资源标识。
+	TokenHash   string        // 会话令牌摘要，不包含原始凭据。
+	AuthEpoch   int64         // 账号版本；变化后旧会话失效。
+	IdleTimeout time.Duration // 允许空闲的时间间隔；由持久化层转换为数据库区间。
 }
 
 // TouchSession 使用取得锁后的数据库时间续期；已过期状态不能被重新激活。
 func (q *Queries) TouchSession(ctx context.Context, input TouchSessionParams) (Session, error) {
+	idle := pgtype.Interval{Microseconds: input.IdleTimeout.Microseconds(), Valid: true}
 	var session Session
 	response := q.db.WithContext(ctx).Table("iam.user_sessions").Model(&session).
 		Clauses(clause.Returning{}).
 		Where("id = ? AND token_hash = ? AND state = 'active' AND auth_epoch = ? AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()", input.ID, input.TokenHash, input.AuthEpoch).
 		Updates(map[string]any{
-			"idle_expires_at": gorm.Expr("LEAST(absolute_expires_at,GREATEST(idle_expires_at,clock_timestamp()+?::interval))", input.IdleTimeout),
+			"idle_expires_at": gorm.Expr("LEAST(absolute_expires_at,GREATEST(idle_expires_at,clock_timestamp()+?::interval))", idle),
 			"last_seen_at":    gorm.Expr("GREATEST(last_seen_at,clock_timestamp())"),
 		})
 	if response.Error != nil {
@@ -104,8 +105,8 @@ func (q *Queries) TouchSession(ctx context.Context, input TouchSessionParams) (S
 
 // RevokeUserSessionsParams 指定需要撤销的用户和原因。
 type RevokeUserSessionsParams struct {
-	UserID       uuid.UUID   // 会话所属用户。
-	RevokeReason pgtype.Text // 撤销原因，不包含凭据。
+	UserID       uuid.UUID // 会话所属用户。
+	RevokeReason string    // 撤销原因，不包含凭据；空串表示不记录。
 }
 
 // RevokeUserSessions 在当前事务内撤销该用户的全部有效会话。

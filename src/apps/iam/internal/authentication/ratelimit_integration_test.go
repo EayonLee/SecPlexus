@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	cachekey "github.com/EayonLee/SecPlexus/src/apps/iam/internal/cachekey"
 )
 
 func TestLimiterAtomicWindowAndFailClosed(t *testing.T) {

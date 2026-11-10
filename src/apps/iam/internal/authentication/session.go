@@ -136,7 +136,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		ID:          id,
 		TokenHash:   session.TokenHash,
 		AuthEpoch:   user.AuthEpoch,
-		IdleTimeout: interval(s.Config.Auth.SessionIdleTimeout),
+		IdleTimeout: s.Config.Auth.SessionIdleTimeout,
 	})
 	if err != nil {
 		return iamclient.Principal{}, sessionError(err)

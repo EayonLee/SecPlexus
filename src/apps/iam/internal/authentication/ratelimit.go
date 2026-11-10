@@ -12,7 +12,7 @@ import (
 	"github.com/ulule/limiter/v3"
 	redisstore "github.com/ulule/limiter/v3/drivers/store/redis"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	cachekey "github.com/EayonLee/SecPlexus/src/apps/iam/internal/cachekey"
 )
 
 var ErrUnavailable = errors.New("authentication dependency unavailable")

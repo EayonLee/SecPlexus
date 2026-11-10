@@ -127,8 +127,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 	}
 
 	if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: userID,
-		RevokeReason: pgtype.Text{String: "operator_recovery",
-			Valid: true}}); err != nil {
+		RevokeReason: "operator_recovery"}); err != nil {
 		return err
 	}
 

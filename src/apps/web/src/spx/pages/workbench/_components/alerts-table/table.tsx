@@ -37,7 +37,7 @@ import { dataTableFeatures } from "@/lib/data-table-features";
 import { useRecentLeadsColumns } from "./columns";
 import type { RecentLeadRow } from "./schema";
 
-export function RecentLeadsTable({ data }: { data: RecentLeadRow[] }) {
+export function AlertsTable({ data }: { data: RecentLeadRow[] }) {
   const t = useTranslations("Dashboard");
 
   const recentLeadsColumns = useRecentLeadsColumns();
