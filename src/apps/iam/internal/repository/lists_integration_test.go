@@ -33,8 +33,8 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if all["total"].(int64) != 3 {
-		t.Fatalf("empty query total = %v, want 3", all["total"])
+	if all.Total != 3 {
+		t.Fatalf("empty query total = %v, want 3", all.Total)
 	}
 
 	// % 在 ILIKE 里是通配符；作为字面量搜索时只应命中名字里真的带 % 的账号。
@@ -43,8 +43,8 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if percent["total"].(int64) != 0 {
-		t.Fatalf("query %%=%v matched %v accounts, want 0", "%", percent["total"])
+	if percent.Total != 0 {
+		t.Fatalf("query %%=%v matched %v accounts, want 0", "%", percent.Total)
 	}
 
 	// 反斜杠也是字面量，不会破坏 ESCAPE 语法。
@@ -57,7 +57,7 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if named["total"].(int64) != 1 {
-		t.Fatalf("substring query total = %v, want 1", named["total"])
+	if named.Total != 1 {
+		t.Fatalf("substring query total = %v, want 1", named.Total)
 	}
 }

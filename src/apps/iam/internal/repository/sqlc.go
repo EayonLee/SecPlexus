@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
@@ -41,4 +43,15 @@ func textArray(values []string) (json.RawMessage, error) {
 	}
 
 	return json.Marshal(values)
+}
+
+// uuidArray 把标识集合编码为 jsonb 参数，供 SQL 侧的 jsonb_array_elements_text 展开。
+// 与 textArray 同理，避免为数组参数引入第二套驱动。
+func uuidArray(values []uuid.UUID) (json.RawMessage, error) {
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		items = append(items, value.String())
+	}
+
+	return json.Marshal(items)
 }

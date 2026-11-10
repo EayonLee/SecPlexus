@@ -399,6 +399,38 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 		t.Fatalf("unexpected user list row %v", row)
 	}
 
+	// 这两个字段集合是前端消费的契约：缺一项或多一项都要在测试里暴露出来。
+	for _, key := range []string{"items", "total", "limit", "offset"} {
+		if _, exists := list[key]; !exists {
+			t.Fatalf("user list is missing %s: %v", key, list)
+		}
+	}
+
+	for _, key := range []string{"id", "username", "display_name", "email", "status", "configured", "auth_epoch", "roles"} {
+		if _, exists := row[key]; !exists {
+			t.Fatalf("user row is missing %s: %v", key, row)
+		}
+	}
+
+	rolePage := admin.request("GET", "/api/v1/iam/roles?limit=50", nil, 200)
+	for _, key := range []string{"items", "total", "limit", "offset"} {
+		if _, exists := rolePage[key]; !exists {
+			t.Fatalf("role list is missing %s: %v", key, rolePage)
+		}
+	}
+
+	roleItems := rolePage["items"].([]any)
+	if len(roleItems) == 0 {
+		t.Fatal("role list is empty; the contract assertions below would not run")
+	}
+
+	firstRole := roleItems[0].(map[string]any)
+	for _, key := range []string{"id", "name", "description", "builtin", "permissions", "user_count"} {
+		if _, exists := firstRole[key]; !exists {
+			t.Fatalf("role row is missing %s: %v", key, firstRole)
+		}
+	}
+
 	// 删除普通用户不影响调用者会话。
 	admin.request("DELETE", "/api/v1/iam/users/"+memberID, nil, 204)
 	admin.request("GET", "/api/v1/iam/users/"+memberID, nil, 404)
@@ -511,6 +543,12 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 
 		if _, err := time.Parse(time.RFC3339Nano, row["occurred_at"].(string)); err != nil {
 			t.Fatalf("audit occurred_at is not RFC3339: %v", err)
+		}
+
+		for _, key := range []string{"id", "occurred_at", "actor_type", "actor_name", "action", "target_type", "target_id", "outcome", "reason_code", "request_id", "metadata"} {
+			if _, exists := row[key]; !exists {
+				t.Fatalf("audit event is missing %s: %v", key, row)
+			}
 		}
 	}
 

@@ -3,14 +3,16 @@ package service
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // ListUsers 校验用户读取权限后读取列表；支持用户名、显示名与邮箱模糊搜索。
-func (s *Service) ListUsers(ctx context.Context, limit, offset int, query string) (map[string]any, error) {
+func (s *Service) ListUsers(ctx context.Context, limit, offset int, query string) (repository.UserPage, error) {
 	if _, err := s.Authorize(ctx, iamclient.PermissionIAMUsersRead); err != nil {
-		return nil, err
+		return repository.UserPage{}, err
 	}
 
 	return repository.ListUsers(ctx, s.Store.DB, limit, offset, query)
@@ -32,10 +34,15 @@ func (s *Service) ListAuditEvents(ctx context.Context, filter AuditFilter) (repo
 }
 
 // User 查询前校验用户读取权限。
-func (s *Service) User(ctx context.Context, id string) ([]byte, error) {
+func (s *Service) User(ctx context.Context, id string) (repository.UserSummary, error) {
 	if _, err := s.Authorize(ctx, iamclient.PermissionIAMUsersRead); err != nil {
-		return nil, err
+		return repository.UserSummary{}, err
 	}
 
-	return repository.UserJSON(ctx, s.Store.DB, id)
+	userID, err := uuid.Parse(id)
+	if err != nil {
+		return repository.UserSummary{}, repository.ErrInvalid
+	}
+
+	return repository.UserByID(ctx, s.Store.DB, userID)
 }
