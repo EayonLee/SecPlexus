@@ -1,5 +1,5 @@
-// Package cachekey 定义平台实际使用的 Redis key 模板。
-package cachekey
+// Package key 定义平台实际使用的 Redis key 模板。
+package key
 
 import (
 	"fmt"

@@ -26,7 +26,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
-	cachekey "github.com/EayonLee/SecPlexus/src/apps/iam/internal/cachekey"
+	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
