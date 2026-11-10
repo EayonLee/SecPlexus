@@ -182,7 +182,7 @@ func (s *Service) ReplaceUserRoles(ctx context.Context, userID string, input Use
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			target, err := repository.LockedAccount(ctx, tx, id)
 			if err != nil {
 				return err
 			}

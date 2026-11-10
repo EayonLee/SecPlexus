@@ -96,8 +96,8 @@ func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Prin
 		return err
 	}
 
-	var now time.Time
-	if err = repository.DatabaseTime(ctx, tx, &now); err != nil {
+	now, err := repository.DatabaseTime(ctx, tx)
+	if err != nil {
 		return err
 	}
 
@@ -146,7 +146,7 @@ func (s *Service) Manage(ctx context.Context, action, requestID, targetType stri
 			return repository.ErrUnauthenticated
 		}
 
-		if err = repository.SessionUser(ctx, tx, sessionID, &actorID); err != nil {
+		if actorID, err = repository.SessionUser(ctx, tx, sessionID); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
 				return repository.ErrUnauthenticated
 			}

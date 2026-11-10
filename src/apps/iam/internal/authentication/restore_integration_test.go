@@ -32,7 +32,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 	}
 
 	sessions := NewSessions(store, cfg)
-	user, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	user, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

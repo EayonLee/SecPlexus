@@ -108,8 +108,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 		return err
 	}
 
-	q := NewQueries(tx)
-	user, err := q.LockUser(ctx, userID)
+	user, err := LockedAccount(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 		return err
 	}
 
-	if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: userID,
+	if err = RevokeUserSessions(ctx, tx, RevokeUserSessionsParams{UserID: userID,
 		RevokeReason: "operator_recovery"}); err != nil {
 		return err
 	}

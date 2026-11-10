@@ -45,7 +45,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 	}
 
 	first, second := NewSessions(store, cfg), NewSessions(store, cfg)
-	user, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	user, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nextUser, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "otheruser")
+	nextUser, err := repository.GetLoginUser(ctx, store.DB, "otheruser")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	again, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	again, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestSessionIdleAndAbsoluteDeadlines(t *testing.T) {
 	sessions := NewSessions(store, cfg)
 	for _, deadline := range []string{"idle", "absolute"} {
 		t.Run(deadline, func(t *testing.T) {
-			user, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+			user, err := repository.GetLoginUser(ctx, store.DB, "admin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -226,7 +226,7 @@ func TestSessionIdleAndAbsoluteDeadlines(t *testing.T) {
 		})
 	}
 	// 直接调整有效期，验证续期不能突破最初的绝对期限。
-	user, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	user, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestConcurrentReauthenticationConsumesSessionOnce(t *testing.T) {
 	}
 
 	first, second := NewSessions(store, cfg), NewSessions(store, cfg)
-	user, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	user, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
