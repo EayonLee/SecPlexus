@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -25,22 +24,21 @@ func (s *Store) Maintain(ctx context.Context, auditDays, sessionDays int) error 
 
 	defer tx.Rollback()
 
-	if err = tx.WithContext(ctx).Exec(`DELETE FROM iam.scs_sessions WHERE token IN (SELECT token FROM iam.scs_sessions WHERE expiry<clock_timestamp() LIMIT 1000)`).Error; err != nil {
+	q := queries(tx)
+	if err = q.PurgeExpiredStoredSessions(ctx); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`DELETE FROM iam.user_sessions WHERE id IN (SELECT id FROM iam.user_sessions WHERE absolute_expires_at<clock_timestamp()-$1::interval LIMIT 1000)`, pgtype.Interval{Microseconds: (time.Duration(sessionDays) * 24 * time.Hour).Microseconds(),
-		Valid: true}).Error; err != nil {
+	if err = q.PurgeExpiredSessions(ctx, (time.Duration(sessionDays) * 24 * time.Hour).Microseconds()); err != nil {
 		return err
 	}
 
 	// 保留期清理是唯一允许删除审计的路径：在本次事务内显式开闸。
-	if err = tx.WithContext(ctx).Exec(`SELECT set_config('iam.audit_purge','on',true)`).Error; err != nil {
+	if err = q.AllowAuditPurge(ctx); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`DELETE FROM iam.audit_events WHERE id IN (SELECT id FROM iam.audit_events WHERE occurred_at<clock_timestamp()-$1::interval LIMIT 1000)`, pgtype.Interval{Microseconds: (time.Duration(auditDays) * 24 * time.Hour).Microseconds(),
-		Valid: true}).Error; err != nil {
+	if err = q.PurgeExpiredAuditEvents(ctx, (time.Duration(auditDays) * 24 * time.Hour).Microseconds()); err != nil {
 		return err
 	}
 
@@ -57,23 +55,24 @@ func (s *Store) RevokeAfterRestore(ctx context.Context) error {
 
 	defer tx.Rollback()
 
-	if err = tx.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock($1)`, ManagementLock).Error; err != nil {
+	if err = LockManagement(ctx, tx, ManagementLock); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`SELECT id FROM iam.users ORDER BY id FOR UPDATE`).Error; err != nil {
+	q := queries(tx)
+	if err = q.LockAllUsers(ctx); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`UPDATE iam.users SET auth_epoch=auth_epoch+1,updated_at=now()`).Error; err != nil {
+	if err = q.BumpAllUserAuthEpochs(ctx); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason='database_restore' WHERE state='active'`).Error; err != nil {
+	if err = q.RevokeAllActiveSessions(ctx, "database_restore"); err != nil {
 		return err
 	}
 
-	if err = tx.WithContext(ctx).Exec(`DELETE FROM iam.scs_sessions`).Error; err != nil {
+	if err = q.ClearStoredSessions(ctx); err != nil {
 		return err
 	}
 
@@ -104,7 +103,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 
 	defer tx.Rollback()
 
-	if err = tx.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock($1)`, ManagementLock).Error; err != nil {
+	if err = LockManagement(ctx, tx, ManagementLock); err != nil {
 		return err
 	}
 
