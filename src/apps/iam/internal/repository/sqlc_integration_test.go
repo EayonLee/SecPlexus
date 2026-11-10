@@ -4,26 +4,26 @@ package repository_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 )
 
-// TestGeneratedQueriesShareTheCallerTransaction 守住迁移期最关键的不变量：
-// sqlc 生成查询绑定在 GORM 的 ConnPool 上，因此与调用方是同一个事务。
-// 若两者各自开连接，回滚之后就仍能读到已写入的行。
+// TestGeneratedQueriesShareTheCallerTransaction 守住最关键的不变量：
+// 生成的查询绑定在调用方的事务句柄上，因此两者是同一条连接、同一个事务。
+// 若各自开连接，回滚之后就仍能读到已写入的行。
 func TestGeneratedQueriesShareTheCallerTransaction(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	roleID := uuid.New()
 
 	rollback := errors.New("roll back on purpose")
-	err := store.DB.Transaction(func(tx *gorm.DB) error {
+	err := store.Transaction(ctx, func(tx *sql.Tx) error {
 		if createErr := repository.CreateRole(ctx, tx, roleID, "transaction-probe", "probe", ""); createErr != nil {
 			return createErr
 		}
@@ -35,7 +35,7 @@ func TestGeneratedQueriesShareTheCallerTransaction(t *testing.T) {
 	}
 
 	var count int64
-	if scanErr := store.DB.WithContext(ctx).Raw("SELECT count(*) FROM iam.roles WHERE id = $1", roleID).Row().Scan(&count); scanErr != nil {
+	if scanErr := store.DB.QueryRowContext(ctx, "SELECT count(*) FROM iam.roles WHERE id = $1", roleID).Scan(&count); scanErr != nil {
 		t.Fatal(scanErr)
 	}
 	if count != 0 {

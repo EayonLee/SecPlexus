@@ -1,7 +1,9 @@
 version: "2"
 # IAM 的 PostgreSQL 数据访问由 sqlc 生成；schema 直接取 goose 迁移，不维护第二份 DDL。
-# 迁移期使用 database/sql 风味：生成的查询可以绑定 GORM 事务底层的 ConnPool，
-# 从而与现有 GORM 事务共用同一个连接（不会出现两套事务）。移除 GORM 后再评估切到 pgx/v5 原生风味。
+# 使用 database/sql 风味：生成的 DBTX 接口同时被 *sql.DB（根池）与 *sql.Tx（事务）满足，
+# 因此查询与调用方事务天然共用一条连接，不需要第二套事务管理。
+# 未切到 pgx/v5 风味：那会让生成的参数类型变成 pgx 专属，把驱动耦合进仓库签名；
+# 当前唯一收益是数组绑定语法，而数组已用 jsonb 展开，收益不足。
 sql:
   - engine: postgresql
     schema: src/apps/iam/migrations

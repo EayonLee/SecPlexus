@@ -7,7 +7,6 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -116,7 +115,7 @@ func (s *Authenticator) authenticate(ctx context.Context, credentials Credential
 		return iamclient.Principal{}, ErrRateLimited
 	}
 	user, err := repository.GetLoginUser(ctx, s.sessions.Store.DB, normalized)
-	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		_ = (account.PasswordHasher{}).CompareHashAndPassword(s.dummyHash, credentials.Password)
 		logAuthFailure(ctx, slog.LevelWarn, "auth.login_failed", "invalid_credentials", nil)
 		if err := s.failure(ctx, nil, metadata); err != nil {
@@ -166,7 +165,7 @@ func logAuthFailure(ctx context.Context, level slog.Level, event, reason string,
 
 // failure 记录一次登录失败：累计失败次数并写登录审计。
 func (s *Authenticator) failure(ctx context.Context, user *repository.LoginUser, metadata RequestMetadata) error {
-	return s.sessions.Store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return s.sessions.Store.Transaction(ctx, func(tx *sql.Tx) error {
 		var err error
 		audit := repository.Audit{
 			ActorType:  "system",

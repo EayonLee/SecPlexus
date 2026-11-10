@@ -56,13 +56,13 @@
 
 | 模块 | 技术栈 | 存储 | 对外接口 | 依赖谁 |
 |---|---|---|---|---|
-| `iam` | Go 1.27 + Gin 1.12；**sqlc 1.31 生成类型化查询**、pgx v5 做驱动（GORM 仍在移除中，见 [数据访问层计划](../../plans/sqlc-data-layer/plan.md)）；SCS 管 Session；Argon2id 存密码；Cobra 管命令；Goose 管迁移 | PostgreSQL（自己的表 + 会话）<br>Redis（限流） | `/api/v1/iam/*`：用户接口走 Cookie + CSRF；服务接口走服务凭证 | 无（它是最底层） |
+| `iam` | Go 1.27 + Gin 1.12；**sqlc 1.31 生成类型化查询**、pgx v5 做驱动（ORM 已移除，见 [数据访问层计划](../../plans/sqlc-data-layer/plan.md)）；SCS 管 Session；Argon2id 存密码；Cobra 管命令；Goose 管迁移 | PostgreSQL（自己的表 + 会话）<br>Redis（限流） | `/api/v1/iam/*`：用户接口走 Cookie + CSRF；服务接口走服务凭证 | 无（它是最底层） |
 | `console` | Go + Gin；**没有数据库** | 无自有存储 | `/api/v1/console/*`：全部请求先向 IAM 换授权结论 | `iam`（经 `iamclient`） |
 | `web` | Next 16 + React 19；next-intl 双语；TanStack Query 取数；Zod + RHF 管表单；Axios 请求；Tailwind 4 + shadcn | 无（浏览器端状态） | 页面 + 同源窄代理 `/api/v1/{module}/*` | `iam`、`console`（服务端转发） |
 
 **为什么 `console` 没有数据库**：它当前只做"验证身份与授权后的 SSE"。等案件和工作台真正实现时，再按模块自己的表加。AGENTS 里写死了这条：模块拥有自己的配置、启动和表——不预先建空库占位。
 
-**为什么 `iam` 的数据访问走 sqlc 而不是 ORM**：SQL 是唯一事实源，`sqlc generate` 产出类型化查询与行结构，列名、类型和参数在编译期受检查；schema 直接取 goose 迁移，不维护第二份 DDL；生成物入库并由 CI 的 `sqlc diff` 拦截漂移。这里的取舍与依据见 [数据访问规范](../../development/data-access.md) 与 [数据访问层改造计划](../../plans/sqlc-data-layer/plan.md)。GORM 仍在迁移期（会话、用户、列表、审计、维护尚未迁移），最终会被移除；底层始终是 pgx 连接池，迁移仍由 Goose 显式执行，不做自动建表。
+**为什么 `iam` 的数据访问走 sqlc 而不是 ORM**：SQL 是唯一事实源，`sqlc generate` 产出类型化查询与行结构，列名、类型和参数在编译期受检查；schema 直接取 goose 迁移，不维护第二份 DDL；生成物入库并由 CI 的 `sqlc diff` 拦截漂移。这里的取舍与依据见 [数据访问规范](../../development/data-access.md) 与 [数据访问层改造计划](../../plans/sqlc-data-layer/plan.md)。ORM 已经移除：仓库层只由 sqlc 生成查询、显式事务与 `database/sql` 组成，底层始终是同一个 pgx 连接池；迁移仍由 Goose 显式执行，不做自动建表。
 
 #### 规划中（ingestor 与 Python 五件）
 

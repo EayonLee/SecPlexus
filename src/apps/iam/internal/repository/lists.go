@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
@@ -64,7 +63,7 @@ func likePattern(value string) string {
 }
 
 // ListUsers 按用户名、显示名或邮箱模糊搜索用户，并附带角色投影。
-func ListUsers(ctx context.Context, db *gorm.DB, limit, offset int, query string) (UserPage, error) {
+func ListUsers(ctx context.Context, db DB, limit, offset int, query string) (UserPage, error) {
 	pattern := ""
 	if query != "" {
 		pattern = likePattern(query)
@@ -113,7 +112,7 @@ func ListUsers(ctx context.Context, db *gorm.DB, limit, offset int, query string
 }
 
 // UserByID 读取单个用户的公开投影；不存在时返回 sql.ErrNoRows。
-func UserByID(ctx context.Context, db *gorm.DB, id uuid.UUID) (UserSummary, error) {
+func UserByID(ctx context.Context, db DB, id uuid.UUID) (UserSummary, error) {
 	row, err := queries(db).GetUserSummary(ctx, id)
 	if err != nil {
 		return UserSummary{}, err
@@ -143,7 +142,7 @@ func UserByID(ctx context.Context, db *gorm.DB, id uuid.UUID) (UserSummary, erro
 }
 
 // rolesByUserIDs 批量读取页内用户的角色绑定，避免逐行查询。
-func rolesByUserIDs(ctx context.Context, db *gorm.DB, ids []uuid.UUID) (map[uuid.UUID][]RoleRef, error) {
+func rolesByUserIDs(ctx context.Context, db DB, ids []uuid.UUID) (map[uuid.UUID][]RoleRef, error) {
 	grouped := make(map[uuid.UUID][]RoleRef, len(ids))
 	if len(ids) == 0 {
 		return grouped, nil
@@ -167,7 +166,7 @@ func rolesByUserIDs(ctx context.Context, db *gorm.DB, ids []uuid.UUID) (map[uuid
 }
 
 // ListRoles 返回全局角色，内置角色也在列表中且排序稳定。
-func ListRoles(ctx context.Context, db *gorm.DB, limit, offset int) (RolePage, error) {
+func ListRoles(ctx context.Context, db DB, limit, offset int) (RolePage, error) {
 	rows, err := queries(db).ListRoles(ctx, sqlcgen.ListRolesParams{PageLimit: int32(limit), PageOffset: int32(offset)})
 	if err != nil {
 		return RolePage{}, err
@@ -200,7 +199,7 @@ func ListRoles(ctx context.Context, db *gorm.DB, limit, offset int) (RolePage, e
 }
 
 // RoleByID 读取单个角色的公开投影；不存在时返回 sql.ErrNoRows。
-func RoleByID(ctx context.Context, db *gorm.DB, id uuid.UUID) (Role, error) {
+func RoleByID(ctx context.Context, db DB, id uuid.UUID) (Role, error) {
 	row, err := queries(db).GetRoleSummary(ctx, id)
 	if err != nil {
 		return Role{}, err
@@ -225,7 +224,7 @@ func RoleByID(ctx context.Context, db *gorm.DB, id uuid.UUID) (Role, error) {
 }
 
 // permissionsByRoleIDs 批量读取页内角色的权限键。
-func permissionsByRoleIDs(ctx context.Context, db *gorm.DB, ids []uuid.UUID) (map[uuid.UUID][]string, error) {
+func permissionsByRoleIDs(ctx context.Context, db DB, ids []uuid.UUID) (map[uuid.UUID][]string, error) {
 	grouped := make(map[uuid.UUID][]string, len(ids))
 	if len(ids) == 0 {
 		return grouped, nil
@@ -294,7 +293,7 @@ func decodeAuditCursor(value string) (time.Time, string, error) {
 
 // ListAuditEvents 按筛选条件读取审计，用 (occurred_at,id) 键集分页。
 // 审计行数与时间同向增长，OFFSET 深翻会随历史线性变慢，因此只提供向前游标。
-func ListAuditEvents(ctx context.Context, db *gorm.DB, filter AuditFilter, limit int, cursor string) (AuditPage, error) {
+func ListAuditEvents(ctx context.Context, db DB, filter AuditFilter, limit int, cursor string) (AuditPage, error) {
 	page := AuditPage{Items: []AuditEvent{}}
 	params := sqlcgen.ListAuditEventsParams{
 		Outcome:   filter.Outcome,

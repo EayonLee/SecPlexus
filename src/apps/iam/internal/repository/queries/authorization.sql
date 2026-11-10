@@ -3,6 +3,11 @@
 -- name: LockManagement :exec
 SELECT pg_advisory_xact_lock($1);
 
+-- name: ListPermissions :many
+SELECT permission_key, description, risk_level, delegable, requires_recent_auth, status
+FROM iam.permissions
+ORDER BY permission_key;
+
 -- name: ReadPermission :one
 SELECT permission_key, description, risk_level, delegable, requires_recent_auth, status
 FROM iam.permissions

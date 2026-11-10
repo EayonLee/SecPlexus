@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
@@ -45,7 +44,7 @@ func (s *Service) Authorize(ctx context.Context, action string) (decision iamcli
 			)
 		}
 	}()
-	err = s.Store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
 		p, err := s.resolve(ctx, tx)
 		if err != nil {
 			return err
@@ -66,7 +65,7 @@ func (s *Service) Authorize(ctx context.Context, action string) (decision iamcli
 }
 
 // resolve 在当前事务内解析并复核逻辑会话。
-func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (iamclient.Principal, error) {
+func (s *Service) resolve(ctx context.Context, tx *sql.Tx) (iamclient.Principal, error) {
 	id, err := uuid.Parse(s.Sessions.Manager.GetString(ctx, authentication.LogicalSessionKey))
 	if err != nil {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
@@ -76,9 +75,9 @@ func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (iamclient.Principal
 }
 
 // authorizeTx 按最新账号状态与权限键判断动作。
-func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Principal, action string) error {
+func (s *Service) authorizeTx(ctx context.Context, tx *sql.Tx, p iamclient.Principal, action string) error {
 	permission, err := repository.ReadPermission(ctx, tx, action)
-	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return authorization.ErrDenied
 	}
 
@@ -105,7 +104,7 @@ func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Prin
 }
 
 // Manage 串行执行低频管理变更，在同一事务内重新校验操作者并写入审计。
-func (s *Service) Manage(ctx context.Context, action, requestID, targetType string, targetID *uuid.UUID, change func(*gorm.DB, iamclient.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
+func (s *Service) Manage(ctx context.Context, action, requestID, targetType string, targetID *uuid.UUID, change func(*sql.Tx, iamclient.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
 	// 诊断只记录稳定动作和资源标识，不记录请求参数或审计扩展值。
 	ctx = logging.With(ctx, "operation", action, "target_type", targetType, "target_id", targetID)
 	started := time.Now()
@@ -134,7 +133,7 @@ func (s *Service) Manage(ctx context.Context, action, requestID, targetType stri
 		)
 	}()
 
-	err = s.Store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
 		phase = "lock_management"
 		if err = repository.LockManagement(ctx, tx, repository.ManagementLock); err != nil {
 			return err
@@ -147,7 +146,7 @@ func (s *Service) Manage(ctx context.Context, action, requestID, targetType stri
 		}
 
 		if actorID, err = repository.SessionUser(ctx, tx, sessionID); err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, sql.ErrNoRows) {
 				return repository.ErrUnauthenticated
 			}
 

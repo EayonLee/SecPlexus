@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
@@ -35,7 +34,7 @@ func (s *Service) CreateRole(ctx context.Context, input RoleCreate, requestID st
 		requestID,
 		"role",
 		&id,
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			// 新角色没有任何既有授权，这里只需确认调用方有权授予这些权限。
 			if err := s.delegation(ctx, tx, p, nil, input.Permissions); err != nil {
 				return err
@@ -54,7 +53,7 @@ func (s *Service) CreateRole(ctx context.Context, input RoleCreate, requestID st
 
 // delegation 校验操作者现有权限能否覆盖变更前后的授权。
 // 只由「用户 → 角色 → 权限」计算，没有组织、超管标记或作用域旁路。
-func (s *Service) delegation(ctx context.Context, tx *gorm.DB, p iamclient.Principal, old, next []string) error {
+func (s *Service) delegation(ctx context.Context, tx *sql.Tx, p iamclient.Principal, old, next []string) error {
 	userID, err := uuid.Parse(p.UserID)
 	if err != nil {
 		return repository.ErrUnauthenticated
@@ -85,7 +84,7 @@ func (s *Service) UpdateRole(ctx context.Context, roleID string, input RoleUpdat
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, roleID)
 			if err != nil {
 				return err
@@ -115,7 +114,7 @@ func (s *Service) ReplaceGrants(ctx context.Context, roleID string, input RoleGr
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, roleID)
 			if err != nil {
 				return err
@@ -145,7 +144,7 @@ func (s *Service) DeleteRole(ctx context.Context, roleID, requestID string) erro
 		requestID,
 		"role",
 		uuidPointer(roleID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			role, err := repository.RoleGrants(ctx, tx, roleID)
 			if err != nil {
 				return err
@@ -176,7 +175,7 @@ func (s *Service) ReplaceUserRoles(ctx context.Context, userID string, input Use
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid
@@ -232,7 +231,7 @@ func (s *Service) ReplaceUserRoles(ctx context.Context, userID string, input Use
 }
 
 // grantsFor 读取一组角色授予的权限；任何角色不存在都视为无效输入。
-func grantsFor(ctx context.Context, tx *gorm.DB, roleIDs []string) ([]string, error) {
+func grantsFor(ctx context.Context, tx *sql.Tx, roleIDs []string) ([]string, error) {
 	ids := slices.Clone(roleIDs)
 	// 统一加锁顺序，避免两个并发变更以相反顺序锁同一组角色。
 	slices.Sort(ids)
@@ -243,7 +242,7 @@ func grantsFor(ctx context.Context, tx *gorm.DB, roleIDs []string) ([]string, er
 		}
 
 		role, err := repository.RoleGrants(ctx, tx, raw)
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, repository.ErrInvalid
 		}
 
@@ -269,7 +268,7 @@ func uuidPointer(value string) *uuid.UUID {
 
 // requireOtherSuperAdmin 保证变更后仍有其它启用中的账号持有内置角色。
 // 只在目标账号确实持有内置角色时校验；否则任何变更都不会减少超级管理员数量。
-func (s *Service) requireOtherSuperAdmin(ctx context.Context, tx *gorm.DB, userID uuid.UUID) error {
+func (s *Service) requireOtherSuperAdmin(ctx context.Context, tx *sql.Tx, userID uuid.UUID) error {
 	holds, err := userHoldsBuiltin(ctx, tx, userID)
 	if err != nil || !holds {
 		return err
@@ -288,7 +287,7 @@ func (s *Service) requireOtherSuperAdmin(ctx context.Context, tx *gorm.DB, userI
 }
 
 // userHoldsBuiltin 判断账号是否直接持有内置超级管理员角色。
-func userHoldsBuiltin(ctx context.Context, tx *gorm.DB, userID uuid.UUID) (bool, error) {
+func userHoldsBuiltin(ctx context.Context, tx *sql.Tx, userID uuid.UUID) (bool, error) {
 	builtin, err := repository.BuiltinRoleID(ctx, tx)
 	if err != nil {
 		return false, err

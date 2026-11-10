@@ -257,8 +257,8 @@ Web 只做转发，不解析账号，不合并权限。Cookie 原样传。
 | 用途 | 选择 | 为什么 |
 |---|---|---|
 | HTTP | Gin | 原生路由、中间件、错误链、SSE |
-| 数据访问 | sqlc（生成类型化查询）+ pgx v5 | SQL 是唯一事实源，列名/类型/参数在编译期受检查；schema 取 goose 迁移，不维护第二份 DDL。GORM 仍在迁移期，见 [数据访问层计划](../../../docs/plans/sqlc-data-layer/plan.md) |
-| 驱动 | pgx v5 | GORM 的 postgres driver 走它，SCS 和原生 SQL 共用同一个池 |
+| 数据访问 | sqlc（生成类型化查询）+ pgx v5 | SQL 是唯一事实源，列名/类型/参数在编译期受检查；schema 取 goose 迁移，不维护第二份 DDL。见 [数据访问规范](../../../docs/development/data-access.md) |
+| 驱动 | pgx v5 | 连接池只有一份：`database/sql` 适配、SCS 会话存储和迁移检查共用它 |
 | 会话 | SCS | Cookie 编码、续期、store 接口现成 |
 | 密码 | Argon2id | 内存硬，抗 GPU 爆破 |
 | CSRF | gorilla/csrf | 标准实现 |
@@ -579,7 +579,7 @@ src/apps/iam/
       management/          用户、角色、审计管理
     middleware/            Session 提交屏障、CSRF、服务凭证、契约校验
     service/               用例、最终授权、事务、审计顺序
-    repository/            GORM 查询、锁、SQL、初始化、维护
+    repository/            sqlc 查询、锁、初始化、维护
     authentication/        凭证用例、SCS、可撤销逻辑会话、限流
     authorization/         权限求值和委派规则（不依赖 HTTP 和存储）
     account/               账号、密码、邮箱、显示名、时区规则

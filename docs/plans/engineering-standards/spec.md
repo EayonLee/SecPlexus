@@ -25,7 +25,7 @@
 ## 非目标
 
 - 不改业务契约、接口路径、结果码语义与前端行为。
-- 不引入新框架、不替换 Gin/GORM/Goose。（其中 GORM 一条已被 [sqlc-data-layer](../sqlc-data-layer/spec.md) 取代：数据访问改为 sqlc，GORM 正在移除；Gin 与 Goose 不变。）
+- 不引入新框架、不替换 Gin/GORM/Goose。（其中 GORM 一条已被 [sqlc-data-layer](../sqlc-data-layer/spec.md) 取代：数据访问改为 sqlc，GORM 已移除；Gin 与 Goose 不变。）
 - 不做与本规范无关的重构。
 
 ## 验收

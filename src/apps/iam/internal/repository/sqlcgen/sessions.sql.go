@@ -253,6 +253,31 @@ func (q *Queries) ResetLoginFailures(ctx context.Context, userID uuid.UUID) erro
 	return err
 }
 
+const revokeOwnSession = `-- name: RevokeOwnSession :execrows
+UPDATE iam.user_sessions
+SET state = 'revoked',
+    revoked_at = clock_timestamp(),
+    revoke_reason = $1::text
+WHERE id = $2::uuid
+  AND user_id = $3::uuid
+  AND state = 'active'
+`
+
+type RevokeOwnSessionParams struct {
+	RevokeReason string
+	ID           uuid.UUID
+	UserID       uuid.UUID
+}
+
+// RevokeOwnSession 只撤销属于该用户且仍然有效的会话；没有命中说明会话已失效。
+func (q *Queries) RevokeOwnSession(ctx context.Context, arg RevokeOwnSessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeOwnSession, arg.RevokeReason, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeRotatedSession = `-- name: RevokeRotatedSession :exec
 UPDATE iam.user_sessions
 SET state = 'revoked',

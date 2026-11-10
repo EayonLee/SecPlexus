@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
 	"github.com/jackc/pgx/v5/pgconn"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -96,7 +95,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = result.CodeSelfTargetForbidden
 	case errors.Is(err, repository.ErrConflict):
 		code = result.CodeConflict
-	case errors.Is(err, repository.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, repository.ErrNotFound), errors.Is(err, sql.ErrNoRows):
 		code = result.CodeNotFound
 	case errors.Is(err, authentication.ErrRateLimited):
 		code = result.CodeRateLimited

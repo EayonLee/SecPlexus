@@ -27,7 +27,7 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 	}
 
 	var before int64
-	if err := store.DB.Raw(`SELECT auth_epoch FROM iam.users WHERE id = ?`, userID).Scan(&before).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT auth_epoch FROM iam.users WHERE id = $1`, userID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,7 +40,7 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 	}
 
 	var after int64
-	if err := store.DB.Raw(`SELECT auth_epoch FROM iam.users WHERE id = ?`, userID).Scan(&after).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT auth_epoch FROM iam.users WHERE id = $1`, userID).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +68,7 @@ func TestClearingTimeZoneStoresNull(t *testing.T) {
 	}
 
 	var isNull bool
-	if err := store.DB.Raw(`SELECT timezone IS NULL FROM iam.users WHERE id = ?`, userID).Scan(&isNull).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT timezone IS NULL FROM iam.users WHERE id = $1`, userID).Scan(&isNull); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,7 +88,7 @@ func TestUserTimeZoneColumnIsNullable(t *testing.T) {
 	}
 
 	var nullable string
-	if err := store.DB.Raw(`SELECT is_nullable FROM information_schema.columns WHERE table_schema='iam' AND table_name='users' AND column_name='timezone'`).Scan(&nullable).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT is_nullable FROM information_schema.columns WHERE table_schema='iam' AND table_name='users' AND column_name='timezone'`).Scan(&nullable); err != nil {
 		t.Fatal(err)
 	}
 

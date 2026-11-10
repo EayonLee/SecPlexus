@@ -20,18 +20,19 @@
 4. 分页二选一并写注释：有界管理列表用 offset + 窗口计数；增长型数据（审计、告警）用 keyset 游标。
 5. 关联聚合优先「一次批量查询 + Go 分组」，禁止 N+1，也禁止在 SQL 里产出 API JSON。
 6. 生成代码入库且必须与 `.sql` 同步，CI 用 `sqlc diff` 拦截漂移。
-7. `service` 只依赖 `Store` 接口，不依赖具体驱动；换库时新增实现、不改调用点。
+7. `service` 只依赖 `*repository.Store` 与 `repository.DB`，不接触驱动类型（pgx/GORM 都不出现在 service 签名里）；换库时替换 `Store` 的实现。
 8. 表结构变更走前进迁移，每表每业务列必须有 `COMMENT ON`；封闭取值集用 `CHECK` + `internal/enum` 常量。
 
 ## PostgreSQL 已落地的实现约定
 
-1. **生成查询与 ORM 调用共用同一事务**：`repository.queries(db)` 绑定的是 GORM 会话的 `ConnPool`，
-   事务里即同一个 `*sql.Tx`。集成测试 `TestGeneratedQueriesShareTheCallerTransaction` 用回滚可见性验证。
+1. **生成的查询与调用方共用同一连接或事务**：`repository.DB` 是生成的 `DBTX` 接口，
+   `*sql.DB`（根池）与 `*sql.Tx`（事务）都满足它；`Store.Transaction` 把事务句柄下传给每个仓库函数。
+   集成测试 `TestGeneratedQueriesShareTheCallerTransaction` 用回滚可见性验证两者是同一条连接。
 2. **依赖事务范围的锁操作必须显式校验**：`LockUsers`、`LockManagement` 通过 `requireTransaction`
    拒绝自动提交会话——否则锁会立即释放，静默失效比报错危险。
-3. **数组参数用 jsonb 展开**：`jsonb_array_elements_text(sqlc.arg('x')::jsonb)`，由 `textArray`
-   编码。`database/sql` 风味的数组绑定会让 sqlc 引入 `lib/pq`，与项目的 pgx 驱动重复；
-   切换到 pgx 原生风味后可改回数组。
+3. **数组参数用 jsonb 展开**：`jsonb_array_elements_text(sqlc.arg('x')::jsonb)`，由 `textArray`/`uuidArray`
+   编码。生成代码用 `database/sql` 参数，数组绑定会引入 `lib/pq` 这套第二驱动；
+   `jsonb` 展开保持单一驱动，代价是数组语义由 SQL 侧解释。
 4. **封闭取值列映射到 `internal/enum`**：`sqlc.yaml` 用 column override 把 `permissions.status`、
    `permissions.risk_level` 生成为 `enum.PermissionStatus`/`enum.RiskLevel`，编译期即受约束，
    包装层不再做字符串转换。新增封闭取值列时照此添加。

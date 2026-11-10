@@ -15,7 +15,6 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -76,20 +75,18 @@ func (s *Sessions) Resolve(ctx context.Context) (iamclient.Principal, error) {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err = tx.Error
+	var principal iamclient.Principal
+	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
+		resolved, resolveErr := s.ResolveTx(ctx, tx, id, token)
+		if resolveErr != nil {
+			return resolveErr
+		}
+
+		principal = resolved
+
+		return nil
+	})
 	if err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	defer tx.Rollback()
-
-	principal, err := s.ResolveTx(ctx, tx, id, token)
-	if err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	if err = tx.Commit().Error; err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -98,7 +95,7 @@ func (s *Sessions) Resolve(ctx context.Context) (iamclient.Principal, error) {
 
 // ResolveTx 在事务中先锁定用户再锁定会话。数据库在取得锁后判断过期时间，
 // 防止延迟请求重新激活已空闲过期的会话。
-func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, token string) (iamclient.Principal, error) {
+func (s *Sessions) ResolveTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, token string) (iamclient.Principal, error) {
 	userID, err := repository.SessionUser(ctx, tx, id)
 	if err != nil {
 		return iamclient.Principal{}, sessionError(err)
@@ -166,188 +163,176 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	}
 
 	token := s.Manager.Token(ctx)
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err := tx.Error
-	if err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	defer tx.Rollback()
-
-	userLocks := []uuid.UUID{user.ID}
-	if oldID != uuid.Nil {
-		previousUser, lookup := repository.SessionUser(ctx, tx, oldID)
-		if lookup == nil {
-			userLocks = append(userLocks, previousUser)
-		} else if !errors.Is(lookup, pgx.ErrNoRows) {
-			return iamclient.Principal{}, lookup
-		}
-	}
-
-	if err = repository.LockUsers(ctx, tx, userLocks); err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	locked, err := repository.LockedAccount(ctx, tx, user.ID)
-	if err != nil {
-		return iamclient.Principal{}, sessionError(err)
-	}
-
-	if locked.Status != enum.UserStatusActive || locked.AuthEpoch != user.AuthEpoch {
-		return iamclient.Principal{}, repository.ErrUnauthenticated
-	}
-
-	valid, err := repository.VerifyLoginCredential(ctx, tx, user.ID, user.PasswordHash)
-	if err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	if !valid {
-		return iamclient.Principal{}, repository.ErrUnauthenticated
-	}
-
-	now, err := repository.DatabaseTime(ctx, tx)
-	if err != nil {
-		return iamclient.Principal{}, err
-	}
-
-	authenticated, absolute := now, now.Add(s.Config.Auth.SessionAbsoluteTimeout)
-	var reauthenticated *time.Time
-	if reauthenticate {
-		previous, err := repository.LockedSession(ctx, tx, oldID)
-		if err != nil || previous.State != enum.SessionStateActive || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
-			return iamclient.Principal{}, repository.ErrUnauthenticated
+	var principal iamclient.Principal
+	var newID uuid.UUID
+	var err error
+	txErr := s.Store.Transaction(ctx, func(tx *sql.Tx) error {
+		userLocks := []uuid.UUID{user.ID}
+		if oldID != uuid.Nil {
+			previousUser, lookup := repository.SessionUser(ctx, tx, oldID)
+			if lookup == nil {
+				userLocks = append(userLocks, previousUser)
+			} else if !errors.Is(lookup, pgx.ErrNoRows) {
+				return lookup
+			}
 		}
 
-		authenticated, absolute = previous.AuthenticatedAt, previous.AbsoluteExpiresAt
-		reauthenticated = &now
-	}
-
-	if oldID != uuid.Nil {
-		if err = repository.RevokeRotatedSession(ctx, tx, oldID, TokenHash(oldToken)); err != nil {
-			return iamclient.Principal{}, err
+		if err = repository.LockUsers(ctx, tx, userLocks); err != nil {
+			return err
 		}
-	}
 
-	newID := uuid.New()
-	idle := now.Add(s.Config.Auth.SessionIdleTimeout)
-	if idle.After(absolute) {
-		idle = absolute
-	}
+		locked, err := repository.LockedAccount(ctx, tx, user.ID)
+		if err != nil {
+			return sessionError(err)
+		}
 
-	if err = repository.InsertSession(ctx, tx, repository.InsertSessionParams{
-		ID:                newID,
-		UserID:            user.ID,
-		TokenHash:         TokenHash(token),
-		AuthEpoch:         user.AuthEpoch,
-		AuthenticatedAt:   authenticated,
-		ReauthenticatedAt: reauthenticated,
-		AbsoluteExpiresAt: absolute,
-		IdleExpiresAt:     idle,
-		Now:               now,
-	}); err != nil {
-		return iamclient.Principal{}, err
-	}
+		if locked.Status != enum.UserStatusActive || locked.AuthEpoch != user.AuthEpoch {
+			return repository.ErrUnauthenticated
+		}
 
-	if err = repository.ResetLoginFailures(ctx, tx, user.ID); err != nil {
-		return iamclient.Principal{}, err
-	}
+		valid, err := repository.VerifyLoginCredential(ctx, tx, user.ID, user.PasswordHash)
+		if err != nil {
+			return err
+		}
 
-	if err = repository.AppendAudit(ctx, tx, repository.Audit{
-		ActorID:    &user.ID,
-		ActorName:  user.Username,
-		Action:     "iam.auth.login",
-		TargetType: "session",
-		TargetID:   &newID,
-		RequestID:  requestID,
-	}); err != nil {
-		return iamclient.Principal{}, err
-	}
+		if !valid {
+			return repository.ErrUnauthenticated
+		}
 
-	if err = tx.Commit().Error; err != nil {
-		return iamclient.Principal{}, err
+		now, err := repository.DatabaseTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+
+		authenticated, absolute := now, now.Add(s.Config.Auth.SessionAbsoluteTimeout)
+		var reauthenticated *time.Time
+		if reauthenticate {
+			previous, err := repository.LockedSession(ctx, tx, oldID)
+			if err != nil || previous.State != enum.SessionStateActive || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
+				return repository.ErrUnauthenticated
+			}
+
+			authenticated, absolute = previous.AuthenticatedAt, previous.AbsoluteExpiresAt
+			reauthenticated = &now
+		}
+
+		if oldID != uuid.Nil {
+			if err = repository.RevokeRotatedSession(ctx, tx, oldID, TokenHash(oldToken)); err != nil {
+				return err
+			}
+		}
+
+		newID = uuid.New()
+		idle := now.Add(s.Config.Auth.SessionIdleTimeout)
+		if idle.After(absolute) {
+			idle = absolute
+		}
+
+		if err = repository.InsertSession(ctx, tx, repository.InsertSessionParams{
+			ID:                newID,
+			UserID:            user.ID,
+			TokenHash:         TokenHash(token),
+			AuthEpoch:         user.AuthEpoch,
+			AuthenticatedAt:   authenticated,
+			ReauthenticatedAt: reauthenticated,
+			AbsoluteExpiresAt: absolute,
+			IdleExpiresAt:     idle,
+			Now:               now,
+		}); err != nil {
+			return err
+		}
+
+		if err = repository.ResetLoginFailures(ctx, tx, user.ID); err != nil {
+			return err
+		}
+
+		if err = repository.AppendAudit(ctx, tx, repository.Audit{
+			ActorID:    &user.ID,
+			ActorName:  user.Username,
+			Action:     "iam.auth.login",
+			TargetType: "session",
+			TargetID:   &newID,
+			RequestID:  requestID,
+		}); err != nil {
+			return err
+		}
+
+		principal = iamclient.Principal{
+			UserID:            user.ID.String(),
+			SessionID:         newID.String(),
+			Username:          user.Username,
+			DisplayName:       user.DisplayName,
+			Configured:        user.Configured,
+			AuthEpoch:         user.AuthEpoch,
+			AuthenticatedAt:   authenticated,
+			ReauthenticatedAt: reauthenticated}
+
+		return nil
+	})
+	if txErr != nil {
+		return iamclient.Principal{}, txErr
 	}
 
 	s.Manager.Put(ctx, LogicalSessionKey, newID.String())
-	return iamclient.Principal{
-		UserID:            user.ID.String(),
-		SessionID:         newID.String(),
-		Username:          user.Username,
-		DisplayName:       user.DisplayName,
-		Configured:        user.Configured,
-		AuthEpoch:         user.AuthEpoch,
-		AuthenticatedAt:   authenticated,
-		ReauthenticatedAt: reauthenticated,
-	}, nil
+
+	return principal, nil
 }
 
 // Revoke 撤销本人当前会话。
 func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID string, reason, requestID string) error {
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err := tx.Error
-	if err != nil {
-		return err
-	}
-
-	defer tx.Rollback()
-
 	userID, err := uuid.Parse(p.UserID)
 	if err != nil {
 		return repository.ErrUnauthenticated
 	}
 
-	if _, err = repository.LockedAccount(ctx, tx, userID); err != nil {
-		return err
-	}
+	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
+		if _, err = repository.LockedAccount(ctx, tx, userID); err != nil {
+			return err
+		}
 
-	actorSession, parseErr := uuid.Parse(p.SessionID)
-	if parseErr != nil {
-		return repository.ErrUnauthenticated
-	}
+		actorSession, parseErr := uuid.Parse(p.SessionID)
+		if parseErr != nil {
+			return repository.ErrUnauthenticated
+		}
 
-	fresh, err := s.ResolveTx(ctx, tx, actorSession, s.Manager.Token(ctx))
+		fresh, err := s.ResolveTx(ctx, tx, actorSession, s.Manager.Token(ctx))
+		if err != nil {
+			return err
+		}
+
+		if fresh.UserID != p.UserID {
+			return repository.ErrUnauthenticated
+		}
+
+		id, err := uuid.Parse(sessionID)
+		if err != nil {
+			return repository.ErrInvalid
+		}
+
+		if err = repository.RevokeOwnSession(ctx, tx, id, userID, reason); err != nil {
+			return err
+		}
+
+		return repository.AppendAudit(ctx, tx, repository.Audit{
+			ActorID:    &userID,
+			ActorName:  p.Username,
+			Action:     "iam.sessions.revoke",
+			TargetType: "session",
+			RequestID:  requestID,
+		})
+	})
 	if err != nil {
 		return err
 	}
 
-	if fresh.UserID != p.UserID {
-		return repository.ErrUnauthenticated
-	}
-
-	id, err := uuid.Parse(sessionID)
-	if err != nil {
-		return repository.ErrInvalid
-	}
-
-	response := tx.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason=$3 WHERE id=$1 AND user_id=$2 AND state='active'`, id, userID, reason)
-	if err = response.Error; err != nil {
-		return err
-	}
-
-	if response.RowsAffected == 0 {
-		return repository.ErrNotFound
-	}
-
-	if err = repository.AppendAudit(ctx, tx, repository.Audit{
-		ActorID:    &userID,
-		ActorName:  p.Username,
-		Action:     "iam.sessions.revoke",
-		TargetType: "session",
-		RequestID:  requestID,
-	}); err != nil {
-		return err
-	}
-
-	if err = tx.Commit().Error; err != nil {
-		return err
-	}
 	logging.From(ctx).Info("Session revoked", "event", "session.revoked", "user_id", p.UserID, "session_id", sessionID, "reason", reason)
+
 	return nil
 }
 
 // sessionError 将未找到会话映射为未认证，保留真实存储故障。
 func sessionError(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return repository.ErrUnauthenticated
 	}
 

@@ -9,9 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -39,29 +36,35 @@ var (
 
 // Store 持有 IAM 使用的 PostgreSQL 连接池。
 type Store struct {
-	Pool  *pgxpool.Pool // SCS 与必要的原生查询共用此池，由创建者关闭。
-	DB    *gorm.DB      // 业务查询和显式事务使用的 ORM，同样复用上述池。
-	sqlDB *sql.DB
+	Pool *pgxpool.Pool // SCS 与迁移检查共用的原生池，由创建者关闭。
+	DB   *sql.DB       // 业务查询与事务使用的 database/sql 适配，复用同一池。
 }
 
-// NewStore 基于现有连接池创建 ORM；失败时不接管调用方连接池。
+// NewStore 基于现有连接池创建 database/sql 适配；失败时不接管调用方连接池。
 func NewStore(pool *pgxpool.Pool) (*Store, error) {
-	sqlDB := stdlib.OpenDBFromPool(pool)
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{TranslateError: true, Logger: queryLogger{level: logger.Warn}})
+	return &Store{Pool: pool, DB: stdlib.OpenDBFromPool(pool)}, nil
+}
+
+// Close 关闭 database/sql 适配；外部拥有的 pgx 池仍由创建者关闭。
+func (s *Store) Close() error { return s.DB.Close() }
+
+// Transaction 在单一事务内执行 change，提交前的任何失败都会回滚。
+// 事务句柄按 database/sql 的语义下传，仓库函数与生成查询共用同一条连接。
+func (s *Store) Transaction(ctx context.Context, change func(*sql.Tx) error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		closeErr := sqlDB.Close()
-		return nil, errors.Join(err, closeErr)
+		return err
 	}
 
-	return &Store{
-		Pool:  pool,
-		DB:    db,
-		sqlDB: sqlDB,
-	}, nil
-}
+	// 已经提交后再回滚是空操作，因此这里可以无条件登记。
+	defer func() { _ = tx.Rollback() }()
 
-// Close 关闭 ORM 的 database/sql 适配；外部拥有的 pgx 池仍由创建者关闭。
-func (s *Store) Close() error { return s.sqlDB.Close() }
+	if err = change(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
 
 // Audit 描述需要在事务中记录的审计事件。
 // 审计没有组织维度，目标由 target_type/target_id 表达。
@@ -79,8 +82,9 @@ type Audit struct {
 	Metadata   map[string]any    // 经过筛选的审计扩展字段，编码后不超过 8192 字节。
 }
 
-// AppendAudit 在调用方事务中写入审计事件。
-func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
+// AppendAudit 在调用方给出的连接或事务中写入审计事件。
+// 需要与业务变更同生共死时必须传事务句柄。
+func AppendAudit(ctx context.Context, tx DB, a Audit) error {
 	if a.ActorType == "" {
 		a.ActorType = enum.ActorTypeUser
 	}
@@ -99,7 +103,8 @@ func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
 		return ErrInvalid
 	}
 
-	err = tx.WithContext(ctx).Exec(
+	_, err = tx.ExecContext(
+		ctx,
 		`INSERT INTO iam.audit_events(id,actor_type,actor_id,actor_name,action,target_type,target_id,outcome,reason_code,request_id,decision_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		uuid.New(),
 		a.ActorType,
@@ -113,52 +118,46 @@ func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
 		a.RequestID,
 		a.DecisionID,
 		data,
-	).Error
+	)
+
 	return err
 }
 
 // Seed 在显式初始化或启动时幂等写入内置数据：权限目录、内置角色与配置管理员。
 // 事务与 advisory 锁保证并发启动收敛到同一状态；已存在的账号不会被重复提权。
 func (s *Store) Seed(ctx context.Context, username, password string) error {
-	tx := s.DB.WithContext(ctx).Begin()
-	err := tx.Error
-	if err != nil {
+	return s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := LockManagement(ctx, tx, ManagementLock); err != nil {
+			return err
+		}
+
+		if err := syncCatalog(ctx, tx); err != nil {
+			return err
+		}
+
+		roleID, err := syncBuiltinRole(ctx, tx)
+		if err != nil {
+			return err
+		}
+
+		_, err = syncAdministrator(ctx, tx, username, password, roleID)
+
 		return err
-	}
-
-	defer tx.Rollback()
-
-	if err = LockManagement(ctx, tx, ManagementLock); err != nil {
-		return err
-	}
-
-	if err = syncCatalog(ctx, tx); err != nil {
-		return err
-	}
-
-	roleID, err := syncBuiltinRole(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	if _, err = syncAdministrator(ctx, tx, username, password, roleID); err != nil {
-		return err
-	}
-
-	return tx.Commit().Error
+	})
 }
 
 // syncCatalog 以代码中的权限目录为准逐键 upsert：缺失插入、元数据更新、移除的键标记 retired。
-func syncCatalog(ctx context.Context, tx *gorm.DB) error {
+func syncCatalog(ctx context.Context, tx *sql.Tx) error {
 	for _, p := range authorization.Catalog() {
-		err := tx.WithContext(ctx).Exec(
+		_, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO iam.permissions(permission_key,description,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status='active',updated_at=now()`,
 			p.Key,
 			p.Description,
 			p.RiskLevel,
 			p.Delegable,
 			p.RequiresRecentAuth,
-		).Error
+		)
 		if err != nil {
 			return err
 		}
@@ -170,44 +169,52 @@ func syncCatalog(ctx context.Context, tx *gorm.DB) error {
 		keys = append(keys, p.Key)
 	}
 
-	return tx.WithContext(ctx).Exec(
+	_, err := tx.ExecContext(
+		ctx,
 		`UPDATE iam.permissions SET status='retired',updated_at=now() WHERE status<>'retired' AND NOT (permission_key = ANY($1::text[]))`,
 		keys,
-	).Error
+	)
+
+	return err
 }
 
 // syncBuiltinRole 保证内置角色存在并持有目录中全部 active 权限。
 // 权限只增不删：目录里新增的键在下次启动时补齐，移除的键保留原授权。
-func syncBuiltinRole(ctx context.Context, tx *gorm.DB) (uuid.UUID, error) {
+func syncBuiltinRole(ctx context.Context, tx *sql.Tx) (uuid.UUID, error) {
 	var id uuid.UUID
-	err := tx.WithContext(ctx).Raw(`SELECT id FROM iam.roles WHERE builtin`).Row().Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM iam.roles WHERE builtin`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		id = uuid.New()
-		if err = tx.WithContext(ctx).Exec(
+		if _, err = tx.ExecContext(
+			ctx,
 			`INSERT INTO iam.roles(id,name,description,builtin) VALUES($1,$2,'',true)`,
 			id, authorization.BuiltinRoleName,
-		).Error; err != nil {
+		); err != nil {
 			return uuid.Nil, err
 		}
 	} else if err != nil {
 		return uuid.Nil, err
-	} else if err = tx.WithContext(ctx).Exec(
+	} else if _, err = tx.ExecContext(
+		ctx,
 		`UPDATE iam.roles SET name=$2,description='',updated_at=now() WHERE id=$1`,
 		id, authorization.BuiltinRoleName,
-	).Error; err != nil {
+	); err != nil {
 		return uuid.Nil, err
 	}
 
-	return id, tx.WithContext(ctx).Exec(
+	_, err = tx.ExecContext(
+		ctx,
 		`INSERT INTO iam.role_permissions(role_id,permission_key) SELECT $1,permission_key FROM iam.permissions WHERE status='active' ON CONFLICT DO NOTHING`,
 		id,
-	).Error
+	)
+
+	return id, err
 }
 
 // VerifySchema 校验迁移版本兼容，不在服务启动时自动改表。
 // 内置数据由 Seed 在启动时幂等补齐，因此这里不再把数据存在性当作 schema 状态。
 func (s *Store) VerifySchema(ctx context.Context) error {
-	current, target, pending, err := schemaState(ctx, s.sqlDB)
+	current, target, pending, err := schemaState(ctx, s.DB)
 	if err != nil || pending || current != target {
 		return errors.New("IAM schema version is incompatible; run the matching migration before serving")
 	}
