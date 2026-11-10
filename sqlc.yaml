@@ -28,5 +28,7 @@ sql:
             go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "PermissionStatus" }
           - column: "iam.permissions.risk_level"
             go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "RiskLevel" }
+          - column: "iam.users.status"
+            go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "UserStatus" }
           - db_type: "jsonb"
             go_type: { import: "encoding/json", type: "RawMessage" }
