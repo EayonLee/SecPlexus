@@ -51,3 +51,5 @@ Hey API and LiteLLM are not currently used and have been removed from the galler
 ## Gin logo attribution
 
 The Gin-Gonic Framework logo was created by Javier Provecho and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Its Go gopher eyes were designed by Renee French and are licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The logo is used without modification. See the [upstream logo repository](https://github.com/gin-gonic/logo) and [license text](LICENSE.gin-logo).
+
+The `next-intl-mark-light.png` and `next-intl-mark-dark.png` files are cropped from the official next-intl SVGs to remove transparent padding; the artwork itself is unchanged.
