@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { clearRuntime, processAlive, readRuntime, writeRuntime } from './runtime.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
 const apps = path.join(root, 'src/apps');
@@ -50,15 +51,137 @@ function workingDirectories(pids) {
 
 const inside = (directory, parent) => directory === parent || directory.startsWith(`${parent}${path.sep}`);
 
+function linuxListenerPids() {
+  const inodes = new Set();
+  for (const filename of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let text;
+    try {
+      text = readFileSync(filename, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of text.split('\n').slice(1)) {
+      const fields = line.trim().split(/\s+/);
+      if (fields.length > 9 && fields[3] === '0A' && fields[9] !== '0') inodes.add(fields[9]);
+    }
+  }
+  if (!inodes.size) return [];
+  const pids = new Set();
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    let descriptors;
+    try {
+      descriptors = readdirSync(`/proc/${name}/fd`);
+    } catch {
+      continue;
+    }
+    for (const descriptor of descriptors) {
+      let link;
+      try {
+        link = readlinkSync(`/proc/${name}/fd/${descriptor}`);
+      } catch {
+        continue;
+      }
+      const match = /^socket:\[(\d+)\]$/.exec(link);
+      if (match && inodes.has(match[1])) {
+        pids.add(Number(name));
+        break;
+      }
+    }
+  }
+  return [...pids];
+}
+
+function signalPid(pid, signal) {
+  if (process.platform === 'win32') {
+    spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (error.code === 'ESRCH') process.kill(pid, signal);
+    else if (error.code !== 'EPERM') throw error;
+  }
+}
+
+function registeredAlive(entry) {
+  if (process.platform === 'win32') return processAlive(entry.pid);
+  try {
+    process.kill(-entry.pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM' || processAlive(entry.pid);
+  }
+}
+
+function matchesImage(entry) {
+  if (process.platform !== 'win32' || !entry.image) return true;
+  const result = spawnSync('tasklist.exe', ['/FI', `PID eq ${entry.pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', timeout: 5_000 });
+  if (result.error || result.status !== 0) return true;
+  return result.stdout.toLowerCase().includes(`"${entry.image.toLowerCase()}"`);
+}
+
+async function stopRegisteredProcesses() {
+  const entries = readRuntime(root);
+  const selected = entries.filter((entry) => registeredAlive(entry) && matchesImage(entry));
+  if (!selected.length) {
+    clearRuntime(root);
+    return 0;
+  }
+  console.log(`Stopping ${selected.length} project service process(es).`);
+  for (const entry of selected) signalPid(entry.pid, 'SIGTERM');
+  const deadline = Date.now() + 5_000;
+  while (selected.some(registeredAlive) && Date.now() < deadline) await delay(200);
+  const remaining = selected.filter(registeredAlive);
+  for (const entry of remaining) signalPid(entry.pid, 'SIGKILL');
+  await delay(100);
+  const still = remaining.filter(registeredAlive);
+  if (still.length) {
+    writeRuntime(root, still);
+    throw new Error(`Some project service processes could not be stopped: ${still.map((entry) => entry.pid).join(', ')}.`);
+  }
+  clearRuntime(root);
+  return selected.length;
+}
+
+function stopWindowsWebLock() {
+  if (process.platform !== 'win32') return 0;
+  const filename = path.join(root, 'src/apps/web/.next/dev/lock');
+  if (!existsSync(filename)) return 0;
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync(filename, 'utf8'));
+  } catch {
+    return 0;
+  }
+  const pid = Number(lock.pid);
+  if (!processAlive(pid)) return 0;
+  console.log('Stopping 1 project service process(es).');
+  spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  return 1;
+}
+
 async function stopProcesses() {
+  const registered = await stopRegisteredProcesses();
+  if (registered) return registered;
+  return process.platform === 'win32' ? stopWindowsWebLock() : await stopExistingListeners();
+}
+
+async function stopExistingListeners() {
   const snapshot = processes();
   const protectedPids = new Set();
   for (let pid = process.pid; snapshot.has(pid); pid = snapshot.get(pid).parent) protectedPids.add(pid);
 
-  const listeners = spawnSync('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp'], { encoding: 'utf8', timeout: 15_000 });
-  if (listeners.error) throw listeners.error;
-  if (![0, 1].includes(listeners.status)) throw new Error('Cannot inspect running service ports.');
-  const pids = [...new Set([...listeners.stdout.matchAll(/^p(\d+)$/gm)].map(match => Number(match[1])))];
+  let pids;
+  if (process.platform === 'linux') {
+    pids = linuxListenerPids();
+  } else {
+    const listeners = spawnSync('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fp'], { encoding: 'utf8', timeout: 15_000 });
+    if (listeners.error) throw listeners.error;
+    if (![0, 1].includes(listeners.status)) throw new Error('Cannot inspect running service ports.');
+    pids = [...new Set([...listeners.stdout.matchAll(/^p(\d+)$/gm)].map(match => Number(match[1])))];
+  }
   if (!pids.length) return 0;
   const directories = workingDirectories([...snapshot.keys()]);
   function belongsToProject(pid) {

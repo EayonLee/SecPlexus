@@ -1,17 +1,18 @@
 # 需求与设计计划索引
 
-本目录按具体需求组织 Spec 与 Plan。索引用于查找主题和审核状态，实施任务、验证证据和剩余事项以对应 Plan 为准，不在这里重复维护。
+本目录按具体需求维护 Spec 与 Plan。索引用于查找主题和审核状态，实施任务、验证证据和剩余事项以对应 Plan 为准，不在这里重复维护。
 
 当前处于初期开发阶段，交付以本地实现、构建、测试及必要的容器验证为准。远程 CI、生产部署与生产升级暂不开展，后续另行安排，不作为当前计划的未完成项；已有相关配置不代表已经执行。
 
 | 计划 ID | 需求名称 | 范围 | 状态 | Spec | Plan |
 |---|---|---|---|---|---|
+| [flat-authorization](flat-authorization/spec.md) | 扁平授权：权限只由用户与角色表达 | 用户→角色→权限单一路径；扁平权限键 7 项；`/api/v1/iam` 扁平路由；内置数据启动幂等写入；Console 与审计无范围维度；单基线迁移 | 已实施（封板待人工验收） | [spec](flat-authorization/spec.md) | [plan](flat-authorization/plan.md) |
+| [engineering-standards](engineering-standards/spec.md) | 工程规范固化：数据库设计、后端结构与日志 | 数据库注释与封闭取值枚举化；Go 目录/分层/命名规范；日志简单英文；证据驱动 | 已实施（Windows 实测） | [spec](engineering-standards/spec.md) | [plan](engineering-standards/plan.md) |
+| [cross-platform-runtime](cross-platform-runtime/spec.md) | 跨平台运行时与开发工具 | Windows/macOS/Linux 同一 `pnpm` 入口；进程树登记与停止；Make 可选；测试不使用 shell 通配符；构建/E2E 平台适配 | 已实施（Windows 实测） | [spec](cross-platform-runtime/spec.md) | [plan](cross-platform-runtime/plan.md) |
 | [timezone-and-user-preference](timezone-and-user-preference/spec.md) | 全平台时区统一与用户时区偏好 | 服务端固定 UTC；用户级时区偏好存库；显示按用户/浏览器回落 | 已实施 | [spec](timezone-and-user-preference/spec.md) | [plan](timezone-and-user-preference/plan.md) |
 | [test-strategy-and-coverage](test-strategy-and-coverage/spec.md) | 测试规范固化与存量测试补齐 | 改动类型与必需测试层判定表；存量无测试包补齐 | 规范已落地，存量部分完成 | [spec](test-strategy-and-coverage/spec.md) | [plan](test-strategy-and-coverage/plan.md) |
-| [org-tree-and-role-model](org-tree-and-role-model/spec.md) | 组织树、角色权限模型与成员管理重构 | 信息架构重划；组织树（深度上限 3，根 `master`）；权限目录扩展；字段校验统一 | 已实施，未提交 | [spec](org-tree-and-role-model/spec.md) | [plan](org-tree-and-role-model/plan.md) |
-| [org-inheritance-and-management](org-inheritance-and-management/spec.md) | 组织授权继承与管理界面修正 | 祖先角色向下继承；**取消组织深度硬上限**；管理员不变量归位应用层；成员子树聚合（可开关）；树形只读展示；reparent 递归重算 depth；脏数据清理 | 待审核（v3：15 缺陷已修，待实施） | [spec](org-inheritance-and-management/spec.md) | [plan](org-inheritance-and-management/plan.md) · [审查](org-inheritance-and-management/review-findings.md) |
-| [audit-role-settings-consolidation](audit-role-settings-consolidation/spec.md) | 审计与角色管理简化、设置区合并 | 审计单一列表（操作者/时间/结果筛选）；角色去 code/kind 与内置角色；创建/编辑改右侧抽屉；删除有成员角色被拒；设置区合并为 `/settings` 单入口 | 实施中 | [spec](audit-role-settings-consolidation/spec.md) | [plan](audit-role-settings-consolidation/plan.md) |
-| [org-user-management-merge](org-user-management-merge/spec.md) | 组织/用户管理合并与「成员 → 用户」统一命名 | 组织管理改为左树右列表；成员页与平台用户页合并为用户管理；全库表/列/权限键/文案 members→users | 实施中 | [spec](org-user-management-merge/spec.md) | — |
+| [audit-role-settings-consolidation](audit-role-settings-consolidation/spec.md) | 审计与角色管理简化、设置区合并 | 审计单一列表（操作者/时间/结果筛选）；角色去 code/kind；创建/编辑改右侧抽屉；删除有用户持有的角色被拒；设置区合并为 `/settings` 单入口 | 实施中 | [spec](audit-role-settings-consolidation/spec.md) | [plan](audit-role-settings-consolidation/plan.md) |
+| [management-pages-consistency](management-pages-consistency/spec.md) | 管理页一致性与用户列表去重 | 四个管理页标题与宽度统一；工具条一行（查询左、主操作右）；列全左对齐；右侧抽屉统一 SheetPanel 宽度；删除重复说明；用户列表按用户聚合；角色抽屉不重复展示用户 | 已实施（界面规则随页面改写保留） | [spec](management-pages-consistency/spec.md) | [plan](management-pages-consistency/plan.md) |
 | [ingest-and-normalization](ingest-and-normalization/spec.md) | 数据接入与归一化（ingestor 首版） | syslog/HTTP/Kafka 三通道接收；格式探测 + 厂商 YAML 模板映射 OCSF；发布 `spx.ingest.event`；connectors 注册表。不做告警提升/合并（归 correlator），不写 ClickHouse | 待审核，未实施 | [spec](ingest-and-normalization/spec.md) | [plan](ingest-and-normalization/plan.md) |
 
 ## 维护规则

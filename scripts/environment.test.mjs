@@ -17,7 +17,7 @@ for (const [script, args] of [['start.mjs', ['dev']], ['start.mjs', ['preview']]
   test(`${script} ${args.join(' ')} prepares missing configuration before launching services`, (t) => {
     const root = workspace(t);
     mkdirSync(path.join(root, 'scripts'));
-    for (const file of ['environment.mjs', 'endpoints.mjs', script]) {
+    for (const file of ['environment.mjs', 'endpoints.mjs', 'processes.mjs', 'runtime.mjs', script]) {
       copyFileSync(fileURLToPath(new URL(file, import.meta.url)), path.join(root, 'scripts', file));
     }
     writeFileSync(path.join(root, '.env.example'), 'SPX_WEB_BIND_HOST=127.0.0.1\n');
@@ -72,7 +72,7 @@ test('only IAM receives authoritative administrator credentials and modules rema
 for (const command of ['dev', 'preview']) {
   test(`${command} rejects incomplete configuration before launching applications or infrastructure`, (t) => {
     const root = workspace(t); mkdirSync(path.join(root, 'scripts'));
-    for (const file of ['environment.mjs', 'endpoints.mjs', 'start.mjs']) copyFileSync(fileURLToPath(new URL(file, import.meta.url)), path.join(root, 'scripts', file));
+    for (const file of ['environment.mjs', 'endpoints.mjs', 'processes.mjs', 'runtime.mjs', 'start.mjs']) copyFileSync(fileURLToPath(new URL(file, import.meta.url)), path.join(root, 'scripts', file));
     writeFileSync(path.join(root, '.env'), 'SPX_WEB_BIND_HOST=127.0.0.1\n');
     const result = spawnSync(process.execPath, [path.join(root, 'scripts/start.mjs'), command], { env: { PATH: '' }, encoding: 'utf8' });
     assert.equal(result.status, 1); assert.match(result.stderr, /Missing module config.yaml/); assert.doesNotMatch(result.stderr, /Docker|pnpm failed/);

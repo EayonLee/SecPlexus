@@ -1,7 +1,7 @@
 import nextEnv from "@next/env";
 
 import { readWebConfiguration } from "../src/config/environment.mjs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +31,16 @@ try {
       ],
       { cwd: directory, env: process.env, stdio: "inherit" },
     );
-    for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.once(signal, () => {
+        // Windows 只结束 Next CLI 会留下它启动的服务进程，用 /T 一并结束。
+        if (process.platform === "win32" && child.pid) {
+          spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        } else {
+          child.kill(signal);
+        }
+      });
+    }
     child.once("error", () => {
       console.error("Cannot start Next.js");
       process.exitCode = 1;
