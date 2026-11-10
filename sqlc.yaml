@@ -22,5 +22,11 @@ sql:
           - db_type: "uuid"
             nullable: true
             go_type: { import: "github.com/google/uuid", type: "UUID", pointer: true }
+          # 封闭取值列直接映射为 enum 常量类型：状态与风险级别在编译期受约束，
+          # 不需要在包装层再做一次字符串转换。
+          - column: "iam.permissions.status"
+            go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "PermissionStatus" }
+          - column: "iam.permissions.risk_level"
+            go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "RiskLevel" }
           - db_type: "jsonb"
             go_type: { import: "encoding/json", type: "RawMessage" }
