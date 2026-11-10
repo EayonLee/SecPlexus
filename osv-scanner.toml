@@ -1,0 +1,14 @@
+# OSV-Scanner 配置：全量扫描，仅忽略已评估且当前无修复路径的项。
+#
+# 规则：每条忽略必须写明原因与到期日；到期后 osv-scanner 会重新报出，强制复审。
+# 只允许忽略构建期（devDependency / CLI）依赖，运行期依赖不允许忽略。
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+effectiveUntil = 2027-03-31
+reason = "dev-only: shadcn CLI 的传递依赖，运行时不加载，当前无修复版本"
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+effectiveUntil = 2027-03-31
+reason = "dev-only: ts-morph 的传递依赖，修复需 major 升级，随工具链升级处理"

@@ -41,6 +41,7 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  # 工作流里的 action 固定到 commit SHA，由这里跟进新版本：SHA 与 `# vX.Y.Z` 注释一起更新。
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -48,7 +49,11 @@ updates:
       day: monday
     open-pull-requests-limit: 3
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore(ci)"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # Action major versions can change runner and Node requirements; review
       # them deliberately instead of taking them automatically.

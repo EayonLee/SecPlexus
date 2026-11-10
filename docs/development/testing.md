@@ -85,6 +85,29 @@ GOTOOLCHAIN=go1.27.3 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
 
 当前执行本地分层检查和业务目录产物一致性检查；不开展部署或远程 CI，实际验收证据记录在 Plan。
 
+## 安全与供应链检查
+
+前三道闸门以退出码阻断且不依赖 GitHub Advanced Security；CodeQL 用 advanced setup 工作流实现，公开仓库免费，私有化后需要 GitHub Code Security。CI 的 `security` job 与
+`test`/`quality` 并行，不在关键路径上。
+
+| 闸门 | 工具与版本 | 覆盖 | 本地入口 |
+| --- | --- | --- | --- |
+| 工作流与 action 用法 | zizmor（官方 action，仅高危+高置信阻断） | 未固定 action、脚本注入、权限过宽、缓存投毒 | `uvx zizmor .`（需 uv） |
+| 提交内容中的密钥 | gitleaks v8.28.0 | 工作树全量扫描（`.env.example` 等模板也在扫描范围） | `make security` |
+| 依赖已知漏洞 | osv-scanner v2.7.1 | `go.mod` 与 `pnpm-lock.yaml` | `make security` |
+| 源码语义分析（SAST） | CodeQL（`codeql.yml`，Go + TypeScript） | 注入、路径穿越、SSRF、硬编码凭据等可数据流追踪的缺陷 | 无法本地运行，仅在 CI |
+
+**action 固定到 commit SHA。** 依据 [GitHub 安全加固指引](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)
+与 OpenSSF Scorecard 的 Pinned-Dependencies 检查：浮动标签（`@v4`）可被上游改写，SHA 不能。
+升级由 Dependabot 的 `github-actions` 生态跟进，它会同时更新 SHA 与行尾的 `# vX.Y.Z` 注释。
+
+**忽略与白名单的规则**（两个配置文件都在仓库根目录）：
+
+- `.gitleaks.toml` 只允许排除本地/构建产物（`node_modules`、`.next`、`logs`、`.spx`、`.env`）。
+  禁止在 `allowlist.paths` 里加业务代码路径；误报用 `[[rules.allowlists]]` 精确到规则与正则。
+- `osv-scanner.toml` 的每条 `[[IgnoredVulns]]` 必须写明 `reason` 与 `effectiveUntil`（不超过 6 个月），
+  到期后 osv-scanner 会重新报出，强制复审。只允许忽略构建期依赖，运行期依赖必须修或升级。
+
 ## 环境和稳定性
 
 真实集成与E2E使用显式测试连接、独立数据库/schema、账号、实例命名空间与端口；不能默认读开发/生产DSN后执行清理。测试启动可显式创建隔离容器，也可使用已提供测试环境，不要求所有开发者安装Docker。缺少集成依赖应明确失败或被明确标记为未执行，CI验收任务不能静默skip后变绿。
