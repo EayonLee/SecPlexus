@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
 
 // administrator 是配置托管账号在同步时的内部快照。
@@ -36,8 +36,9 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 		return uuid.Nil, err
 	}
 
-	reason := pgtype.Text{String: "administrator_configuration", Valid: true}
+	reason := "administrator_configuration"
 	q := NewQueries(tx)
+	gen := queries(tx)
 	hasher := account.PasswordHasher{}
 
 	current, err := configuredAdministrator(ctx, tx)
@@ -58,19 +59,15 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 
 	// 配置改名时先收回旧账号的内置标记，保证任何时刻只有一个配置托管账号。
 	if hasCurrent && current.ID != target.ID {
-		if err = tx.WithContext(ctx).Table("iam.users").Where("id = ?", current.ID).Updates(map[string]any{
-			"configured": false,
-			"auth_epoch": gorm.Expr("auth_epoch+1"),
-			"updated_at": gorm.Expr("now()"),
-		}).Error; err != nil {
+		if err = gen.DemoteConfiguredAdministrator(ctx, current.ID); err != nil {
 			return uuid.Nil, err
 		}
 
-		if err = tx.WithContext(ctx).Table("iam.user_roles").Where("user_id = ? AND role_id = ?", current.ID, builtinRoleID).Delete(nil).Error; err != nil {
+		if err = gen.DeleteUserRole(ctx, sqlcgen.DeleteUserRoleParams{UserID: current.ID, RoleID: builtinRoleID}); err != nil {
 			return uuid.Nil, err
 		}
 
-		if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason.String}); err != nil {
+		if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason}); err != nil {
 			return uuid.Nil, err
 		}
 
@@ -102,15 +99,11 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 		passwordChanged := target.PasswordHash == "" || hasher.CompareHashAndPassword(target.PasswordHash, password) != nil
 		changed = passwordChanged || target.Username != username || target.Status != enum.UserStatusActive || !hasCurrent || current.ID != target.ID
 		if changed {
-			if err = tx.WithContext(ctx).Table("iam.users").Where("id = ?", target.ID).Updates(map[string]any{
-				"username":     username,
-				"display_name": username,
-				"email":        nil,
-				"status":       string(enum.UserStatusActive),
-				"configured":   true,
-				"auth_epoch":   gorm.Expr("auth_epoch+1"),
-				"updated_at":   gorm.Expr("now()"),
-			}).Error; err != nil {
+			if err = gen.PromoteConfiguredAdministrator(ctx, sqlcgen.PromoteConfiguredAdministratorParams{
+				ID:       target.ID,
+				Username: username,
+				Status:   string(enum.UserStatusActive),
+			}); err != nil {
 				return uuid.Nil, err
 			}
 
@@ -131,7 +124,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 				}
 			}
 
-			if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason.String}); err != nil {
+			if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason}); err != nil {
 				return uuid.Nil, err
 			}
 		}
@@ -144,7 +137,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 	}
 
 	// 配置账号始终持有内置角色；重复启动只补缺失的绑定。
-	if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.user_roles(user_id,role_id,created_by) VALUES($1,$2,$1) ON CONFLICT DO NOTHING`, target.ID, builtinRoleID).Error; err != nil {
+	if err = gen.EnsureUserRole(ctx, sqlcgen.EnsureUserRoleParams{UserID: target.ID, RoleID: builtinRoleID}); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -153,20 +146,32 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 
 // configuredAdministrator 读取当前配置托管账号及其密码哈希。
 func configuredAdministrator(ctx context.Context, tx *gorm.DB) (administrator, error) {
-	var row administrator
-	err := tx.WithContext(ctx).Raw(`
-		SELECT u.id,u.username,u.status,u.auth_epoch,COALESCE(c.password_hash,'')
-		FROM iam.users u LEFT JOIN iam.password_credentials c ON c.user_id=u.id
-		WHERE u.configured`).Row().Scan(&row.ID, &row.Username, &row.Status, &row.AuthEpoch, &row.PasswordHash)
-	return row, err
+	row, err := queries(tx).ConfiguredAdministrator(ctx)
+	if err != nil {
+		return administrator{}, err
+	}
+
+	return administrator{
+		ID:           row.ID,
+		Username:     row.Username,
+		Status:       row.Status,
+		AuthEpoch:    row.AuthEpoch,
+		PasswordHash: row.PasswordHash,
+	}, nil
 }
 
 // administratorByUsername 按规范化用户名读取账号；不存在时返回 sql.ErrNoRows。
 func administratorByUsername(ctx context.Context, tx *gorm.DB, normalized string) (administrator, error) {
-	var row administrator
-	err := tx.WithContext(ctx).Raw(`
-		SELECT u.id,u.username,u.status,u.auth_epoch,COALESCE(c.password_hash,'')
-		FROM iam.users u LEFT JOIN iam.password_credentials c ON c.user_id=u.id
-		WHERE u.username_normalized=$1`, normalized).Row().Scan(&row.ID, &row.Username, &row.Status, &row.AuthEpoch, &row.PasswordHash)
-	return row, err
+	row, err := queries(tx).AdministratorByUsername(ctx, normalized)
+	if err != nil {
+		return administrator{}, err
+	}
+
+	return administrator{
+		ID:           row.ID,
+		Username:     row.Username,
+		Status:       row.Status,
+		AuthEpoch:    row.AuthEpoch,
+		PasswordHash: row.PasswordHash,
+	}, nil
 }

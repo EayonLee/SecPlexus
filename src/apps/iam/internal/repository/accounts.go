@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/aarondl/opt/omit"
@@ -10,20 +11,22 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
 
 // InsertUser 创建用户资料，不对外暴露密码记录。
 // configured 标记由启动配置写入的内置管理员，数据库只允许一个。
 func InsertUser(ctx context.Context, db *gorm.DB, id uuid.UUID, value string, normalized string, displayName string, email string, configured bool) error {
-	err := db.WithContext(ctx).Table("iam.users").Create(map[string]any{
-		"id":                  id,
-		"username":            value,
-		"username_normalized": normalized,
-		"display_name":        displayName,
-		"email":               gorm.Expr("NULLIF(?, '')", email),
-		"status":              string(enum.UserStatusActive),
-		"configured":          configured,
-	}).Error
+	err := queries(db).InsertUser(ctx, sqlcgen.InsertUserParams{
+		ID:                 id,
+		Username:           value,
+		UsernameNormalized: normalized,
+		DisplayName:        displayName,
+		Email:              email,
+		Status:             string(enum.UserStatusActive),
+		Configured:         configured,
+	})
+
 	return mapUniqueViolation(err)
 }
 
@@ -47,77 +50,65 @@ func mapUniqueViolation(err error) error {
 
 // InsertPassword 为新账号写入密码哈希。
 func InsertPassword(ctx context.Context, db *gorm.DB, id uuid.UUID, hash string) error {
-	return db.WithContext(ctx).Table("iam.password_credentials").Create(map[string]any{
-		"user_id":       id,
-		"password_hash": hash,
-	}).Error
+	return queries(db).InsertPassword(ctx, sqlcgen.InsertPasswordParams{UserID: id, PasswordHash: hash})
 }
 
 // UpdateUser 更新资料与状态；只有访问状态变化才递增账号版本。
 // auth_epoch 是「账号版本」：改显示名称或邮箱不影响会话，改状态才会让旧会话失效。
+// email 未给出时不改写库里已有的邮箱，空串则存为 NULL。
 func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName string, email omit.Val[string], status enum.UserStatus, accessChanged bool) error {
-	updates := map[string]any{
-		"display_name": displayName,
-		"status":       status,
-		"updated_at":   gorm.Expr("now()"),
-	}
-
-	if accessChanged {
-		updates["auth_epoch"] = gorm.Expr("auth_epoch+1")
+	params := sqlcgen.UpdateUserParams{
+		ID:            id,
+		DisplayName:   displayName,
+		Status:        string(status),
+		UpdateEmail:   email.IsValue(),
+		AccessChanged: accessChanged,
 	}
 
 	if email.IsValue() {
-		updates["email"] = gorm.Expr("NULLIF(?, '')", email.MustGet())
+		params.Email = email.MustGet()
 	}
 
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(updates).Error
+	return queries(db).UpdateUser(ctx, params)
 }
 
 // UpdateTimeZone 写入本人展示时区偏好；空串存为 NULL 表示未设置。
 // 该偏好只影响渲染，不递增 auth_epoch，也不撤销会话。
 func UpdateTimeZone(ctx context.Context, db *gorm.DB, id uuid.UUID, timeZone string) error {
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
-		"timezone":   gorm.Expr("NULLIF(?, '')", timeZone),
-		"updated_at": gorm.Expr("now()"),
-	}).Error
+	return queries(db).UpdateUserTimeZone(ctx, sqlcgen.UpdateUserTimeZoneParams{ID: id, Timezone: timeZone})
 }
 
 // BumpUserAuthEpoch 增加账号版本，使旧会话失效。
 func BumpUserAuthEpoch(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
-		"auth_epoch": gorm.Expr("auth_epoch+1"),
-		"updated_at": gorm.Expr("now()"),
-	}).Error
+	return queries(db).BumpUserAuthEpoch(ctx, id)
 }
 
 // ResetPassword 更新密码哈希，同时清除失败和锁定状态。
 func ResetPassword(ctx context.Context, db *gorm.DB, id uuid.UUID, hash string) error {
-	return db.WithContext(ctx).Table("iam.password_credentials").Where("user_id = ?", id).Updates(map[string]any{
-		"password_hash":   hash,
-		"changed_at":      gorm.Expr("now()"),
-		"failed_attempts": 0,
-		"locked_until":    nil,
-		"updated_at":      gorm.Expr("now()"),
-	}).Error
+	return queries(db).ResetPassword(ctx, sqlcgen.ResetPasswordParams{UserID: id, PasswordHash: hash})
 }
 
 // UserTimeZone 读取本人展示时区偏好；未设置时返回空串。
+// 账号在会话读取之后被删除时同样按未设置处理，让该项偏好不影响本人资料读取。
 func UserTimeZone(ctx context.Context, db *gorm.DB, id uuid.UUID) (string, error) {
-	var value *string
-	err := db.WithContext(ctx).Table("iam.users").Select("timezone").Where("id = ?", id).Scan(&value).Error
+	value, err := queries(db).ReadUserTimeZone(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+
 	if err != nil {
 		return "", err
 	}
 
-	if value == nil {
+	if !value.Valid {
 		return "", nil
 	}
 
-	return *value, nil
+	return value.String, nil
 }
 
 // DeleteUser 删除账号。凭据、会话与角色绑定由 users 的级联删除清理，
 // 历史创建人引用由 ON DELETE SET NULL 置空，不阻塞删除。
 func DeleteUser(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
-	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Delete(nil).Error
+	return queries(db).DeleteUser(ctx, id)
 }
