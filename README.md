@@ -2,18 +2,20 @@
 
 **One AI Security Platform: Protect, Operate, Respond.**
 
-SecPlexus is an open-source, identity-first security operations platform for
-teams whose defenses already span SIEM, EDR, WAF and cloud security. It does not
-replace those systems. It is the neutral brain above them: it turns alerts from
-different vendors into one attack story, investigates event groups with an
-auditable AI analyst, and closes the loop through governed response that runs in
-the tools you already own.
+SecPlexus is an open-source AI security operations platform for the modern SOC.
+It sits above the SIEM, EDR, WAF and cloud security a company already owns: it
+turns alerts from different vendors into one attack story, investigates event
+groups with an auditable AI analyst, and closes the loop through governed
+response in the tools that already run the environment.
 
-Most "AI SOC" products are a chat panel bolted onto an existing console: a human
-starts the conversation, the model sees one alert at a time, and the reasoning
-lives in a prompt. SecPlexus is designed the other way round. Alerts arrive as
-data, correlation decides what belongs together, and a graph of deterministic
-steps plus bounded model calls produces evidence, a verdict and an audit trail.
+It also protects the AI surface itself — LLM traffic, agents, MCP tool calls and
+model keys — inside the same platform. A prompt injection blocked by the
+guardrail is not a side alert in another console; it enters the same case
+pipeline as an EDR detection, because the assets being protected and the assets
+being operated are the same.
+
+SecPlexus is not another SIEM, not another EDR, and not a copilot bolted onto a
+legacy console. It replaces the brain, not the limbs.
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> · <a href="docs/design/architecture/README.md">Documentation</a> · <a href="CONTRIBUTING.md">Contributing</a>
@@ -31,173 +33,145 @@ steps plus bounded model calls produces evidence, a verdict and an audit trail.
 
 ## Protect. Operate. Respond.
 
-The platform direction is one product with three outcomes:
+- **Protect the AI surface.** Inline guardrails for LLM and MCP traffic:
+  prompt injection, DLP, privilege abuse and model-key misuse. Agent and MCP
+  capability contracts, supply-chain admission and behavior audit. AI
+  applications, agents, MCP servers and model keys are first-class assets, not
+  an afterthought.
+- **Operate the security workload.** Ingest alerts and findings from the stack
+  already in place, normalize them to OCSF, deduplicate and correlate across
+  vendors, and reconstruct attack chains. An AI analyst investigates the event
+  group, not one alert at a time. Vulnerability findings, threat intelligence
+  and asset criticality feed the same prioritization.
+- **Respond with a governed loop.** The agent proposes; SOAR executes after
+  approval, checks the asset's blast radius, runs idempotent playbooks and
+  writes back with each vendor's native ID. Analysts work three queues: ready
+  for approval, needs human context, and closed for spot-checking.
 
-- **Protect** the new attack surface: LLM applications, agents, MCP tool calls
-  and model keys. Identity and runtime policy live in the same platform, so a
-  blocked prompt injection is not another product's alert; it enters the same
-  case pipeline as an EDR detection.
-- **Operate** the alert flood as one problem. SecPlexus normalizes vendor alerts
-  into OCSF, collapses duplicates and related activity, and gives the AI an
-  incident view rather than a single alert. Analysts work three queues: ready for
-  approval, needs human context, and closed for spot-checking.
-- **Respond** through a governed loop. The agent proposes; the SOAR executes
-  after approval, checks the asset's blast radius, runs idempotent actions and
-  writes back using each vendor's native ID. AI never holds the power to isolate
-  a host or disable an account by itself.
+## Capabilities
 
-The delivered foundation today is the identity and control plane. Ingestion,
-correlation, investigation and response services are being built in public; the
-status below is explicit about what exists.
+| Capability | What it covers |
+| --- | --- |
+| AI alert operations | Alert and finding ingestion, OCSF normalization, dedupe, cross-source correlation, attack-chain incident views, AI investigation, triage, case management and the three-queue workbench. |
+| AI runtime protection | Inline LLM and MCP guardrails: prompt injection, DLP, privilege abuse, model-key misuse, agent and MCP behavior audit. |
+| Agent and MCP security | Capability contracts for tool calls, MCP/Skill supply-chain admission, and an audit trail of what an agent actually did. |
+| Vulnerability operations | Ingest findings from the scanners a customer already runs, prioritize by KEV/EPSS and exploitability, and verify remediation. SecPlexus does not build another scanner. |
+| Threat intelligence and assets | IOC lifecycle, ATT&CK mapping, entity profiles, asset criticality, and an AI asset inventory covering applications, agents, MCP servers and model keys. |
+| Response and automation | SOAR playbooks, approvals, asset blast-radius gating, idempotent actions, notifications and native-ID write-back. |
+| Platform foundation | IAM, roles and permissions, append-only audit, configuration, shared contracts and the operator console. |
+
+This is the product map. The implementation is in progress; the build status
+below separates what exists from what is being specified and built.
 
 ## Why SecPlexus
 
-- **Replace the brain, not the limbs.** Your SIEM, EDR, WAF and cloud security
-  stay in place. SecPlexus sits above them, correlates what no single vendor can
-  see, and sends actions back to the native tools.
-- **Work on alerts, not a second log lake.** The unit is the normalized
-  alert, not another archive of raw logs. Your SIEM remains the system of record;
-  SecPlexus adds the cross-vendor correlation, case context and response that a
-  vendor-siloed stack cannot provide.
-- **AI-native is an architecture, not a prompt.** The unit of investigation is an
+- **Replace the brain, not the limbs.** A company already owns detection and
+  enforcement. SecPlexus sits above that stack, correlates what no single vendor
+  can see, and sends actions back to the native tools.
+- **Vendor AI cannot see across vendors.** An EDR sees its endpoint, a WAF sees
+  its traffic, an identity system sees its login. The attack crosses all three.
+  Only a neutral layer can reconstruct the whole story and keep the native IDs
+  needed for response.
+- **Work on alerts, not a second log lake.** The unit is the normalized alert,
+  not another archive of raw logs. The SIEM remains the system of record;
+  SecPlexus adds cross-vendor correlation, case context and response.
+- **AI-native is an architecture, not a prompt.** The investigation unit is an
   event group. The workflow is a graph of deterministic steps with bounded model
   nodes, groundedness gates, evidence-level verdicts and a three-valued
   conclusion: true positive, false positive or `insufficient_info`. An empty
   tool result is never proof that an alert is benign.
-- **Every correction becomes institutional memory.** When an analyst changes a
-  conclusion, the reason is required. That reason, the evidence and the outcome
-  become searchable context for the next investigation. Shadow mode records what
-  the AI would have done before any alert category earns the right to auto-close.
+- **The loop gets sharper.** Analyst corrections require a reason and become
+  institutional memory. Shadow mode records what the AI would have done before
+  an alert category earns the right to auto-close. Rule proposals go through
+  propose → review → eval → promote.
 - **Alerts are facts; cases are the product.** Alerts remain a complete,
   queryable fact layer. An incident view is the AI's working set. A case is the
   only persistent operational object: timeline, evidence, approval, response and
   post-incident review.
-- **Identity is the foundation, not a bolt-on.** One IAM owns users, sessions,
-  roles, permissions and audit. There is one authorization path — user → role →
-  permission — with append-only audit and immediate session revocation through
-  `auth_epoch`.
-- **Failure is explicit.** Correlation degradation keeps the raw alerts and says
-  so. Tool failures are distinguished from empty results. The uncertain queue is
-  a first-class part of the workflow, not a hidden backlog.
-
-## Status
-
-SecPlexus is pre-1.0. Planned services are design commitments, not shipped
-capabilities.
-
-| Capability | State | Notes |
-| --- | --- | --- |
-| Identity and access (IAM) | Delivered | Login, revocable sessions, password change/reset, users, global roles, flat permissions, authorization, append-only audit, versioned migrations and schema comments. |
-| Web and Console control plane | Delivered foundation | Web ships real IAM pages in English and Simplified Chinese. Console provides identity context and authorized SSE; case and workbench workflows are not implemented. |
-| Alert ingestion and normalization | Planned | Go `ingestor`, Kafka buffering, OCSF 2004 normalization, vendor connector registry. |
-| Correlation and incident views | Planned | Python `correlator`: exact dedupe, window suppression, cross-source entity correlation and rolling attack-chain views. |
-| AI investigation and memory | Planned | Python `agent-runtime`, graph-orchestrated investigation, evidence ledger, institutional memory and rule proposals; all model calls through `llm-gateway`. |
-| Response orchestration | Planned | Python `soar`: approvals, asset blast-radius gating, idempotent playbooks and native-ID write-back. |
-| AI runtime protection | Planned | `ai-gateway` (agentgateway) and `ai-policy` for prompt injection, DLP, model-key abuse, MCP tool governance and agent audit. |
-
-APIs, schema and UI may change before 1.0.
+- **Protect and operate the same objects.** AI applications, agents, MCP tools
+  and model keys are both what the guardrail protects and what the SOC
+  investigates. A blocked prompt injection becomes a case, not a separate
+  product.
+- **Failure is explicit.** Correlation degradation keeps the raw alerts and
+  says so. Tool failures are distinguished from empty results. The uncertain
+  queue is a first-class part of the workflow, not a hidden backlog.
 
 ## Architecture
 
-The target is a data-driven operations pipeline with a separate control plane:
-alerts and AI traffic enter from the left, while people authorize work through
-Web, Console and IAM.
+Two data entries, one brain. Alerts, findings, threat intelligence and AI traffic
+enter the platform; the control plane is separate, so people authorize work
+without data flowing through them.
 
 ```mermaid
 flowchart LR
-  subgraph SRC["Telemetry and AI traffic"]
-    A["EDR · WAF · SIEM<br/>cloud security"]
-    U["LLM apps · agents<br/>MCP tool calls"]
+  subgraph SRC["Data sources"]
+    A["SIEM · EDR · WAF<br/>cloud security"]
+    V["Vulnerability scanners"]
+    T["Threat intelligence"]
+    AI["LLM apps · agents<br/>MCP tool calls"]
   end
 
-  subgraph CTRL["Control plane — delivered foundation"]
-    W["Web<br/>Next.js"]
-    C["Console<br/>Go / Gin"]
-    I["IAM<br/>Go / Gin"]
-  end
-
-  subgraph PIPE["AI operations pipeline — planned"]
-    ING["ingestor<br/>Go"]
+  subgraph DATA["Data plane"]
+    ING["ingestor<br/>OCSF normalization"]
     K["Kafka"]
-    COR["correlator<br/>Python"]
-    AR["agent-runtime<br/>Python"]
-    LG["llm-gateway<br/>Go"]
-    SOAR["soar<br/>Python"]
+    COR["correlator<br/>dedupe · correlate · attack chain"]
     AG["ai-gateway<br/>agentgateway"]
-    AIP["ai-policy<br/>Python"]
+    AIP["ai-policy<br/>rules + model checks"]
   end
 
-  subgraph STORE["Data"]
-    PG["PostgreSQL"]
-    CH["ClickHouse"]
+  subgraph BRAIN["AI operations"]
+    AR["agent-runtime<br/>graph-orchestrated investigation"]
+    LG["llm-gateway<br/>provider access"]
+    MEM["Case + evidence ledger<br/>institutional memory"]
+    SOAR["soar<br/>approval · playbooks"]
+  end
+
+  subgraph STORE["Storage"]
+    PG["PostgreSQL<br/>alerts · cases · memory"]
+    CH["ClickHouse<br/>telemetry"]
+    OS["Object storage<br/>raw payload"]
+  end
+
+  subgraph CTRL["Control plane"]
+    W["Web"] --> C["Console"] --> I["IAM"]
+    W --> I
   end
 
   P["LLM providers"]
+  ASSET["Assets + AI inventory<br/>criticality · blast radius"]
 
-  A -->|"alerts"| ING --> K --> COR
-  COR -->|"alerts + views"| PG
-  COR -->|"telemetry"| CH
-  COR -->|"case event"| AR
-  AR -->|"case state"| C
-  AR -->|"model calls"| LG --> P
-  U -->|"LLM / MCP"| AG -->|"decision"| AIP
+  A --> ING
+  V --> ING
+  T --> COR
+  AI --> AG --> AIP
+  AIP -->|"blocked = security event"| ING
   AG -->|"allowed"| P
-  AIP -->|"blocked = case"| ING
+  ING --> K --> COR
+  COR --> PG
+  COR --> CH
+  COR -->|"incident view"| AR
+  AR --> LG --> P
+  AR --> MEM
+  MEM --> C
   AR -->|"proposal"| SOAR
   SOAR -->|"native-ID write-back"| A
-  W -->|"same-origin"| C
-  W -->|"same-origin"| I
-  C -->|"service credential"| I
-
-  classDef delivered fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-  classDef planned fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray: 5 5
-  class W,C,I delivered
-  class ING,K,COR,AR,LG,SOAR,AG,AIP,PG,CH planned
+  ASSET --> COR
+  ASSET --> AR
+  ASSET --> SOAR
+  OS -.-> ING
 ```
 
-Green modules are delivered today; dashed modules are planned. The only path
-implemented today is Web → IAM/Console with PostgreSQL and Redis serving IAM. The pipeline is the next build, not a claim about current behavior.
-
-| Layer | Components | State |
-| --- | --- | --- |
-| Identity and access | IAM, PostgreSQL, Redis | Delivered |
-| Control plane | Web, Console | Foundation delivered |
-| Ingestion | `ingestor`, Kafka, connector registry | Planned |
-| Correlation | `correlator`, PostgreSQL alerts, ClickHouse telemetry | Planned |
-| Investigation | `agent-runtime`, `llm-gateway`, evidence ledger, memory | Planned |
-| Response | `soar`, approvals, native-ID write-back | Planned |
-| AI runtime protection | `ai-gateway`, `ai-policy` | Planned |
-
-### Identity and authorization (delivered)
-
-```mermaid
-flowchart LR
-  U["User"] --> UR["user_roles"]
-  UR --> R["Role"]
-  R --> RP["role_permissions"]
-  RP --> P["Permission key<br/>module.resource.action"]
-  R -->|"builtin = true"| SA["Built-in super administrator"]
-```
-
-- Permission keys are stable identifiers in the form
-  `module.resource.action`; the key is stored, the three parts are derived.
-- The configured administrator is the only `configured` account. It is created
-  from configuration, cannot be deleted or disabled in the UI, and its password
-  is changed only by configuration.
-- Sessions are logical rows in PostgreSQL. Password changes, account status
-  changes and configuration changes bump `auth_epoch`, which invalidates every
-  older session immediately.
-- Audit rows are append-only. A trigger rejects `UPDATE`; `DELETE` is allowed
-  only inside retention maintenance with the `iam.audit_purge` transaction flag.
+The diagram is the target architecture, not a claim that every service ships
+today. The first implemented slice is the control plane; the data plane, AI
+investigation, response and guardrail services are under active development.
 
 ## Tech stack
 
 | Layer | Choices |
 | --- | --- |
-| Delivered services | Go 1.27, Gin, GORM, Goose, pgx, SCS, Argon2id, Gorilla CSRF; Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, TanStack Query/Table, Zod, React Hook Form, next-intl |
-| Delivered data | PostgreSQL 16, Redis 7 |
-| Planned services | `ingestor` (Go); `correlator`, `agent-runtime`, `soar`, `ai-policy` (Python); `llm-gateway` (Go); `ai-gateway` (agentgateway, Rust) |
-| Planned data plane | Kafka, ClickHouse, S3-compatible object storage |
+| Services | Go 1.27, Gin, GORM, Goose, pgx; Python for the planned correlator, agent-runtime, SOAR and ai-policy; Next.js 16 and React 19 for Web |
+| Data | PostgreSQL 16, Redis 7, Kafka, ClickHouse, S3-compatible object storage |
+| AI | Graph-orchestrated agent runtime, `llm-gateway` (Bifrost core), NeMo Guardrails, `ai-gateway` (agentgateway) |
 | Tooling | pnpm, GNU Make, Biome, Vitest, Playwright, Go test |
 
 ## Quick start
@@ -300,6 +274,15 @@ comments, enums, indexes and migrations follow
 | [Changelog](CHANGELOG.md) | Notable changes, fixes and security-relevant updates. |
 | [Support](SUPPORT.md) | Where to ask questions and what to include. |
 | [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Web](src/apps/web/README.md) | Module contracts and responsibilities. |
+
+## Build status
+
+SecPlexus is pre-1.0 and built in public. The repository currently contains the
+first implemented slice: the control plane (IAM, Web and Console). The data plane,
+AI investigation, response orchestration, AI runtime protection, vulnerability
+operations, agent security and threat intelligence are specified in
+[docs/plans](docs/plans/README.md) and under active development. Planned services
+are not presented as available.
 
 ## Security
 

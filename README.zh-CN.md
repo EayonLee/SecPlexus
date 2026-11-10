@@ -4,13 +4,16 @@
 
 **一体化 AI 安全平台：防护、运营、响应。**
 
-SecPlexus 是开源的、以身份为底座的安全运营平台，面向已经部署 SIEM、EDR、WAF 与云安全的企业。
-它不替换这些系统，而是做它们之上的中立大脑：把不同厂商的告警还原成同一次攻击，
-用可审计的 AI 分析师研判事件组，并通过受治理的响应在企业原有工具中完成闭环。
+SecPlexus 是开源的 AI 安全运营平台，面向现代 SOC。它站在企业已有的 SIEM、EDR、WAF
+与云安全之上：把不同厂商的告警还原成同一次攻击，用可审计的 AI 分析师研判事件组，
+并通过受治理的响应在原有工具中完成闭环。
 
-行业不缺“在旧控制台上外挂一个聊天框”的产品：人发起会话，模型一次只看一条告警，
-研判方法论活在提示词里。SecPlexus 反过来设计：告警作为数据流入，关联决定哪些告警
-属于同一起事件，确定性图编排加上受限模型调用，产出证据、结论和完整审计链。
+它也在同一平台内保护 AI 自身：LLM 流量、Agent、MCP 工具调用与模型 Key。护栏拦下的
+Prompt 注入不是另一个控制台里的旁路告警，而是与 EDR 检测进入同一条案件流水线——
+因为被防护的资产和被运营的资产本来就是同一批。
+
+SecPlexus 不是另一个 SIEM，不是另一个 EDR，也不是在旧控制台上外挂的 copilot。
+它替换的是大脑，不是手脚。
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> · <a href="docs/design/architecture/README.md">架构文档</a> · <a href="CONTRIBUTING.zh-CN.md">参与贡献</a>
@@ -28,155 +31,126 @@ SecPlexus 是开源的、以身份为底座的安全运营平台，面向已经�
 
 ## 防护 · 运营 · 响应
 
-产品方向是用一个平台覆盖三类结果：
+- **防护 AI 面。** 对 LLM 与 MCP 流量做内联护栏：Prompt 注入、DLP、权限滥用与模型
+  Key 滥用；对 Agent 与 MCP 做能力契约、供应链准入与行为审计。AI 应用、Agent、
+  MCP server 与模型 Key 是一等资产，不是事后补上的清单。
+- **运营安全负载。** 接入企业现有栈里的告警与发现，归一化为 OCSF，跨厂商去重与关联，
+  还原攻击链。AI 分析师研判的是事件组，不是一条条告警。漏洞发现、威胁情报与资产
+  关键性进入同一套优先级判断。
+- **用受治理的闭环响应。** Agent 提议，SOAR 在人审批后执行；执行前检查资产爆炸半径，
+  动作幂等，并按上游厂商的原生 ID 回写。分析师只在三个队列里工作：待授权、需要人的
+  判断、已闭环待抽查。
 
-- **防护新的攻击面**：LLM 应用、Agent、MCP 工具调用与模型 Key。身份与运行时策略在
-  同一平台内，护栏拦下的 Prompt 注入不是另一个产品的告警，而是与 EDR 检测进入同一条
-  案件流水线。
-- **把告警洪水当成一个整体来运营**：把厂商告警归一化为 OCSF，折叠重复与同源噪音，
-  交给 AI 的不是单条告警，而是一个带攻击链的事件视图。分析师只在三个队列里工作：
-  待授权、需要人的判断、已闭环待抽查。
-- **用受治理的闭环完成响应**：Agent 提议，SOAR 在人审批后执行；执行前检查资产爆炸
-  半径，动作幂等，并按上游厂商的原生 ID 回写。AI 不拥有直接隔离主机或禁用账号的权力。
+## 能力全景
 
-今天已交付的是身份与控制面底座。接入、关联、研判与响应服务正在公开开发中；下面的
-状态表明确区分“已交付”与“规划中”。
+| 能力 | 覆盖内容 |
+| --- | --- |
+| AI 告警运营 | 告警与发现接入、OCSF 归一化、去重、跨源关联、攻击链事件视图、AI 研判、分流、案件管理与三队列工作台。 |
+| AI 运行时防护 | LLM 与 MCP 的内联护栏：Prompt 注入、DLP、权限滥用、模型 Key 滥用，以及 Agent/MCP 行为审计。 |
+| Agent 与 MCP 安全 | 工具调用的能力契约、MCP/Skill 供应链准入，以及 Agent 实际行为的审计链。 |
+| 漏洞运营 | 接入客户已有扫描器的发现，按 KEV/EPSS 与可利用性排序，并验证修复；SecPlexus 不自建扫描器。 |
+| 威胁情报与资产 | IOC 生命周期、ATT&CK 映射、实体画像、资产关键性，以及覆盖应用、Agent、MCP server 与模型 Key 的 AI 资产清单。 |
+| 响应与自动化 | SOAR playbook、审批、资产爆炸半径门控、幂等动作、通知与原生 ID 回写。 |
+| 平台基座 | IAM、角色与权限、追加型审计、配置、共享契约与运营控制台。 |
+
+这是产品地图。实现仍在进行中；下面的“建设状态”明确区分已存在与正在定义、开发的部分。
 
 ## 为什么是 SecPlexus
 
-- **替换大脑，不替换手脚。** 企业已有的 SIEM、EDR、WAF 与云安全继续工作。
-  SecPlexus 站在它们之上，关联任何单一厂商看不到的部分，再把处置动作写回原生工具。
-- **运营告警，不做第二个日志湖。** 处理单元是归一化后的告警，而不是再建一套原始
-  日志仓库。用户的 SIEM 仍是日志的事实源，SecPlexus 补上跨厂商关联、案件上下文与
-  响应闭环——这是厂商各自为战的栈给不了的。
+- **替换大脑，不替换手脚。** 企业已经拥有检测与执行能力。SecPlexus 站在它们之上，
+  关联任何单一厂商看不到的部分，再把动作写回原生工具。
+- **厂商 AI 看不到跨厂商的全局。** EDR 只看端点，WAF 只看流量，身份系统只看登录，
+  而攻击同时穿过三者。只有中立层能把故事拼完整，并保留处置所需的上游原生 ID。
+- **运营告警，不做第二个日志湖。** 处理单元是归一化后的告警，不是再建一套原始日志
+  仓库。SIEM 仍是日志的事实源；SecPlexus 补上跨厂商关联、案件上下文与响应闭环。
 - **AI-native 是架构，不是提示词。** 研判单元是事件组；流程是确定性图编排加边界清晰的
   模型节点，带 groundedness 门禁、证据级判定和三值结论：真阳性、假阳性或
   `insufficient_info`。工具返回空结果，永远不能当作“告警是良性的”证据。
-- **每一次纠正都沉淀为机构记忆。** 分析师改结论时必须填写原因；原因、证据与结果成为
-  下一次研判可检索的上下文。影子模式先记录 AI 会怎么做，某一类告警靠长期正确率
-  “挣得”自动关闭的授权，而不是靠一个全局置信度阈值。
+- **闭环越用越准。** 分析师改结论必须填写原因，原因沉淀为机构记忆；影子模式先记录
+  AI 会怎么做，某一类告警靠长期正确率“挣得”自动关闭的授权；规则建议走
+  propose → review → eval → promote。
 - **告警是事实，案件是产品。** 告警保持完整、可查询的事实层；事件视图是 AI 的工作集；
   案件是唯一持久的运营对象，承载时间线、证据、审批、处置与复盘。
-- **身份是底座，不是补丁。** 唯一的 IAM 拥有用户、会话、角色、权限与审计；只有一条
-  授权路径：用户 → 角色 → 权限。审计只追加，改密或状态变化通过 `auth_epoch` 立即
-  失效所有旧会话。
+- **防护与运营面对的是同一批对象。** AI 应用、Agent、MCP 工具与模型 Key 既是被护栏保护的
+  对象，也是 SOC 要调查的对象。一次被拦下的 Prompt 注入就是一个案件，而不是另建一套
+  AI 安全产品。
 - **失败必须可见。** 关联能力降级时保留原始告警并显式标记；工具失败与“查无结果”分开；
   不确定队列是一等公民，而不是隐藏的积压。
 
-## 当前状态
-
-SecPlexus 处于 pre-1.0。规划中的服务是设计承诺，不是已交付能力。
-
-| 能力 | 状态 | 说明 |
-| --- | --- | --- |
-| 身份与访问（IAM） | 已交付 | 登录、可撤销会话、改密/重置密码、用户、全局角色、扁平权限、授权、追加型审计、版本化迁移与表注释。 |
-| Web 与 Console 控制面 | 底座已交付 | Web 提供中英文 IAM 页面；Console 提供身份上下文与带授权的 SSE。案件与工作台尚未实现。 |
-| 告警接入与归一化 | 规划中 | Go `ingestor`、Kafka 缓冲、OCSF 2004 归一化、厂商连接器注册表。 |
-| 关联与事件视图 | 规划中 | Python `correlator`：精确去重、窗口抑制、跨源实体关联与攻击链滚动聚合。 |
-| AI 研判与记忆 | 规划中 | Python `agent-runtime`、图编排研判、证据 Ledger、机构记忆与规则建议；所有模型调用经 `llm-gateway`。 |
-| 响应编排 | 规划中 | Python `soar`：审批、资产爆炸半径门控、幂等 playbook 与原生 ID 回写。 |
-| AI 运行时防护 | 规划中 | `ai-gateway`（agentgateway）与 `ai-policy`：Prompt 注入、DLP、模型 Key 滥用、MCP 工具治理与 Agent 行为审计。 |
-
-1.0 之前 API、数据库结构与界面都可能变化。
-
 ## 架构
 
-目标是数据驱动的运营流水线，控制面独立：告警与 AI 流量从左侧进入，人通过 Web、
-Console 与 IAM 授权工作，数据不穿过人。
+两个数据入口，一个大脑。告警、发现、威胁情报与 AI 流量进入平台；控制面独立存在，
+人在这里授权工作，数据不穿过人。
 
 ```mermaid
 flowchart LR
-  subgraph SRC["遥测与 AI 流量"]
-    A["EDR · WAF · SIEM<br/>云安全"]
-    U["LLM 应用 · Agent<br/>MCP 工具调用"]
+  subgraph SRC["数据源"]
+    A["SIEM · EDR · WAF<br/>云安全"]
+    V["漏洞扫描器"]
+    T["威胁情报"]
+    AI["LLM 应用 · Agent<br/>MCP 工具调用"]
   end
 
-  subgraph CTRL["控制面 — 已交付底座"]
-    W["Web<br/>Next.js"]
-    C["Console<br/>Go / Gin"]
-    I["IAM<br/>Go / Gin"]
-  end
-
-  subgraph PIPE["AI 运营流水线 — 规划中"]
-    ING["ingestor<br/>Go"]
+  subgraph DATA["数据面"]
+    ING["ingestor<br/>OCSF 归一化"]
     K["Kafka"]
-    COR["correlator<br/>Python"]
-    AR["agent-runtime<br/>Python"]
-    LG["llm-gateway<br/>Go"]
-    SOAR["soar<br/>Python"]
+    COR["correlator<br/>去重 · 关联 · 攻击链"]
     AG["ai-gateway<br/>agentgateway"]
-    AIP["ai-policy<br/>Python"]
+    AIP["ai-policy<br/>规则 + 模型检测"]
   end
 
-  subgraph STORE["数据"]
-    PG["PostgreSQL"]
-    CH["ClickHouse"]
+  subgraph BRAIN["AI 运营"]
+    AR["agent-runtime<br/>图编排研判"]
+    LG["llm-gateway<br/>模型出口"]
+    MEM["案件 + 证据 Ledger<br/>机构记忆"]
+    SOAR["soar<br/>审批 · playbook"]
+  end
+
+  subgraph STORE["存储"]
+    PG["PostgreSQL<br/>告警 · 案件 · 记忆"]
+    CH["ClickHouse<br/>遥测"]
+    OS["对象存储<br/>raw payload"]
+  end
+
+  subgraph CTRL["控制面"]
+    W["Web"] --> C["Console"] --> I["IAM"]
+    W --> I
   end
 
   P["模型供应商"]
+  ASSET["资产 + AI 资产清单<br/>关键性 · 爆炸半径"]
 
-  A -->|"告警"| ING --> K --> COR
-  COR -->|"告警 + 事件视图"| PG
-  COR -->|"遥测"| CH
-  COR -->|"案件事件"| AR
-  AR -->|"案件状态"| C
-  AR -->|"模型调用"| LG --> P
-  U -->|"LLM / MCP"| AG -->|"决策"| AIP
+  A --> ING
+  V --> ING
+  T --> COR
+  AI --> AG --> AIP
+  AIP -->|"拦截 = 安全事件"| ING
   AG -->|"放行"| P
-  AIP -->|"拦截 = 案件"| ING
+  ING --> K --> COR
+  COR --> PG
+  COR --> CH
+  COR -->|"事件视图"| AR
+  AR --> LG --> P
+  AR --> MEM
+  MEM --> C
   AR -->|"处置提议"| SOAR
   SOAR -->|"原生 ID 回写"| A
-  W -->|"同源"| C
-  W -->|"同源"| I
-  C -->|"服务凭证"| I
-
-  classDef delivered fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-  classDef planned fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray: 5 5
-  class W,C,I delivered
-  class ING,K,COR,AR,LG,SOAR,AG,AIP,PG,CH planned
+  ASSET --> COR
+  ASSET --> AR
+  ASSET --> SOAR
+  OS -.-> ING
 ```
 
-绿色为今天已交付的模块，虚线为规划中模块。当前已实现的路径只有
-Web → IAM/Console，PostgreSQL 与 Redis 目前服务于 IAM；流水线是下一步建设，
-不是对现状的宣称。
-
-| 层次 | 组件 | 状态 |
-| --- | --- | --- |
-| 身份与访问 | IAM、PostgreSQL、Redis | 已交付 |
-| 控制面 | Web、Console | 底座已交付 |
-| 接入 | `ingestor`、Kafka、连接器注册表 | 规划中 |
-| 关联 | `correlator`、PostgreSQL 告警、ClickHouse 遥测 | 规划中 |
-| 研判 | `agent-runtime`、`llm-gateway`、证据 Ledger、机构记忆 | 规划中 |
-| 响应 | `soar`、审批、原生 ID 回写 | 规划中 |
-| AI 运行时防护 | `ai-gateway`、`ai-policy` | 规划中 |
-
-### 身份与授权（已交付）
-
-```mermaid
-flowchart LR
-  U["用户"] --> UR["user_roles"]
-  UR --> R["角色"]
-  R --> RP["role_permissions"]
-  RP --> P["权限键<br/>module.resource.action"]
-  R -->|"builtin = true"| SA["内置超级管理员"]
-```
-
-- 权限键是 `module.resource.action` 形式的稳定标识；数据库只存键，三段由键派生。
-- 配置托管管理员是唯一的 `configured` 账号：由配置创建，页面不能删除、停用或改密，
-  密码只随配置更新。
-- 会话是 PostgreSQL 中的逻辑行。改密、账号状态变化和配置变化会推进 `auth_epoch`，
-  让所有旧会话立即失效。
-- 审计只追加：触发器拒绝 `UPDATE`；只有保留期清理在 `iam.audit_purge` 事务标记下
-  才允许 `DELETE`。
+这张图是目标架构，不代表每个服务今天都已交付。第一个已实现的切片是控制面；
+数据面、AI 研判、响应与护栏服务正在开发。
 
 ## 技术栈
 
 | 层次 | 选择 |
 | --- | --- |
-| 已交付服务 | Go 1.27、Gin、GORM、Goose、pgx、SCS、Argon2id、Gorilla CSRF；Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn/ui、TanStack Query/Table、Zod、React Hook Form、next-intl |
-| 已交付数据 | PostgreSQL 16、Redis 7 |
-| 规划中服务 | `ingestor`（Go）；`correlator`、`agent-runtime`、`soar`、`ai-policy`（Python）；`llm-gateway`（Go）；`ai-gateway`（agentgateway，Rust） |
-| 规划中数据面 | Kafka、ClickHouse、S3 兼容对象存储 |
+| 服务 | Go 1.27、Gin、GORM、Goose、pgx；规划中的 correlator、agent-runtime、SOAR、ai-policy 使用 Python；Web 使用 Next.js 16 + React 19 |
+| 数据 | PostgreSQL 16、Redis 7、Kafka、ClickHouse、S3 兼容对象存储 |
+| AI | 图编排 agent runtime、`llm-gateway`（Bifrost core）、NeMo Guardrails、`ai-gateway`（agentgateway） |
 | 工具 | pnpm、GNU Make、Biome、Vitest、Playwright、Go test |
 
 ## 快速开始
@@ -275,6 +249,13 @@ docs/             架构、开发指南与计划
 | [更新日志](CHANGELOG.md) | 重要变更、修复与安全相关更新。 |
 | [支持](SUPPORT.md) | 提问渠道与需要提供的信息。 |
 | [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Web](src/apps/web/README.md) | 模块契约与职责。 |
+
+## 建设状态
+
+SecPlexus 处于 pre-1.0，公开开发中。仓库当前包含第一个已实现的切片：控制面
+（IAM、Web、Console）。数据面、AI 研判、响应编排、AI 运行时防护、漏洞运营、
+Agent 安全与威胁情报已经在 [docs/plans](docs/plans/README.md) 中定义，正在开发。
+规划中的服务不作为已交付能力。
 
 ## 安全
 
