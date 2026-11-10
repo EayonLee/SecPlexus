@@ -30,8 +30,8 @@ describe("platform localization", () => {
   test("uses the approved dashboard names and ICU pagination", () => {
     const english = createTranslator({ locale: "en", messages: en });
     const chinese = createTranslator({ locale: "zh-CN", messages: zh });
-    expect(english("Dashboard.title")).toBe("Dashboard");
-    expect(chinese("Dashboard.title")).toBe("安全智驾工作台");
+    expect(english("Dashboard.title")).toBe("Security Operations");
+    expect(chinese("Dashboard.title")).toBe("安全运营工作台");
     expect(english("Common.pagination", { total: 1, page: 1 })).toBe("1 record · Page 1");
     expect(english("Common.pagination", { total: 2, page: 1 })).toBe("2 records · Page 1");
     expect(chinese("Common.pagination", { total: 2, page: 1 })).toBe("共 2 条 · 第 1 页");

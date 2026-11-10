@@ -7,7 +7,6 @@ export interface AuthState extends Omit<ApiMe, "principal"> {
 }
 export const initialAuth: AuthState = {
   status: "unknown",
-  organizations: [],
-  capabilities: [],
-  platform_capabilities: [],
+  permissions: [],
+  roles: [],
 };

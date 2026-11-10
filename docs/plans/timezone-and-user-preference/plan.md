@@ -49,10 +49,10 @@ node scripts/build.mjs
 实施后在此记录。未完成前不得标记完成。
 
 - 单元测试：`tests/unit/timezone.test.ts` 11 个用例通过（回落顺序、语义值、非法值、偏好 cookie 序列化与清除）；`identity/timezone_test.go` 11 个表驱动子用例通过。
-- 集成测试：`TestProfileTimeZonePreference` 通过（真实 PG/Redis）。覆盖写入四个合法值可读回、三个非法值返回 400 且不改变既有值、空串清除、会话 ID 不变。`TestCrossOrganizationAccessIsDenied` 覆盖跨组织读写拒绝。
+- 集成测试：`TestProfileTimeZonePreference` 通过（真实 PG/Redis）。覆盖写入四个合法值可读回、三个非法值返回 400 且不改变既有值、空串清除、会话 ID 不变。
 - 类型与构建：`tsc --noEmit` 0；`vitest run` 17 文件 51 测试通过；`go build`/`go vet`/`go test` 全 0；根 `node scripts/build.mjs` 0；`pnpm catalogs:check` 0；`gofmt -l src` 无输出。
 - 浏览器实测：已完成（chrome-devtools，真实登录 admin）。切换 UTC 后审计日志显示 UTC 时间，与本地时间相差 8 小时；刷新后保持；清掉偏好 cookie 后重开仍按已保存偏好渲染；切回「跟随浏览器」恢复本地时间。此过程发现并修复一个真实缺陷：清掉偏好 cookie 后首屏曾回退浏览器时区，现 `request.ts` 在镜像缺失时回源 `GET /api/v1/iam/me` 读取数据库真值。
-- E2E（Playwright，隔离栈）：13 个用例全部通过，含新增「展示时区可切换并在刷新与清除本地缓存后保持」与「跨组织访问被服务端拒绝而不是仅在前端隐藏」。时区用例按 `request_id` 锁定同一条审计记录，跨时区比较渲染结果，刷新与清 cookie 后仍一致。
+- E2E（Playwright，隔离栈）：13 个用例全部通过，含新增「展示时区可切换并在刷新与清除本地缓存后保持」。时区用例按 `request_id` 锁定同一条审计记录，跨时区比较渲染结果，刷新与清 cookie 后仍一致。
 - 顺带修正：审计表头原写死「时间（UTC）」，时区可配置后该文案错误，已改为「时间 / Time」。
 
 实现说明：服务端读不到浏览器时区，因此使用两个 cookie，职责分离：

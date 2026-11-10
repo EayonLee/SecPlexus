@@ -10,9 +10,11 @@ import (
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // RegisterUserRoutes 注册用户业务路由及模块就绪检查。
+// 授权只有「用户 → 角色 → 权限」，路由全部扁平，没有组织段。
 func RegisterUserRoutes(engine gin.IRouter, server *handler.Server) {
 	engine.GET("/health/ready", server.Ready)
 	engine.GET("/api/v1/iam/auth/context", server.AuthContext)
@@ -24,27 +26,17 @@ func RegisterUserRoutes(engine gin.IRouter, server *handler.Server) {
 	engine.POST("/api/v1/iam/me/password", server.ChangePassword)
 	engine.GET("/api/v1/iam/users", server.ListUsers)
 	engine.POST("/api/v1/iam/users", server.CreateUser)
-	engine.PATCH("/api/v1/iam/users/:id", server.UpdateUser)
 	engine.GET("/api/v1/iam/users/:id", server.GetUser)
-	engine.GET("/api/v1/iam/organizations", server.ListOrganizations)
-	engine.GET("/api/v1/iam/organizations/tree", server.OrganizationTree)
-	engine.DELETE("/api/v1/iam/organizations/:id", server.DeleteOrganization)
-	engine.POST("/api/v1/iam/organizations", server.CreateOrganization)
-	engine.PATCH("/api/v1/iam/organizations/:id", server.UpdateOrganization)
+	engine.PATCH("/api/v1/iam/users/:id", server.UpdateUser)
+	engine.DELETE("/api/v1/iam/users/:id", server.DeleteUser)
+	engine.PUT("/api/v1/iam/users/:id/roles", server.SetUserRoles)
 	engine.POST("/api/v1/iam/users/:id/reset-password", server.ResetUserPassword)
-	engine.GET("/api/v1/iam/orgs/:org_id/users", server.ListOrganizationUsers)
-	engine.POST("/api/v1/iam/orgs/:org_id/users", server.CreateOrganizationUser)
-	engine.PATCH("/api/v1/iam/orgs/:org_id/users/:id", server.UpdateOrganizationUser)
-	engine.DELETE("/api/v1/iam/orgs/:org_id/users/:id", server.DeleteOrganizationUser)
-	engine.GET("/api/v1/iam/orgs/:org_id/roles", server.ListRoles)
-	engine.POST("/api/v1/iam/orgs/:org_id/roles", server.CreateRole)
-	engine.PATCH("/api/v1/iam/orgs/:org_id/roles/:id", server.UpdateRole)
-	engine.DELETE("/api/v1/iam/orgs/:org_id/roles/:id", server.DeleteRole)
-	engine.GET("/api/v1/iam/orgs/:org_id/roles/:id", server.GetRole)
-	engine.GET("/api/v1/iam/orgs/:org_id/roles/:id/users", server.ListRoleUsers)
-	engine.PUT("/api/v1/iam/orgs/:org_id/roles/:id/permissions", server.SetRolePermissions)
-	engine.PUT("/api/v1/iam/orgs/:org_id/users/:id/roles", server.SetOrganizationUserRoles)
-	engine.POST("/api/v1/iam/orgs/:org_id/permission-preview", server.PreviewPermission)
+	engine.GET("/api/v1/iam/roles", server.ListRoles)
+	engine.POST("/api/v1/iam/roles", server.CreateRole)
+	engine.GET("/api/v1/iam/roles/:id", server.GetRole)
+	engine.PATCH("/api/v1/iam/roles/:id", server.UpdateRole)
+	engine.DELETE("/api/v1/iam/roles/:id", server.DeleteRole)
+	engine.PUT("/api/v1/iam/roles/:id/permissions", server.SetRolePermissions)
 	engine.GET("/api/v1/iam/permissions", server.Permissions)
 	engine.GET("/api/v1/iam/audit-events", server.ListAuditEvents)
 }
@@ -61,6 +53,7 @@ func Handler(server *handler.Server) http.Handler {
 	user.Use(iammiddleware.Session(server.Service.Sessions), server.Errors, server.Security.GinProtect(), func(c *gin.Context) {
 		if c.FullPath() == "/api/v1/iam/auth/login" || c.FullPath() == "/api/v1/iam/auth/reauthenticate" {
 			if err := server.Limiter.CheckIP(c.Request.Context(), c.ClientIP()); err != nil {
+				logging.From(c.Request.Context()).Warn("Login source is rate limited", "event", "auth.login_rejected", "reason", "ip_rate_limited")
 				httpx.Reject(c, err)
 				return
 			}

@@ -19,15 +19,22 @@ var ErrUnavailable = errors.New("authentication dependency unavailable")
 var ErrRateLimited = errors.New("too many authentication attempts")
 
 // Limiter 使用成熟的原子 Redis 存储，来源与账号分别计数。
+// 阈值来自配置：不同部署的暴露面与用户规模不同，硬编码会让运维无从调整。
 type Limiter struct{ ip, account *limiter.Limiter }
 
+const accountRatePeriod = 15 * time.Minute
+
 // NewLimiter 在启动时加载组件脚本；存储不可用时启动失败。
-func NewLimiter(client *redis.Client) (*Limiter, error) {
+func NewLimiter(client *redis.Client, ipRate, accountRate int) (*Limiter, error) {
 	store, err := redisstore.NewStoreWithOptions(client, limiter.StoreOptions{Prefix: cachekey.Prefix})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	return &Limiter{ip: limiter.New(store, limiter.Rate{Period: time.Minute, Limit: 60}), account: limiter.New(store, limiter.Rate{Period: 15 * time.Minute, Limit: 20})}, nil
+
+	return &Limiter{
+		ip:      limiter.New(store, limiter.Rate{Period: time.Minute, Limit: int64(ipRate)}),
+		account: limiter.New(store, limiter.Rate{Period: accountRatePeriod, Limit: int64(accountRate)}),
+	}, nil
 }
 
 // CheckIP 在读取凭据前限制来源，包括无效请求。
@@ -36,6 +43,7 @@ func (l *Limiter) CheckIP(ctx context.Context, ip string) error {
 }
 
 // CheckAccount 限制已经规范化的账号，不把账号明文写入 Redis。
+// 未配置计数器的 Limiter（单元测试）不做限制。
 func (l *Limiter) CheckAccount(ctx context.Context, account string) error {
 	return check(ctx, l.account, cachekey.IAMLoginAccount, account)
 }
@@ -49,6 +57,10 @@ func (l *Limiter) Check(ctx context.Context, ip, account string) error {
 }
 
 func check(ctx context.Context, counter *limiter.Limiter, template cachekey.Template, value string) error {
+	if counter == nil {
+		return nil
+	}
+
 	hash := sha256.Sum256([]byte(value))
 	state, err := counter.Get(ctx, template.ComponentKey(hex.EncodeToString(hash[:])))
 	if err != nil {

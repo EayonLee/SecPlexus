@@ -15,7 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
@@ -79,24 +79,32 @@ type Auth struct {
 	ReauthWindow           time.Duration `yaml:"reauth_window"`            // 二次认证有效时间。
 	LoginMaxFailures       int           `yaml:"login_max_failures"`       // 允许的连续登录失败次数。
 	LoginLockDuration      time.Duration `yaml:"login_lock_duration"`      // 登录失败后的失败锁定时间。
+	LoginIPRate            int           `yaml:"login_ip_rate"`            // 每个来源地址每分钟允许的认证请求数。
+	LoginAccountRate       int           `yaml:"login_account_rate"`       // 每个账号每 15 分钟允许的认证请求数。
 }
 
-// Config 包含 IAM 启动、基础组件和身份管理所需的配置。
+// Bootstrap 描述配置托管的内置管理员：每次启动都幂等写入数据库。
+type Bootstrap struct {
+	Username string `yaml:"username"` // 内置管理员用户名；改名会收回旧账号的内置标记。
+	Password string `yaml:"password"` // 内置管理员密码；只能由配置更新。
+}
+
+// Retention 描述按天计算的清理窗口。
+type Retention struct {
+	AuditDays   int `yaml:"audit_days"`   // 审计记录保留天数。
+	SessionDays int `yaml:"session_days"` // 已结束会话保留天数。
+}
+
+// Config 包含 IAM 启动、基础组件和账号与授权所需的配置。
 type Config struct {
 	App            App                      `yaml:"app"`             // 公开服务配置。
 	DB             Database                 `yaml:"db"`              // PostgreSQL 连接配置。
 	Cache          Cache                    `yaml:"cache"`           // Redis 连接配置。
 	ServiceClients map[string]ServiceClient `yaml:"service_clients"` // 服务调用方及允许的操作。
 	Auth           Auth                     `yaml:"auth"`            // 认证策略配置。
-	Bootstrap      struct {
-		Username string `yaml:"username"` // 配置托管的唯一超级管理员用户名。
-		Password string `yaml:"password"` // 仅配置可修改的管理员密码。
-	} `yaml:"bootstrap"` // 唯一超级管理员身份与凭据的权威来源。
-	Retention struct {
-		AuditDays   int `yaml:"audit_days"`   // 审计记录保留天数。
-		SessionDays int `yaml:"session_days"` // 已结束会话保留天数。
-	} `yaml:"retention"` // 审计和会话保留期限。
-	Logging logging.Config `yaml:"logging"` // 日志输出与轮转配置。
+	Bootstrap      Bootstrap                `yaml:"bootstrap"`       // 配置托管管理员的权威来源。
+	Retention      Retention                `yaml:"retention"`       // 审计和会话保留期限。
+	Logging        logging.Config           `yaml:"logging"`         // 日志输出与轮转配置。
 }
 
 // Load 加载配置，补全连接地址并校验配置值。
@@ -160,6 +168,12 @@ func (c Config) Validate() error {
 	}
 	if a.LoginLockDuration <= 0 {
 		return errors.New("auth.login_lock_duration must be greater than 0")
+	}
+	if a.LoginIPRate < 1 || a.LoginIPRate > 10000 {
+		return errors.New("auth.login_ip_rate must be between 1 and 10000")
+	}
+	if a.LoginAccountRate < 1 || a.LoginAccountRate > 10000 {
+		return errors.New("auth.login_account_rate must be between 1 and 10000")
 	}
 	if c.Retention.AuditDays < 1 || c.Retention.AuditDays > 36500 {
 		return errors.New("retention.audit_days must be between 1 and 36500")
@@ -228,10 +242,10 @@ func (c Config) ValidateServe() error {
 
 // ValidateAdministrator 校验配置托管账号，错误不包含配置的凭据值。
 func (c Config) ValidateAdministrator() error {
-	if _, err := identity.NormalizeUsername(c.Bootstrap.Username); err != nil {
+	if _, err := account.NormalizeUsername(c.Bootstrap.Username); err != nil {
 		return errors.New("bootstrap.username must identify the configured administrator")
 	}
-	if err := identity.ValidatePassword(c.Bootstrap.Password); err != nil {
+	if err := account.ValidatePassword(c.Bootstrap.Password); err != nil {
 		// 报出实际长度而非密码值：截断（例如 .env 中未加引号的 '#' 之后被当作
 		// 注释丢弃）会因此立刻自解释，且长度不是机密信息。
 		return fmt.Errorf(

@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Building2, LockKeyhole } from "lucide-react";
+import { LockKeyhole } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -15,11 +14,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { zChangePasswordBody } from "@/spx/api/iam/schemas";
 
 import { useAction } from "../components/data";
+import { PageHeader } from "../components/page-header";
 import { changePassword, signOut, useIdentity } from "../iam/session";
 import { TimeZoneCard } from "./time-zone-card";
 
@@ -28,6 +27,7 @@ import { TimeZoneCard } from "./time-zone-card";
 export function SettingsPage() {
   const t = useTranslations("Account");
   const errors = useTranslations("Errors");
+  const navigation = useTranslations("Navigation");
   const perform = useAction();
 
   const auth = useIdentity();
@@ -48,9 +48,7 @@ export function SettingsPage() {
 
   return (
     <div className="@container/main flex flex-col gap-4 md:gap-6">
-      <header>
-        <h1 className="font-semibold text-2xl tracking-tight">{t("profile")}</h1>
-      </header>
+      <PageHeader title={navigation("settingsHome")} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="flex flex-col gap-4 lg:col-span-2">
@@ -67,32 +65,6 @@ export function SettingsPage() {
           </Card>
 
           <TimeZoneCard />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("organizations")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {auth.organizations.length ? (
-                <ul className="flex flex-col">
-                  {auth.organizations.map((org, index) => (
-                    <li key={org.id}>
-                      {index > 0 ? <Separator /> : null}
-                      <Link
-                        href={`/dashboard?org_id=${encodeURIComponent(org.id)}`}
-                        className="hover:bg-muted/50 flex items-center gap-3 rounded-md py-3 text-sm underline-offset-4 transition-colors hover:underline"
-                      >
-                        <Building2 className="text-muted-foreground size-4" />
-                        {org.name}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-muted-foreground text-sm">{t("noOrganizations")}</p>
-              )}
-            </CardContent>
-          </Card>
         </div>
 
         <Card className="h-fit">
@@ -116,7 +88,7 @@ export function SettingsPage() {
           <CardTitle>{t("passwordAndLogin")}</CardTitle>
         </CardHeader>
         <CardContent>
-          {auth.principal?.is_super_admin ? (
+          {auth.principal?.configured ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

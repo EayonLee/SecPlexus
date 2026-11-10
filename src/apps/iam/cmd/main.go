@@ -1,4 +1,4 @@
-// Command iam 选择身份服务、显式迁移和维护命令。
+// Command iam 选择账号服务、显式迁移和维护命令。
 package main
 
 import (
@@ -64,7 +64,7 @@ func newCommand() *cobra.Command {
 		}
 		return execute(cmd.Context(), name, cfg, userID)
 	}
-	root := &cobra.Command{Use: "iam", Short: "SecPlexus identity service", Args: cobra.NoArgs, RunE: run, SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "iam", Short: "SecPlexus account and authorization service", Args: cobra.NoArgs, RunE: run, SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&filename, "config", "", "IAM YAML configuration file")
 	root.PersistentFlags().BoolVar(&printEndpoints, "print-endpoints", false, "print effective endpoints without connecting dependencies")
 	for _, name := range []string{"check-config", "serve", "migrate", "status", "maintain", "revoke-after-restore", "reset-password"} {
@@ -134,6 +134,7 @@ func execute(ctx context.Context, command string, cfg config.Config, userID stri
 			return err
 		}
 
+		logging.From(migrationCtx).Info("IAM seed completed", "event", "iam.seed.completed")
 		fmt.Println("IAM migrations and initialization completed.")
 		return nil
 	}

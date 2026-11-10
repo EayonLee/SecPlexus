@@ -51,7 +51,7 @@ func TestEventsRouteIsRegistered(t *testing.T) {
 
 	var found bool
 	for _, route := range engine.Routes() {
-		if route.Method == http.MethodGet && route.Path == "/api/v1/console/orgs/:org_id/events" {
+		if route.Method == http.MethodGet && route.Path == "/api/v1/console/events" {
 			found = true
 		}
 	}
@@ -61,7 +61,26 @@ func TestEventsRouteIsRegistered(t *testing.T) {
 	}
 }
 
-// 健康检查必须存在且不依赖组织参数。
+// 扁平授权没有组织段，旧路由必须消失。
+func TestOrganizationRoutesAreGone(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	client, err := iamclient.New("http://127.0.0.1:8081", strings.Repeat("c", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(client.Close)
+	router.Register(engine, &handler.Server{IAM: client})
+
+	for _, route := range engine.Routes() {
+		if strings.Contains(route.Path, "orgs") || strings.Contains(route.Path, ":org_id") {
+			t.Fatalf("organization route still registered: %s", route.Path)
+		}
+	}
+}
+
+// 健康检查必须存在且不依赖任何组织参数。
 func TestReadyRouteRegistered(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

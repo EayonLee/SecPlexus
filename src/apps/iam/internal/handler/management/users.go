@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
@@ -15,7 +16,7 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// ListUsers 按查询条件与分页读取平台用户。
+// ListUsers 按查询条件与分页读取用户。
 func (s *Handler) ListUsers(c *gin.Context) {
 	var params model.ListQuery
 	if err := c.ShouldBindQuery(&params); err != nil {
@@ -24,11 +25,8 @@ func (s *Handler) ListUsers(c *gin.Context) {
 	}
 	w := c.Writer
 	r := c.Request
-	query := params.Q
 
-	limit, offset := params.Limit, params.Offset
-
-	response, err := s.Service.ListUsers(r.Context(), limit, offset, query)
+	response, err := s.Service.ListUsers(r.Context(), params.Limit, params.Offset, params.Q)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -37,7 +35,7 @@ func (s *Handler) ListUsers(c *gin.Context) {
 	result.Success(w, response)
 }
 
-// GetUser 读取平台用户的公开字段。
+// GetUser 读取用户的公开字段与角色。
 func (s *Handler) GetUser(c *gin.Context) {
 	id := c.Param("id")
 	w := c.Writer
@@ -55,12 +53,12 @@ func (s *Handler) GetUser(c *gin.Context) {
 func (s *Handler) CreateUser(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformUsersManage, ""); err != nil {
+	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMUsersManage); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	var input service.UserInput
+	var input model.APIUserInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -74,7 +72,13 @@ func (s *Handler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	id, err := s.Service.CreateUser(r.Context(), input, middleware.RequestID(r))
+	id, err := s.Service.CreateUser(r.Context(), service.UserCreate{
+		Username:    input.Username,
+		DisplayName: input.DisplayName,
+		Email:       input.Email,
+		Password:    input.Password,
+		RoleIDs:     input.RoleIDs,
+	}, middleware.RequestID(r))
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -83,18 +87,54 @@ func (s *Handler) CreateUser(c *gin.Context) {
 	result.Created(w, map[string]string{"id": id})
 }
 
-// UpdateUser 按身份版本更新用户资料和状态。
+// UpdateUser 按账号版本更新用户资料和状态。
 func (s *Handler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input service.UserUpdate
+	var input model.APIUserUpdate
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	if err := s.Service.UpdateUser(r.Context(), id, input, middleware.RequestID(r)); err != nil {
+	if err := s.Service.UpdateUser(r.Context(), id, service.UserUpdate{
+		DisplayName: input.DisplayName,
+		Email:       input.Email,
+		Status:      enum.UserStatus(input.Status),
+	}, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
+	}
+
+	result.NoContent(w)
+}
+
+// DeleteUser 删除用户；配置托管账号与仍被角色绑定引用的账号由用例拒绝。
+func (s *Handler) DeleteUser(c *gin.Context) {
+	id := c.Param("id")
+	w := c.Writer
+	r := c.Request
+	if err := s.Service.DeleteUser(r.Context(), id, middleware.RequestID(r)); err != nil {
+		httpx.Reject(c, err)
+		return
+	}
+
+	result.NoContent(w)
+}
+
+// SetUserRoles 全量替换用户角色，权限和委派上限由用例校验。
+func (s *Handler) SetUserRoles(c *gin.Context) {
+	id := c.Param("id")
+	w := c.Writer
+	r := c.Request
+	var input model.APIUserRolesInput
+	if err := httpx.Bind(c, &input); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+		return
+	}
+
+	if err := s.Service.ReplaceUserRoles(r.Context(), id, service.UserRoles{RoleIDs: input.RoleIDs}, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -107,7 +147,7 @@ func (s *Handler) ResetUserPassword(c *gin.Context) {
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMPlatformUsersManage, ""); err != nil {
+	if _, err := s.Service.Authorize(r.Context(), iamclient.PermissionIAMUsersReset); err != nil {
 		httpx.Reject(c, err)
 		return
 	}

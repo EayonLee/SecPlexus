@@ -50,8 +50,8 @@ func TestSecurityChangesRollbackWhenAuditCannotCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 缺少 org_id/role_ids 时在绑定层即被拒绝，不会走到数据库故障路径。
-	client.request("POST", "/api/v1/iam/users", map[string]string{"username": "newmember", "display_name": "用户", "password": "temporary account password"}, 400)
+	// 创建在业务事务内写审计；审计不可写必须让整个变更回滚。
+	client.request("POST", "/api/v1/iam/users", map[string]string{"username": "newmember", "display_name": "用户", "password": "temporary account password"}, 500)
 	var count int
 	if err = f.server.Service.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE username_normalized='newmember'`).Scan(&count); err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestAuthenticationLocksRecoverAndDependencyFailuresRemainUnavailable(t *tes
 	}
 
 	client.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": f.initial}, 503)
-	// Redis 不可用不能被误报为密码错误，也不应阻断不依赖 Redis 的身份读取。
+	// Redis 不可用不能被误报为密码错误，也不应阻断不依赖 Redis 的账号读取。
 	client.request("GET", "/api/v1/iam/me", nil, 200)
 	f.server.Service.Store.Pool.Close()
 	client.request("GET", "/api/v1/iam/me", nil, 503)
@@ -98,7 +98,7 @@ func TestPanicBeforeSessionCommitCompensatesLogicalSession(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		authentication.CurrentAttempt(ctx).Principal = &principal
+		authentication.AttemptFrom(ctx).SetPrincipal(principal, false)
 		panic("private panic must not reach browser")
 	}
 	response, err := client.client.Get(f.public.URL + "/health/ready")

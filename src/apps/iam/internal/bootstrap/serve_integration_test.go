@@ -32,7 +32,7 @@ func TestUnifiedHTTPListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Auth.CSRFKey = strings.Repeat("k", 32)
-	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.organizations.read"}}}
+	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.users.read"}}}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

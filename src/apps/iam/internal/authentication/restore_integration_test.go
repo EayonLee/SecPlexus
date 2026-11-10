@@ -42,7 +42,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	principal, err := sessions.Create(loaded, user, uuid.NewString(), "integration", "127.0.0.1", false)
+	principal, err := sessions.Create(loaded, user, uuid.NewString(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 
 	run("pg_restore", backup, "--clean", "--if-exists", "--no-owner", "--exit-on-error")
 	clear(backup)
-	// 数据恢复确实带回了旧会话；维护步骤必须撤销这些恢复出来的身份。
+	// 数据恢复确实带回了旧会话；维护步骤必须撤销这些恢复出来的会话。
 	restored, err := sessions.Manager.Load(ctx, token)
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
+	// 绑定测试必须加载校验别名注册（iam_permissions/iam_role_ids）。
+	_ "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 )
 
@@ -49,50 +51,57 @@ func requireInvalidBinding(t *testing.T, pattern, method string, handler gin.Han
 
 func TestCreateRoleRejectsInvalidBodyBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles", http.MethodPost, s.CreateRole, "/orgs/o/roles", `{"code":"","name":""}`)
+	requireInvalidBinding(t, "/roles", http.MethodPost, s.CreateRole, "/roles", `{"name":""}`)
 }
 
 func TestCreateRoleRejectsMalformedJSONBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles", http.MethodPost, s.CreateRole, "/orgs/o/roles", `{`)
+	requireInvalidBinding(t, "/roles", http.MethodPost, s.CreateRole, "/roles", `{`)
 }
 
 func TestCreateRoleRejectsUnknownFieldBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles", http.MethodPost, s.CreateRole, "/orgs/o/roles", `{"code":"x1","name":"名称","unexpected":"field"}`)
+	requireInvalidBinding(t, "/roles", http.MethodPost, s.CreateRole, "/roles", `{"name":"名称","unexpected":"field"}`)
 }
 
-func TestCreateOrganizationRejectsInvalidBodyBeforeService(t *testing.T) {
+func TestUpdateRoleRejectsMissingNameBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/organizations", http.MethodPost, s.CreateOrganization, "/organizations", `{"name":"","slug":"","admin_user_id":""}`)
+	requireInvalidBinding(t, "/roles/:id", http.MethodPatch, s.UpdateRole, "/roles/r", `{"description":"说明"}`)
 }
 
-func TestCreateOrganizationRejectsInvalidSlugBeforeService(t *testing.T) {
+// 角色没有并发版本字段，旧客户端回传必须按未知字段拒绝而不是静默忽略。
+func TestSetRolePermissionsRejectsVersionFieldBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/organizations", http.MethodPost, s.CreateOrganization, "/organizations", `{"name":"组织","slug":"Bad Slug","admin_user_id":"u"}`)
+	requireInvalidBinding(t, "/roles/:id/permissions", http.MethodPut, s.SetRolePermissions, "/roles/r/permissions", `{"permissions":[],"version":"abc"}`)
 }
 
-func TestUpdateRoleRejectsMissingVersionBeforeService(t *testing.T) {
+func TestSetUserRolesRejectsNonUUIDBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles/:id", http.MethodPatch, s.UpdateRole, "/orgs/o/roles/r", `{"name":"Role","status":"active"}`)
+	requireInvalidBinding(t, "/users/:id/roles", http.MethodPut, s.SetUserRoles, "/users/u/roles", `{"role_ids":["not-a-uuid"]}`)
 }
 
-func TestUpdateRoleRejectsUnknownStatusBeforeService(t *testing.T) {
+func TestUpdateUserRejectsMissingStatusBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles/:id", http.MethodPatch, s.UpdateRole, "/orgs/o/roles/r", `{"name":"Role","status":"archived","authz_epoch":"1"}`)
+	requireInvalidBinding(t, "/users/:id", http.MethodPatch, s.UpdateUser, "/users/u", `{"display_name":"用户"}`)
 }
 
-func TestSetRolePermissionsRejectsNonNumericVersionBeforeService(t *testing.T) {
+func TestUpdateUserRejectsUnknownStatusBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/orgs/:org_id/roles/:id/permissions", http.MethodPut, s.SetRolePermissions, "/orgs/o/roles/r/permissions", `{"permissions":[],"version":"abc"}`)
+	requireInvalidBinding(t, "/users/:id", http.MethodPatch, s.UpdateUser, "/users/u", `{"display_name":"用户","status":"archived"}`)
 }
 
-func TestListOrganizationsRejectsOutOfRangeLimitBeforeService(t *testing.T) {
+// 账号版本由服务端维护，客户端回传 auth_epoch 必须按未知字段拒绝。
+func TestUpdateUserRejectsEpochFieldBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/organizations", http.MethodGet, s.ListOrganizations, "/organizations?limit=1000", "")
+	requireInvalidBinding(t, "/users/:id", http.MethodPatch, s.UpdateUser, "/users/u", `{"display_name":"用户","status":"active","auth_epoch":"1"}`)
 }
 
-func TestListOrganizationsRejectsNegativeOffsetBeforeService(t *testing.T) {
+func TestListUsersRejectsOutOfRangeLimitBeforeService(t *testing.T) {
 	s := &management.Handler{}
-	requireInvalidBinding(t, "/organizations", http.MethodGet, s.ListOrganizations, "/organizations?offset=-1", "")
+	requireInvalidBinding(t, "/users", http.MethodGet, s.ListUsers, "/users?limit=1000", "")
+}
+
+func TestListUsersRejectsNegativeOffsetBeforeService(t *testing.T) {
+	s := &management.Handler{}
+	requireInvalidBinding(t, "/users", http.MethodGet, s.ListUsers, "/users?offset=-1", "")
 }

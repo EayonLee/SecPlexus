@@ -15,13 +15,12 @@ import {
 } from "@/spx/api/iam/auth";
 
 import type messages from "../../../messages/en.json";
-import { organizationFromPath } from "./navigation";
-import { identityScope, queryClient } from "./query";
+import { sessionScope, queryClient } from "./query";
 import { advanceRequestScope, assertRequestScope, requestScope } from "./request-scope";
 import { type AuthState, initialAuth } from "./types";
 
 export const useIdentity = create<AuthState>(() => initialAuth);
-let identityRequest = 0;
+let sessionRequest = 0;
 let csrfToken = "";
 let csrfPending: Promise<string> | undefined;
 let channel: BroadcastChannel | undefined;
@@ -34,7 +33,7 @@ function syncTimeZonePreferenceCookie(value: string | null | undefined) {
   document.cookie = timeZonePreferenceCookieValue(value);
 }
 
-/** advance 取消旧范围请求和投影，不改变尚未失效的服务端身份。 */
+/** advance 取消旧范围请求和投影，不改变尚未失效的服务端会话。 */
 function advance() {
   advanceRequestScope();
   void queryClient.cancelQueries();
@@ -49,31 +48,29 @@ function clear(status: AuthState["status"] = "anonymous") {
   useIdentity.setState({ ...initialAuth, status }, true);
 }
 
-/** acceptIdentity 是服务端身份投影的唯一安装点，范围变化同时清理旧请求与缓存。 */
+/** acceptIdentity 是服务端会话投影的唯一安装点，范围变化同时清理旧请求与缓存。 */
 function acceptIdentity(data: AuthState) {
   const previous = useIdentity.getState();
   if (
     previous.principal &&
-    (JSON.stringify(identityScope(previous)) !== JSON.stringify(identityScope(data)) ||
-      JSON.stringify(previous.capabilities) !== JSON.stringify(data.capabilities) ||
-      JSON.stringify(previous.platform_capabilities) !== JSON.stringify(data.platform_capabilities))
+    JSON.stringify(sessionScope(previous)) !== JSON.stringify(sessionScope(data))
   )
     advance();
   syncTimeZonePreferenceCookie(data.timezone);
   useIdentity.setState(data, true);
 }
 
-/** initializeSession 接收跨标签身份变更通知，并加载服务端身份。 */
+/** initializeSession 接收跨标签会话变更通知，并加载服务端会话投影。 */
 export function initializeSession() {
   if (!channel && typeof BroadcastChannel !== "undefined") {
-    channel = new BroadcastChannel("spx-identity");
+    channel = new BroadcastChannel("spx-session");
     channel.addEventListener("message", ({ data }) => {
       if (data !== "session_changed") return;
       clear("unknown");
-      void refreshIdentity();
+      void refreshMe();
     });
   }
-  return refreshIdentity();
+  return refreshMe();
 }
 
 async function csrf(): Promise<string> {
@@ -112,58 +109,40 @@ http.interceptors.response.use(
     if (error.status === 401 && path !== "/api/v1/iam/auth/login") clear();
     if (error.status === 503) useIdentity.setState({ status: "unavailable" });
     if (error.code === "iam.csrf_invalid") csrfToken = "";
-    if (error.code === "permission_denied" && !path.startsWith("/api/v1/iam/me")) void refreshIdentity();
+    if (error.code === "permission_denied" && !path.startsWith("/api/v1/iam/me")) void refreshMe();
     throw error;
   },
 );
 
-/** refreshIdentity 只接受当前身份周期的最新结果，隔离组织切换的并发响应。 */
-export async function refreshIdentity(
-  requestedOrg = organizationFromPath(window.location.pathname, window.location.search),
-) {
-  let orgID = requestedOrg;
+/** refreshMe 只接受当前会话周期的最新结果，隔离并发刷新。 */
+export async function refreshMe() {
   const started = requestScope().version;
-  const request = ++identityRequest;
+  const request = ++sessionRequest;
   try {
-    let data = await me(orgID);
-    if (!orgID && data.organizations.length) {
-      orgID = data.organizations[0].id;
-      data = await me(orgID);
-    }
-    if (started === requestScope().version && request === identityRequest)
+    const data = await me();
+    if (started === requestScope().version && request === sessionRequest)
       acceptIdentity({ ...data, status: "authenticated" });
   } catch (error) {
     if (started !== requestScope().version || (error instanceof DOMException && error.name === "AbortError")) return;
     // 401 的含义是"未登录"，必须落到 anonymous；若停留在 unknown，登录页会把表单保持禁用，用户无法输入。
     if (error instanceof APIError && error.status === 401) {
-      if (started === requestScope().version && request === identityRequest) clear("anonymous");
+      if (started === requestScope().version && request === sessionRequest) clear("anonymous");
       return;
     }
-    if (error instanceof APIError && error.status === 403 && orgID) {
-      try {
-        const data = await me();
-        if (started === requestScope().version && request === identityRequest)
-          acceptIdentity({ ...data, org_id: orgID, capabilities: [], status: "authenticated" });
-      } catch {
-        if (started === requestScope().version && request === identityRequest)
-          useIdentity.setState({ status: "unavailable" });
-      }
-      return;
-    }
-    if (started === requestScope().version && request === identityRequest)
+    if (started === requestScope().version && request === sessionRequest)
       useIdentity.setState({ status: "unavailable" });
   }
 }
 
-/** signIn 登录成功后重新加载身份，并通知其他标签页。 */
+/** signIn 登录成功后重新加载会话投影，并通知其他标签页。 */
 export async function signIn(username: string, password: string) {
   await login({ username, password });
   clear("unknown");
   channel?.postMessage("session_changed");
-  await refreshIdentity();
+  await refreshMe();
 }
 
-/** signOut 先请求服务端撤销，再清理当前标签的身份投影。 */
+/** signOut 先请求服务端撤销，再清理当前标签的会话投影。 */
 export async function signOut() {
   await logout();
   clear();
@@ -177,20 +156,13 @@ export async function changePassword(old_password: string, new_password: string)
   channel?.postMessage("session_changed");
 }
 
-/** reauthenticate 确认当前账号密码，再刷新能力与安全凭据。 */
+/** reauthenticate 确认当前账号密码，再刷新权限与安全凭据。 */
 export async function reauthenticate(password: string) {
-  const orgID = useIdentity.getState().org_id;
   advance();
   await confirmPassword({ password });
   // 同一身份确认只替换会话投影，保持当前页面挂载以保留表单草稿。
-  await refreshIdentity(orgID);
+  await refreshMe();
   channel?.postMessage("session_changed");
-}
-
-/** switchOrganization 取消旧组织请求，再加载目标组织能力。 */
-export async function switchOrganization(orgID: string) {
-  clear("unknown");
-  await refreshIdentity(orgID);
 }
 
 /** errorMessageKey 将稳定结果码映射为国际化消息键，不显示内部错误正文。 */
@@ -207,6 +179,18 @@ export function errorMessageKey(error: unknown): keyof (typeof messages)["Errors
       return "permissionDenied";
     case "conflict":
       return "conflict";
+    case "iam.builtin_role_immutable":
+      return "builtinRoleImmutable";
+    case "iam.configured_user_immutable":
+      return "configuredUserImmutable";
+    case "iam.last_super_admin":
+      return "lastSuperAdmin";
+    case "iam.role_in_use":
+      return "roleInUse";
+    case "iam.role_name_taken":
+      return "roleNameTaken";
+    case "iam.self_target_forbidden":
+      return "selfTargetForbidden";
     case "iam.csrf_invalid":
       return "csrfInvalid";
     case "invalid_request":

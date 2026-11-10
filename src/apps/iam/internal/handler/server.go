@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
@@ -39,7 +39,6 @@ type Server struct {
 	Auth       *authentication.Authenticator
 	Security   *iammiddleware.Security
 	Limiter    *authentication.Limiter
-	hashSlots  chan struct{}
 	ReadyCheck func(context.Context) error
 }
 
@@ -50,7 +49,7 @@ func New(svc *service.Service, security *iammiddleware.Security, limiter *authen
 	if err != nil {
 		return nil, err
 	}
-	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, hashSlots: slots, ReadyCheck: ReadyCheck}, nil
+	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, ReadyCheck: ReadyCheck}, nil
 }
 
 // Errors 将 Gin 收集的业务错误在响应及会话提交前统一映射。
@@ -69,7 +68,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = result.CodeServiceUnavailable
 	case errors.Is(err, authentication.ErrInvalidCredentials):
 		code = result.CodeInvalidCredentials
-	case errors.Is(err, identity.ErrPasswordMismatch):
+	case errors.Is(err, account.ErrPasswordMismatch):
 		code = result.CodeInvalidCurrentPassword
 	case errors.Is(err, repository.ErrUnauthenticated):
 		code = result.CodeUnauthenticated
@@ -79,16 +78,22 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		code = result.CodePermissionDenied
 	case errors.Is(err, repository.ErrInvalid):
 		code = result.CodeInvalidRequest
-	case errors.Is(err, repository.ErrRootOrganization):
-		code = result.CodeRootOrganizationImmutable
-	case errors.Is(err, repository.ErrHasChildren):
-		code = result.CodeOrganizationHasChildren
-	case errors.Is(err, repository.ErrHasUsers):
-		code = result.CodeOrganizationHasMembers
 	case errors.Is(err, repository.ErrUsernameTaken):
 		code = result.CodeUsernameTaken
 	case errors.Is(err, repository.ErrEmailTaken):
 		code = result.CodeEmailTaken
+	case errors.Is(err, repository.ErrRoleInUse):
+		code = result.CodeRoleInUse
+	case errors.Is(err, repository.ErrRoleNameTaken):
+		code = result.CodeRoleNameTaken
+	case errors.Is(err, repository.ErrBuiltinRoleImmutable):
+		code = result.CodeBuiltinRoleImmutable
+	case errors.Is(err, repository.ErrConfiguredUserImmutable):
+		code = result.CodeConfiguredUserImmutable
+	case errors.Is(err, repository.ErrLastSuperAdmin):
+		code = result.CodeLastSuperAdmin
+	case errors.Is(err, repository.ErrSelfTarget):
+		code = result.CodeSelfTargetForbidden
 	case errors.Is(err, repository.ErrConflict):
 		code = result.CodeConflict
 	case errors.Is(err, repository.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound), errors.Is(err, sql.ErrNoRows):
@@ -127,7 +132,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		// 浏览器导航取消请求属于正常中断，不作为内部故障告警。
 		level = slog.LevelDebug
 	}
-	logging.From(r.Context()).Log(r.Context(), level, "IAM 请求未完成", "event", "iam.rejected", "code", code, "error", logging.Error(err))
+	logging.From(r.Context()).Log(r.Context(), level, "IAM request rejected", "event", "iam.rejected", "code", code, "error", logging.Error(err))
 
 	result.Fail(w, code)
 }
@@ -166,13 +171,14 @@ func (s *Server) Reauthenticate(c *gin.Context) {
 }
 
 func (s *Server) metadata(c *gin.Context) authentication.RequestMetadata {
-	return authentication.RequestMetadata{RequestID: requestID(c.Request), ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+	return authentication.RequestMetadata{RequestID: requestID(c.Request), ClientIP: c.ClientIP()}
 }
 
 func (s *Server) authenticated(c *gin.Context, p iamclient.Principal, reauth bool) {
-	a := authentication.CurrentAttempt(c.Request.Context())
-	a.Principal = &p
-	a.Reauthenticate = reauth
+	if a := authentication.AttemptFrom(c.Request.Context()); a != nil {
+		a.SetPrincipal(p, reauth)
+	}
+
 	s.Security.ClearCSRF(c.Writer)
 	result.Success(c.Writer, model.APILoginResponse{Principal: p})
 }
@@ -191,7 +197,7 @@ func (s *Server) AuthContext(c *gin.Context) {
 	result.Success(c.Writer, map[string]string{"csrf_token": csrf.Token(c.Request)})
 }
 
-// AuthorizeRequest 先确认服务身份，再按转发的原始会话执行权限检查。
+// AuthorizeRequest 先确认服务调用方凭证，再按转发的原始会话执行权限检查。
 func (s *Server) AuthorizeRequest(c *gin.Context) {
 	r := c.Request
 	var input iamclient.AuthorizeRequest
@@ -201,10 +207,6 @@ func (s *Server) AuthorizeRequest(c *gin.Context) {
 	}
 	if !s.Security.ServiceClient(r, input.Action) {
 		httpx.Reject(c, authorization.ErrDenied)
-		return
-	}
-	if input.Resource != nil {
-		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 	parsed, err := url.ParseRequestURI(input.Path)
@@ -229,7 +231,7 @@ func (s *Server) AuthorizeRequest(c *gin.Context) {
 			failure = authentication.ErrUnavailable
 			return
 		}
-		decision, failure = s.Service.Authorize(loaded, input.Action, input.OrgID)
+		decision, failure = s.Service.Authorize(loaded, input.Action)
 	})).ServeHTTP(buffer, original)
 	if failure != nil {
 		httpx.Reject(c, failure)

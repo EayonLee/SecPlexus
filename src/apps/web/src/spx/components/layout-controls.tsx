@@ -15,10 +15,9 @@ import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 export function LayoutControls() {
   const t = useTranslations("Appearance");
 
-  const { values, resolvedThemeMode, setPreference, resetPreferences } = usePreferencesStore(
+  const { values, setPreference, resetPreferences } = usePreferencesStore(
     useShallow((state) => ({
       values: state.values,
-      resolvedThemeMode: state.resolvedThemeMode,
       setPreference: state.setPreference,
       resetPreferences: state.resetPreferences,
     })),

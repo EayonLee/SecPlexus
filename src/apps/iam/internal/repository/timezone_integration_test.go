@@ -12,13 +12,13 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 )
 
-// 时区偏好只在渲染层生效，写入不能连带改变身份版本或撤销会话。
+// 时区偏好只在渲染层生效，写入不能连带改变账号版本或撤销会话。
 func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "tz-member", "tz-member", "时区用户", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "tz-member", "tz-member", "时区用户", "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,7 +45,7 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 	}
 
 	if before != after {
-		t.Fatalf("auth epoch changed from %d to %d; time zone must not rotate identity", before, after)
+		t.Fatalf("auth epoch changed from %d to %d; time zone must not bump the account version", before, after)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestClearingTimeZoneStoresNull(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "tz-clear", "tz-clear", "清除时区", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "tz-clear", "tz-clear", "清除时区", "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +83,7 @@ func TestUserTimeZoneColumnIsNullable(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "tz-default", "tz-default", "默认时区", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "tz-default", "tz-default", "默认时区", "", false); err != nil {
 		t.Fatal(err)
 	}
 

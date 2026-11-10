@@ -11,28 +11,31 @@ type Definition struct {
 }
 
 const (
-	CodeOK                        Code = "ok"
-	CodeInvalidRequest            Code = "invalid_request"
-	CodeUnauthenticated           Code = "unauthenticated"
-	CodePermissionDenied          Code = "permission_denied"
-	CodeNotFound                  Code = "not_found"
-	CodeConflict                  Code = "conflict"
-	CodeRateLimited               Code = "rate_limited"
-	CodeInternalError             Code = "internal_error"
-	CodeServiceUnavailable        Code = "service_unavailable"
-	CodePayloadTooLarge           Code = "payload_too_large"
-	CodeUnsupportedMediaType      Code = "unsupported_media_type"
-	CodeMethodNotAllowed          Code = "method_not_allowed"
-	CodeInvalidCredentials        Code = "iam.invalid_credentials"
-	CodeInvalidCurrentPassword    Code = "iam.invalid_current_password"
-	CodeCSRFInvalid               Code = "iam.csrf_invalid"
-	CodeOriginInvalid             Code = "iam.origin_invalid"
-	CodeRecentAuthRequired        Code = "iam.recent_auth_required"
-	CodeUsernameTaken             Code = "iam.username_taken"
-	CodeEmailTaken                Code = "iam.email_taken"
-	CodeOrganizationHasChildren   Code = "iam.organization_has_children"
-	CodeOrganizationHasMembers    Code = "iam.organization_has_members"
-	CodeRootOrganizationImmutable Code = "iam.root_organization_immutable"
+	CodeOK                      Code = "ok"
+	CodeInvalidRequest          Code = "invalid_request"
+	CodeUnauthenticated         Code = "unauthenticated"
+	CodePermissionDenied        Code = "permission_denied"
+	CodeNotFound                Code = "not_found"
+	CodeConflict                Code = "conflict"
+	CodeRateLimited             Code = "rate_limited"
+	CodeInternalError           Code = "internal_error"
+	CodeServiceUnavailable      Code = "service_unavailable"
+	CodePayloadTooLarge         Code = "payload_too_large"
+	CodeUnsupportedMediaType    Code = "unsupported_media_type"
+	CodeMethodNotAllowed        Code = "method_not_allowed"
+	CodeInvalidCredentials      Code = "iam.invalid_credentials"
+	CodeInvalidCurrentPassword  Code = "iam.invalid_current_password"
+	CodeCSRFInvalid             Code = "iam.csrf_invalid"
+	CodeOriginInvalid           Code = "iam.origin_invalid"
+	CodeRecentAuthRequired      Code = "iam.recent_auth_required"
+	CodeUsernameTaken           Code = "iam.username_taken"
+	CodeEmailTaken              Code = "iam.email_taken"
+	CodeRoleInUse               Code = "iam.role_in_use"
+	CodeRoleNameTaken           Code = "iam.role_name_taken"
+	CodeBuiltinRoleImmutable    Code = "iam.builtin_role_immutable"
+	CodeConfiguredUserImmutable Code = "iam.configured_user_immutable"
+	CodeLastSuperAdmin          Code = "iam.last_super_admin"
+	CodeSelfTargetForbidden     Code = "iam.self_target_forbidden"
 )
 
 // Lookup 查询已注册结果码；未知码不会被当作成功。
@@ -76,12 +79,18 @@ func Lookup(code Code) (Definition, bool) {
 		return Definition{Status: 409, Message: "该用户名已被占用"}, true
 	case CodeEmailTaken:
 		return Definition{Status: 409, Message: "该邮箱已被占用"}, true
-	case CodeOrganizationHasChildren:
-		return Definition{Status: 409, Message: "该组织下仍有子组织，无法删除"}, true
-	case CodeOrganizationHasMembers:
-		return Definition{Status: 409, Message: "该组织下仍有用户，无法删除"}, true
-	case CodeRootOrganizationImmutable:
-		return Definition{Status: 409, Message: "根组织不能删除"}, true
+	case CodeRoleInUse:
+		return Definition{Status: 409, Message: "该角色下仍有用户，无法删除"}, true
+	case CodeRoleNameTaken:
+		return Definition{Status: 409, Message: "该角色名称已被占用"}, true
+	case CodeBuiltinRoleImmutable:
+		return Definition{Status: 409, Message: "内置角色不可修改或删除"}, true
+	case CodeConfiguredUserImmutable:
+		return Definition{Status: 409, Message: "内置管理员由配置管理，不能删除或停用"}, true
+	case CodeLastSuperAdmin:
+		return Definition{Status: 409, Message: "必须保留至少一名启用中的超级管理员"}, true
+	case CodeSelfTargetForbidden:
+		return Definition{Status: 409, Message: "不能对当前登录账号执行该操作"}, true
 	}
 	return Definition{}, false
 }

@@ -1,6 +1,8 @@
 package management
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
@@ -11,51 +13,8 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// PreviewPermission 预览拟议权限变更，不实际授予权限。
-func (s *Handler) PreviewPermission(c *gin.Context) {
-	orgId := c.Param("org_id")
-	w := c.Writer
-	r := c.Request
-	var input service.PreviewInput
-	if err := httpx.Bind(c, &input); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
-
-	response, err := s.Service.Preview(r.Context(), orgId, input)
-	if err != nil {
-		httpx.Reject(c, err)
-		return
-	}
-
-	result.Success(w, response)
-}
-
-// ListRoleUsers 查询角色关联用户，组织与角色读取权限均由用例校验。
-func (s *Handler) ListRoleUsers(c *gin.Context) {
-	orgId := c.Param("org_id")
-	id := c.Param("id")
-	var params model.ListQuery
-	if err := c.ShouldBindQuery(&params); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
-	w := c.Writer
-	r := c.Request
-	limit, offset := params.Limit, params.Offset
-
-	response, err := s.Service.ListRoleUsers(r.Context(), limit, offset, orgId, id)
-	if err != nil {
-		httpx.Reject(c, err)
-		return
-	}
-
-	result.Success(w, response)
-}
-
-// ListRoles 读取角色及当前操作者允许执行的动作。
+// ListRoles 读取全局角色列表。
 func (s *Handler) ListRoles(c *gin.Context) {
-	orgId := c.Param("org_id")
 	var params model.ListQuery
 	if err := c.ShouldBindQuery(&params); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
@@ -63,29 +22,31 @@ func (s *Handler) ListRoles(c *gin.Context) {
 	}
 	w := c.Writer
 	r := c.Request
-	limit, offset := params.Limit, params.Offset
 
-	items, total, err := s.Service.Roles(r.Context(), orgId, "", limit, offset)
+	response, err := s.Service.Roles(r.Context(), params.Limit, params.Offset)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, map[string]any{"items": items, "total": total, "limit": limit, "offset": offset})
+	result.Success(w, response)
 }
 
-// CreateRole 创建组织自定义角色。
+// CreateRole 创建全局角色。
 func (s *Handler) CreateRole(c *gin.Context) {
-	orgId := c.Param("org_id")
 	w := c.Writer
 	r := c.Request
-	var input service.RoleCreateInput
+	var input model.APIRoleCreate
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	id, err := s.Service.CreateRole(r.Context(), orgId, input, middleware.RequestID(r))
+	id, err := s.Service.CreateRole(r.Context(), service.RoleCreate{
+		Name:        input.Name,
+		Description: input.Description,
+		Permissions: input.Permissions,
+	}, middleware.RequestID(r))
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -94,39 +55,35 @@ func (s *Handler) CreateRole(c *gin.Context) {
 	result.Created(w, map[string]string{"id": id})
 }
 
-// GetRole 读取当前组织内的指定角色。
+// GetRole 读取指定角色。
 func (s *Handler) GetRole(c *gin.Context) {
-	orgId := c.Param("org_id")
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	items, _, err := s.Service.Roles(r.Context(), orgId, id, 1, 0)
+	data, err := s.Service.Role(r.Context(), id)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	if len(items) == 0 {
-		httpx.Reject(c, repository.ErrNotFound)
-		return
-	}
-
-	result.Success(w, items[0])
+	result.Success(w, json.RawMessage(data))
 }
 
-// UpdateRole 按版本更新角色资料。
+// UpdateRole 更新角色资料。
 func (s *Handler) UpdateRole(c *gin.Context) {
-	orgId := c.Param("org_id")
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input service.RoleInput
+	var input model.APIRoleInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	if err := s.Service.UpdateRole(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+	if err := s.Service.UpdateRole(r.Context(), id, service.RoleUpdate{
+		Name:        input.Name,
+		Description: input.Description,
+	}, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -134,19 +91,18 @@ func (s *Handler) UpdateRole(c *gin.Context) {
 	result.NoContent(w)
 }
 
-// SetRolePermissions 按版本替换角色权限并保留委派限制。
+// SetRolePermissions 全量替换角色权限并保留委派限制。
 func (s *Handler) SetRolePermissions(c *gin.Context) {
-	orgId := c.Param("org_id")
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input service.GrantsInput
+	var input model.APIGrantsInput
 	if err := httpx.Bind(c, &input); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}
 
-	if err := s.Service.ReplaceGrants(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+	if err := s.Service.ReplaceGrants(r.Context(), id, service.RoleGrants{Permissions: input.Permissions}, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}
@@ -154,40 +110,13 @@ func (s *Handler) SetRolePermissions(c *gin.Context) {
 	result.NoContent(w)
 }
 
-// DeleteRole 按版本删除未被用户引用的自定义角色。
+// DeleteRole 删除未被用户引用的角色。
 func (s *Handler) DeleteRole(c *gin.Context) {
-	orgId := c.Param("org_id")
-	id := c.Param("id")
-	var params model.VersionQuery
-	if err := c.ShouldBindQuery(&params); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
-	w := c.Writer
-	r := c.Request
-	version := params.Version
-
-	if err := s.Service.DeleteRole(r.Context(), orgId, id, version, middleware.RequestID(r)); err != nil {
-		httpx.Reject(c, err)
-		return
-	}
-
-	result.NoContent(w)
-}
-
-// SetOrganizationUserRoles 替换用户角色关系，权限和版本检查由用例完成。
-func (s *Handler) SetOrganizationUserRoles(c *gin.Context) {
-	orgId := c.Param("org_id")
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	var input service.OrganizationUserRolesInput
-	if err := httpx.Bind(c, &input); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
 
-	if err := s.Service.ReplaceOrganizationUserRoles(r.Context(), orgId, id, input, middleware.RequestID(r)); err != nil {
+	if err := s.Service.DeleteRole(r.Context(), id, middleware.RequestID(r)); err != nil {
 		httpx.Reject(c, err)
 		return
 	}

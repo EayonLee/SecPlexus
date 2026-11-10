@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/combobox";
 import { updateProfile } from "@/spx/api/iam/auth";
 
-import { refreshIdentity, useIdentity } from "../iam/session";
+import { refreshMe, useIdentity } from "../iam/session";
 
 /** 每批渲染的候选数。全部时区都可滚动到达，这里只控制单次挂载的 DOM 规模。 */
 const pageSize = 60;
@@ -74,7 +74,7 @@ export function TimeZoneCard() {
     setSaving(true);
     try {
       await updateProfile({ timezone: next });
-      await refreshIdentity();
+      await refreshMe();
       router.refresh();
       toast.success(t("timeZoneSaved"));
     } catch {

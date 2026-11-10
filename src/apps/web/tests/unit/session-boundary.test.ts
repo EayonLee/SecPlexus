@@ -1,23 +1,42 @@
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
 import { http } from "../../src/spx/api/client";
-import { createOrganization, listUsers } from "../../src/spx/api/iam/management";
+import { createUser, listUsers } from "../../src/spx/api/iam/management";
 import { queryClient } from "../../src/spx/iam/query";
-import { reauthenticate, refreshIdentity, useIdentity } from "../../src/spx/iam/session";
+import { reauthenticate, refreshMe, useIdentity } from "../../src/spx/iam/session";
 import { createServer, type ServerResponse } from "node:http";
 
-const org = "09aa1d46-7c4b-493a-aef4-2e6e9b6c93ab";
-let version = "1";
+let grants = ["iam.users.read"];
 let session = "old-session";
 let delayed: ServerResponse | undefined;
 let arrived: (() => void) | undefined;
 let reauthRejected = false;
-let organizationReply: { status: number; contentType: string; body: string } | undefined;
+let writeReply: { status: number; contentType: string; body: string } | undefined;
+const identity = () => ({
+  principal: {
+    user_id: "user",
+    session_id: session,
+    username: "admin",
+    display_name: "Admin",
+    configured: true,
+    auth_epoch: "1",
+    authenticated_at: "2026-10-29T08:30:00Z",
+  },
+  roles: [{ id: "role", name: "Super administrator" }],
+  permissions: grants,
+});
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
-  if (request.url?.startsWith("/api/v1/iam/users")) {
+  if (request.method === "GET" && request.url?.startsWith("/api/v1/iam/users")) {
     delayed = response;
     arrived?.();
+    return;
+  }
+  if (request.method === "POST" && request.url === "/api/v1/iam/users" && writeReply) {
+    response.setHeader("Content-Type", writeReply.contentType);
+    response.statusCode = writeReply.status;
+    if (!writeReply.body) response.setHeader("Content-Length", "0");
+    response.end(writeReply.body);
     return;
   }
   if (request.url === "/api/v1/iam/auth/reauthenticate") {
@@ -30,41 +49,28 @@ const server = createServer((request, response) => {
       return;
     }
     session = "new-session";
-  }
-  if (request.url === "/api/v1/iam/organizations" && organizationReply) {
-    response.setHeader("Content-Type", organizationReply.contentType);
-    response.statusCode = organizationReply.status;
-    if (!organizationReply.body) response.setHeader("Content-Length", "0");
-    response.end(organizationReply.body);
+    response.end(
+      JSON.stringify({
+        code: "ok",
+        message: "ok",
+        request_id: "test-request",
+        data: { principal: identity().principal },
+      }),
+    );
     return;
   }
-  const data =
-    request.url === "/api/v1/iam/auth/context"
-      ? { csrf_token: "test-token" }
-      : {
-          principal: {
-            user_id: "user",
-            session_id: session,
-            username: "admin",
-            display_name: "Admin",
-            is_super_admin: true,
-            auth_epoch: "1",
-            authenticated_at: "2026-10-29T08:30:00Z",
-          },
-          organizations: [{ id: org, name: "Ops", slug: "ops", authz_epoch: version, depth: 0, parent_id: null }],
-          org_id: org,
-          capabilities: [],
-          platform_capabilities: [],
-        };
-  response.end(
-    JSON.stringify({
-      code: "ok",
-      message: "ok",
-      request_id: "test-request",
-      data:
-        request.url === "/api/v1/iam/auth/reauthenticate" && "principal" in data ? { principal: data.principal } : data,
-    }),
-  );
+  if (request.url === "/api/v1/iam/auth/context") {
+    response.end(
+      JSON.stringify({ code: "ok", message: "ok", request_id: "test-request", data: { csrf_token: "test-token" } }),
+    );
+    return;
+  }
+  if (request.url === "/api/v1/iam/me") {
+    response.end(JSON.stringify({ code: "ok", message: "ok", request_id: "test-request", data: identity() }));
+    return;
+  }
+  response.writeHead(404);
+  response.end();
 });
 beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -81,13 +87,15 @@ afterAll(async () => {
   vi.unstubAllGlobals();
 });
 
-test("accepting a changed authorization scope removes old cached projections", async () => {
-  await refreshIdentity(org);
+test("accepting a changed permission set removes old cached projections", async () => {
+  await refreshMe();
   expect(useIdentity.getState().status).toBe("authenticated");
+  expect(useIdentity.getState().permissions).toEqual(["iam.users.read"]);
   queryClient.setQueryData(["old-projection"], { restricted: true });
-  version = "2";
-  await refreshIdentity(org);
+  grants = ["iam.users.read", "iam.roles.read"];
+  await refreshMe();
   expect(queryClient.getQueryData(["old-projection"])).toBeUndefined();
+  expect(useIdentity.getState().permissions).toEqual(["iam.users.read", "iam.roles.read"]);
 });
 
 test("a late unauthorized response cannot erase the reauthenticated identity", async () => {
@@ -121,11 +129,12 @@ test("confirming identity keeps the current page mounted while replacing its ses
   await reauthenticate("test-password");
   unsubscribe();
   expect(states).not.toContain("unknown");
-  expect(useIdentity.getState().org_id).toBe(org);
+  expect(useIdentity.getState().permissions).toEqual(["iam.users.read", "iam.roles.read"]);
   expect(useIdentity.getState().status).toBe("authenticated");
 });
 
-const validCreated = JSON.stringify({ code: "ok", message: "ok", request_id: "test", data: { id: org } });
+const validCreated = JSON.stringify({ code: "ok", message: "ok", request_id: "test", data: { id: "target" } });
+const createBody = { username: "new_analyst", display_name: "New analyst", password: "123456789012" };
 for (const reply of [
   { status: 200, contentType: "text/html", body: "<html>Gateway sign in</html>" },
   { status: 201, contentType: "text/html", body: "<html>Gateway sign in</html>" },
@@ -135,24 +144,20 @@ for (const reply of [
   { status: 200, contentType: "application/json", body: validCreated },
 ])
   test(`invalid write acknowledgement rejects without mutation success: ${reply.status}/${reply.contentType}/${reply.body.length}`, async () => {
-    organizationReply = reply;
+    writeReply = reply;
     let acknowledged = false;
     const mutation = queryClient.getMutationCache().build(queryClient, {
-      mutationFn: createOrganization,
+      mutationFn: createUser,
       onSuccess: () => {
         acknowledged = true;
       },
     });
-    await expect(mutation.execute({ slug: "ops", name: "Ops", admin_user_id: org })).rejects.toBeDefined();
+    await expect(mutation.execute(createBody)).rejects.toBeDefined();
     expect(acknowledged).toBe(false);
   });
 
 test("JSON acknowledgements are validated even if the media type is missing or incorrect", async () => {
-  organizationReply = { status: 201, contentType: "text/plain", body: validCreated };
-  const response = await createOrganization({
-    slug: "ops",
-    name: "Ops",
-    admin_user_id: org,
-  });
-  expect(response.id).toBe(org);
+  writeReply = { status: 201, contentType: "text/plain", body: validCreated };
+  const response = await createUser(createBody);
+  expect(response.id).toBe("target");
 });

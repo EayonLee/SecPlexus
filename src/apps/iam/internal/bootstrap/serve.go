@@ -45,7 +45,8 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		return err
 	}
 
-	if err = store.SyncAdministrator(startup, cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
+	// 权限目录、内置角色与配置管理员都在启动时幂等写入，前端只读这些内置数据。
+	if err = store.Seed(startup, cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
 		return err
 	}
 
@@ -62,7 +63,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		return err
 	}
 
-	limiter, err := authentication.NewLimiter(client)
+	limiter, err := authentication.NewLimiter(client, cfg.Auth.LoginIPRate, cfg.Auth.LoginAccountRate)
 	if err != nil {
 		return err
 	}
@@ -72,12 +73,12 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		Config:   cfg,
 	}, security, limiter, func(ctx context.Context) error {
 		if err := pool.Ping(ctx); err != nil {
-			logging.From(ctx).Error("PostgreSQL 就绪检查失败", "event", "dependency.unready", "dependency", "postgres", "error", logging.Error(err))
+			logging.From(ctx).Error("PostgreSQL is not ready", "event", "dependency.unready", "dependency", "postgres", "error", logging.Error(err))
 			return err
 		}
 
 		if err := client.Ping(ctx).Err(); err != nil {
-			logging.From(ctx).Error("Redis 就绪检查失败", "event", "dependency.unready", "dependency", "redis", "error", logging.Error(err))
+			logging.From(ctx).Error("Redis is not ready", "event", "dependency.unready", "dependency", "redis", "error", logging.Error(err))
 			return err
 		}
 		return nil
@@ -96,9 +97,9 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		MaxHeaderBytes:    16 * 1024,
 	}
 
-	slog.Info("HTTP 监听启动中", "event", "service.starting", "addr", cfg.App.Addr())
+	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr())
 	if err := httpx.Serve(ctx, httpServer); err != nil {
-		logging.From(ctx).Error("HTTP 服务关闭失败", "event", "service.listener_failed", "error", logging.Error(err))
+		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(err))
 		return err
 	}
 	return nil

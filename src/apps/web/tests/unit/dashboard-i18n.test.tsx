@@ -7,8 +7,8 @@ import zh from "../../messages/zh-CN.json";
 import WorkbenchPage from "../../src/spx/pages/workbench";
 
 test.each([
-  { locale: "en" as const, messages: en, title: "Dashboard", leads: "New leads", won: "Projects won" },
-  { locale: "zh-CN" as const, messages: zh, title: "安全智驾工作台", leads: "新增销售线索", won: "成交项目" },
+  { locale: "en" as const, messages: en, title: "Security Operations", leads: "Ingested alerts", won: "Closed incidents" },
+  { locale: "zh-CN" as const, messages: zh, title: "安全运营工作台", leads: "接入告警", won: "已闭环事件" },
 ])("renders the real dashboard components in $locale", ({ locale, messages, title, leads, won }) => {
   const html = renderToStaticMarkup(
     <NextIntlClientProvider

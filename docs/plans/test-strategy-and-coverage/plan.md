@@ -27,7 +27,7 @@
 
 - [x] `iam/internal/handler/management`：新增参数绑定契约单测（10 个用例），断言非法输入收集 `ErrInvalid` 且不触达业务用例；允许/拒绝路径由 `handler` 包集成测试覆盖（`TestManagementBindingRejectsInvalidInputBeforeService`）。
 - [x] `iam/internal/router`：路由注册与鉴权分组契约（由集成测试覆盖）。
-- [x] `iam/internal/service`：新增 `validEmail`/`validName` 表驱动单测；账号、成员、组织、密码、角色、预览的关键路径由既有集成测试覆盖。带 `-tags=integration` 覆盖率 43.7%。
+- [x] `iam/internal/service`：新增 `validEmail`/`validName` 表驱动单测；账号、角色、密码、预览的关键路径由既有集成测试覆盖。带 `-tags=integration` 覆盖率 43.7%。
 - [x] `iam/internal/repository`：新增时区读写（不递增 auth_epoch、空值存 NULL、列可空）、维护清理保留期边界、恢复后撤销会话三组集成测试。带 `-tags=integration` 覆盖率 40.4%。
 - [x] `console/internal/handler`：SSE 与访问上下文集成测试。
 - [x] `console/internal/bootstrap`：启动装配与配置校验测试。
@@ -63,7 +63,7 @@ node scripts/build.mjs
 | `console/internal/bootstrap` | 0%（无测试文件） | 78.9%（2 个用例） |
 | `console/internal/router` | 0%（无测试文件） | 87.5%（3 个用例） |
 | `iam/internal/identity` | 已有 | 新增 11 个表驱动子用例（时区校验） |
-| `iam/internal/handler` | 已有 8 个集成测试 | 新增 2 个（时区偏好、跨组织拒绝） |
+| `iam/internal/handler` | 已有 8 个集成测试 | 新增 2 个（时区偏好、越权拒绝） |
 
 ## 验收证据
 
@@ -102,7 +102,7 @@ node scripts/build.mjs
 
 仍存在的缺口（诚实记录）：
 
-- `service` 与 `repository` 的剩余未覆盖部分集中在需要复杂业务夹具的跨模块用例（成员生命周期并发、角色委派边界、组织并发版本冲突）。这些不是「没有测试」，而是需要逐条设计隔离数据；按本计划判定表属可接受残留，不应为凑覆盖率写无意义断言。
+- `service` 与 `repository` 的剩余未覆盖部分集中在需要复杂业务夹具的跨模块用例（账号停用与角色回收并发、角色委派边界、角色并发版本冲突）。这些不是「没有测试」，而是需要逐条设计隔离数据；按本计划判定表属可接受残留，不应为凑覆盖率写无意义断言。
 - `management` 包的响应映射（状态码与响应体）不在包内测试，因为它依赖 `handler.Server.Errors`，由 `handler` 包集成测试覆盖；包内单测只覆盖它真正拥有的绑定契约。
 - `iam/internal/router` 未单独建测试文件。路由注册由 `handler` 包的集成测试经真实 HTTP 覆盖（请求确实穿过路由表），按判定表视为已覆盖，但无独立文件。
 - 集成测试需要外部 PostgreSQL 与 Redis；Docker 不可用时须显式提供连接串，否则跳过。

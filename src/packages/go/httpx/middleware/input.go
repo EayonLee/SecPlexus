@@ -19,8 +19,7 @@ func InputBoundary(limits map[string]int64) gin.HandlerFunc {
 			return
 		}
 		var path struct {
-			ID    string `uri:"id" binding:"omitempty,uuid"`
-			OrgID string `uri:"org_id" binding:"omitempty,uuid"`
+			ID string `uri:"id" binding:"omitempty,uuid"`
 		}
 		if err := c.ShouldBindUri(&path); err != nil || c.Query("return_to") != "" || c.Query("redir") != "" {
 			result.Fail(c.Writer, result.CodeInvalidRequest)

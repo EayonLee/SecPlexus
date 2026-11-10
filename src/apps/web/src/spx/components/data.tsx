@@ -15,14 +15,18 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 
-import { identityScope } from "../iam/query";
+import { APIError } from "../api/client";
+import { sessionScope } from "../iam/query";
 import { errorMessageKey, useIdentity } from "../iam/session";
+import { requestReauth } from "./reauth";
 
+// 全局约定：所有列（含操作列）一律左对齐，操作按钮不加 justify-end，
+// 避免同一张表里出现两种对齐轴。
 export interface PageData<T> {
   items: T[];
   total: number;
 }
-/** usePagedQuery 仅组合受控页码和身份作用域；服务端状态完全交给 Query。 */
+/** usePagedQuery 仅组合受控页码和会话作用域；服务端状态完全交给 Query。 */
 export function usePagedQuery<T>(
   key: QueryKey,
   fetchPage: (pagination: { limit: number; offset: number }, signal: AbortSignal) => Promise<PageData<T>>,
@@ -30,7 +34,7 @@ export function usePagedQuery<T>(
   const auth = useIdentity();
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
   const query = useQuery({
-    queryKey: [...key, ...identityScope(auth), pagination.pageIndex, pagination.pageSize],
+    queryKey: [...key, ...sessionScope(auth), pagination.pageIndex, pagination.pageSize],
     enabled: auth.status === "authenticated",
     queryFn: ({ signal }) =>
       fetchPage({ limit: pagination.pageSize, offset: pagination.pageIndex * pagination.pageSize }, signal),
@@ -75,7 +79,7 @@ export function DataTable<T extends { id: string }>({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {state.error && <p role="alert">{errors(state.error)}</p>}
-      <div className="overflow-hidden rounded-md border">
+      <div className="overflow-hidden rounded-xl border">
         <Table>
           <TableHeader className="bg-muted">
             <TableRow>
@@ -194,6 +198,21 @@ export function useAction() {
         if (success) toast.success(success);
         return true;
       } catch (error) {
+        // 高风险操作可能要求近期密码确认：确认成功后重放一次，用户不必重填表单。
+        if (error instanceof APIError && error.code === "iam.recent_auth_required") {
+          if (!(await requestReauth())) return false;
+
+          try {
+            await action();
+            if (success) toast.success(success);
+            return true;
+          } catch (retryError) {
+            if (!(retryError instanceof DOMException && retryError.name === "AbortError"))
+              toast.error(errors(errorMessageKey(retryError)));
+            return false;
+          }
+        }
+
         if (!(error instanceof DOMException && error.name === "AbortError"))
           toast.error(errors(errorMessageKey(error)));
         return false;

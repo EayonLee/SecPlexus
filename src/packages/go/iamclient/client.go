@@ -53,15 +53,15 @@ func New(baseURL, credential string) (*Client, error) {
 	return &Client{origin: strings.TrimSuffix(baseURL, "/"), credential: credential, http: httpClient}, nil
 }
 
-// Authorize 从原始请求获取会话；操作和组织由服务端路由确定，不能信任浏览器提交的值。
-func (c *Client) Authorize(ctx context.Context, original *http.Request, action, orgID string, resource *Resource) (decision CapabilityDecision, err error) {
-	ctx = logging.With(ctx, "operation", "iam.authorize_rpc", "action", action, "org_id", orgID)
+// Authorize 从原始请求获取会话；操作由服务端路由确定，不能信任浏览器提交的值。
+func (c *Client) Authorize(ctx context.Context, original *http.Request, action string) (decision CapabilityDecision, err error) {
+	ctx = logging.With(ctx, "operation", "iam.authorize_rpc", "action", action)
 	started := time.Now()
 	var upstreamID string
 	defer func() {
 		log := logging.From(ctx)
 		if err == nil && decision.Allowed {
-			log.Debug("IAM 内部授权调用完成", "event", "rpc.completed", "upstream_request_id", upstreamID, "decision_id", decision.DecisionID, "duration_ms", time.Since(started).Milliseconds())
+			log.Debug("IAM authorization call finished", "event", "rpc.completed", "upstream_request_id", upstreamID, "decision_id", decision.DecisionID, "duration_ms", time.Since(started).Milliseconds())
 			return
 		}
 		var failure *Error
@@ -83,13 +83,13 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 			)
 			return
 		}
-		log.Error("IAM 内部请求构造失败", "event", "rpc.failed", "error", logging.Error(err))
+		log.Error("Could not build IAM request", "event", "rpc.failed", "error", logging.Error(err))
 	}()
 	unavailable := func(reason string, cause error) error {
 		return &Error{Status: 503, Code: result.CodeServiceUnavailable, Reason: reason, RequestID: upstreamID, Cause: cause}
 	}
 
-	input := AuthorizeRequest{Cookie: original.Header.Get("Cookie"), Method: original.Method, Path: original.URL.RequestURI(), Origin: original.Header.Get("Origin"), CSRFToken: original.Header.Get("X-CSRF-Token"), Action: action, OrgID: orgID, Resource: resource}
+	input := AuthorizeRequest{Cookie: original.Header.Get("Cookie"), Method: original.Method, Path: original.URL.RequestURI(), Origin: original.Header.Get("Origin"), CSRFToken: original.Header.Get("X-CSRF-Token"), Action: action}
 	// 单个授权 RPC 直接使用标准库和共享 DTO，不另建通用传输或解析框架。
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -149,12 +149,6 @@ func (c *Client) Authorize(ctx context.Context, original *http.Request, action, 
 	}
 	if result.Code(decoded.Code) != result.CodeOK || !decision.Allowed || decision.Principal.UserID == "" || decision.Principal.SessionID == "" || decision.DecisionID == "" {
 		return CapabilityDecision{}, unavailable("invalid_decision", nil)
-	}
-	if orgID != "" && (decision.Scope.Kind != "organization" || decision.Scope.OrgID != orgID) {
-		return CapabilityDecision{}, unavailable("organization_scope_mismatch", nil)
-	}
-	if orgID == "" && (decision.Scope.Kind != "platform" || decision.Scope.OrgID != "") {
-		return CapabilityDecision{}, unavailable("platform_scope_mismatch", nil)
 	}
 	return decision, nil
 }

@@ -8,17 +8,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 )
 
 // InsertUser 创建用户资料，不对外暴露密码记录。
-func InsertUser(ctx context.Context, db *gorm.DB, id uuid.UUID, value string, normalized string, displayName string, email string) error {
+// configured 标记由启动配置写入的内置管理员，数据库只允许一个。
+func InsertUser(ctx context.Context, db *gorm.DB, id uuid.UUID, value string, normalized string, displayName string, email string, configured bool) error {
 	err := db.WithContext(ctx).Table("iam.users").Create(map[string]any{
 		"id":                  id,
 		"username":            value,
 		"username_normalized": normalized,
 		"display_name":        displayName,
 		"email":               gorm.Expr("NULLIF(?, '')", email),
-		"status":              "active",
+		"status":              string(enum.UserStatusActive),
+		"configured":          configured,
 	}).Error
 	return mapUniqueViolation(err)
 }
@@ -49,14 +53,19 @@ func InsertPassword(ctx context.Context, db *gorm.DB, id uuid.UUID, hash string)
 	}).Error
 }
 
-// UpdateUser 更新资料和状态，同时增加身份版本。
-func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName string, email omit.Val[string], status string) error {
+// UpdateUser 更新资料与状态；只有访问状态变化才递增账号版本。
+// auth_epoch 是「账号版本」：改显示名称或邮箱不影响会话，改状态才会让旧会话失效。
+func UpdateUser(ctx context.Context, db *gorm.DB, id uuid.UUID, displayName string, email omit.Val[string], status enum.UserStatus, accessChanged bool) error {
 	updates := map[string]any{
 		"display_name": displayName,
 		"status":       status,
-		"auth_epoch":   gorm.Expr("auth_epoch+1"),
 		"updated_at":   gorm.Expr("now()"),
 	}
+
+	if accessChanged {
+		updates["auth_epoch"] = gorm.Expr("auth_epoch+1")
+	}
+
 	if email.IsValue() {
 		updates["email"] = gorm.Expr("NULLIF(?, '')", email.MustGet())
 	}
@@ -73,7 +82,7 @@ func UpdateTimeZone(ctx context.Context, db *gorm.DB, id uuid.UUID, timeZone str
 	}).Error
 }
 
-// BumpUserAuthEpoch 增加身份版本，使旧会话失效。
+// BumpUserAuthEpoch 增加账号版本，使旧会话失效。
 func BumpUserAuthEpoch(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
 	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Updates(map[string]any{
 		"auth_epoch": gorm.Expr("auth_epoch+1"),
@@ -105,4 +114,10 @@ func UserTimeZone(ctx context.Context, db *gorm.DB, id uuid.UUID) (string, error
 	}
 
 	return *value, nil
+}
+
+// DeleteUser 删除账号。凭据、会话与角色绑定由 users 的级联删除清理，
+// 历史创建人引用由 ON DELETE SET NULL 置空，不阻塞删除。
+func DeleteUser(ctx context.Context, db *gorm.DB, id uuid.UUID) error {
+	return db.WithContext(ctx).Table("iam.users").Where("id = ?", id).Delete(nil).Error
 }

@@ -59,7 +59,7 @@ func TestBoundaryLogsSafeRoute(t *testing.T) {
 	router := NewEngine()
 	router.GET("/items/:id", func(c *gin.Context) {
 		r := c.Request
-		logging.From(r.Context()).Info("核心步骤", "event", "test.step")
+		logging.From(r.Context()).Info("core step", "event", "test.step")
 		panic("secret-panic")
 	})
 	request := httptest.NewRequest("GET", "/items/secret-id?token=secret-query", nil)

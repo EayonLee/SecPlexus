@@ -28,13 +28,12 @@ const server = createServer((request, response) => {
             session_id: "session",
             username: "member",
             display_name: "Member",
-            is_super_admin: true,
+            configured: true,
             auth_epoch: "1",
             authenticated_at: "2026-10-29T08:30:00Z",
           },
-          organizations: [],
-          capabilities: [],
-          platform_capabilities: [],
+          roles: [{ id: "role", name: "Super administrator" }],
+          permissions: ["iam.users.read", "iam.users.manage"],
         };
   response.end(JSON.stringify({ code: "ok", message: "ok", request_id: "test-request", data }));
 });
@@ -54,10 +53,10 @@ afterAll(async () => {
 });
 test("a management mutation invalidates all cached pages and related projections", async () => {
   const keys = [
-    [{ _id: "listUsers" }, "session", 1],
-    [{ _id: "listUsers" }, "session", 2],
-    [{ _id: "listRoles" }, "org", "version"],
-    [{ _id: "listOrganizations" }, "org", "version"],
+    [{ _id: "listUsers" }, "session", "page", 1],
+    [{ _id: "listUsers" }, "session", "page", 2],
+    [{ _id: "listRoles" }, "session", "page", 1],
+    [{ _id: "permissions" }, "session", "catalog"],
   ];
   for (const key of keys) queryClient.setQueryData(key, { previous: "projection" });
   const mutation = queryClient.getMutationCache().build(queryClient, {
@@ -66,7 +65,7 @@ test("a management mutation invalidates all cached pages and related projections
   });
   await mutation.execute({
     id: "target",
-    body: { display_name: "Changed", status: "active", auth_epoch: "1" },
+    body: { display_name: "Changed", status: "active" },
   });
   for (const key of keys) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
   expect(useIdentity.getState().status).toBe("authenticated");

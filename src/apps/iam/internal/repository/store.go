@@ -14,24 +14,27 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 )
 
 const ManagementLock int64 = 0x73707869616d
 
 var (
 	ErrUnauthenticated = errors.New("authentication required")
-	ErrConflict        = errors.New("resource changed or is still in use")
-	ErrInvalid         = errors.New("invalid input")
-	ErrNotFound        = errors.New("resource not found")
-	// ErrHasChildren 与 ErrHasUsers 区分组织删除的两种阻塞原因，
-	// 否则二者都落到通用 conflict，用户不知道要先处理哪一项。
-	ErrHasChildren = errors.New("organization still has child organizations")
-	ErrHasUsers    = errors.New("organization still has users")
-	// ErrRootOrganization 阻止删除全局唯一的根组织：删除后整棵树失去根，
-	// organizations_single_root 不变量被破坏，祖先链查询随之失效。
-	ErrRootOrganization = errors.New("root organization cannot be deleted")
-	ErrUsernameTaken    = errors.New("username is already taken")
-	ErrEmailTaken       = errors.New("email is already taken")
+	// ErrConflict 表示通用并发冲突；以下错误细分了冲突原因，便于前端给出可操作提示。
+	ErrConflict                = errors.New("resource changed or is still in use")
+	ErrInvalid                 = errors.New("invalid input")
+	ErrNotFound                = errors.New("resource not found")
+	ErrRoleInUse               = errors.New("role is still assigned to users")
+	ErrRoleNameTaken           = errors.New("role name is already taken")
+	ErrBuiltinRoleImmutable    = errors.New("builtin role cannot be modified or deleted")
+	ErrConfiguredUserImmutable = errors.New("configured administrator cannot be deleted, disabled or re-passworded")
+	// ErrLastSuperAdmin 守住平台底线：任何变更都必须留下至少一名启用中的超级管理员。
+	ErrLastSuperAdmin = errors.New("at least one active super administrator is required")
+	// ErrSelfTarget 拒绝对当前登录账号的自伤操作，避免会话进行中被自己删除或停用。
+	ErrSelfTarget    = errors.New("operation is not allowed on the signed-in account")
+	ErrUsernameTaken = errors.New("username is already taken")
+	ErrEmailTaken    = errors.New("email is already taken")
 )
 
 // Store 持有 IAM 使用的 PostgreSQL 连接池。
@@ -61,29 +64,29 @@ func NewStore(pool *pgxpool.Pool) (*Store, error) {
 func (s *Store) Close() error { return s.sqlDB.Close() }
 
 // Audit 描述需要在事务中记录的审计事件。
+// 审计没有组织维度，目标由 target_type/target_id 表达。
 type Audit struct {
-	OrgID      *uuid.UUID     // 组织范围；为空时表示平台范围。
-	ActorID    *uuid.UUID     // 操作者标识，系统事件可为空。
-	ActorName  string         // 审计时的操作者名称快照。
-	ActorType  string         // 用户、系统或部署操作员。
-	Action     string         // 稳定的动作名称。
-	TargetType string         // 被操作资源类型。
-	TargetID   *uuid.UUID     // 被操作资源标识。
-	Outcome    string         // 成功、拒绝或失败。
-	Reason     string         // 不包含敏感值的原因代码。
-	RequestID  string         // 关联本次请求的标识。
-	DecisionID *uuid.UUID     // 授权决定标识，可为空。
-	Metadata   map[string]any // 经过筛选的审计扩展字段，编码后不超过 8192 字节。
+	ActorID    *uuid.UUID        // 操作者标识，系统事件可为空。
+	ActorName  string            // 审计时的操作者名称快照。
+	ActorType  enum.ActorType    // 用户、系统或部署操作员，取值见 enum.ActorType。
+	Action     string            // 稳定的动作名称。
+	TargetType string            // 被操作资源类型。
+	TargetID   *uuid.UUID        // 被操作资源标识。
+	Outcome    enum.AuditOutcome // 成功、拒绝或失败，取值见 enum.AuditOutcome。
+	Reason     string            // 不包含敏感值的原因代码。
+	RequestID  string            // 关联本次请求的标识。
+	DecisionID *uuid.UUID        // 授权决定标识，可为空。
+	Metadata   map[string]any    // 经过筛选的审计扩展字段，编码后不超过 8192 字节。
 }
 
 // AppendAudit 在调用方事务中写入审计事件。
 func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
 	if a.ActorType == "" {
-		a.ActorType = "user"
+		a.ActorType = enum.ActorTypeUser
 	}
 
 	if a.Outcome == "" {
-		a.Outcome = "success"
+		a.Outcome = enum.AuditOutcomeSuccess
 	}
 
 	metadata := a.Metadata
@@ -97,9 +100,8 @@ func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
 	}
 
 	err = tx.WithContext(ctx).Exec(
-		`INSERT INTO iam.audit_events(id,org_id,actor_type,actor_id,actor_name,action,target_type,target_id,outcome,reason_code,request_id,decision_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		`INSERT INTO iam.audit_events(id,actor_type,actor_id,actor_name,action,target_type,target_id,outcome,reason_code,request_id,decision_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		uuid.New(),
-		a.OrgID,
 		a.ActorType,
 		a.ActorID,
 		a.ActorName,
@@ -115,8 +117,8 @@ func AppendAudit(ctx context.Context, tx *gorm.DB, a Audit) error {
 	return err
 }
 
-// Seed 在显式初始化时同步权限和创建首个管理员；锁与事务保证幂等。
-// 已有账号不会被提权或重新分配密码。
+// Seed 在显式初始化或启动时幂等写入内置数据：权限目录、内置角色与配置管理员。
+// 事务与 advisory 锁保证并发启动收敛到同一状态；已存在的账号不会被重复提权。
 func (s *Store) Seed(ctx context.Context, username, password string) error {
 	tx := s.DB.WithContext(ctx).Begin()
 	err := tx.Error
@@ -126,122 +128,88 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 
 	defer tx.Rollback()
 
-	if err = tx.WithContext(ctx).Exec(`SELECT pg_advisory_xact_lock($1)`, ManagementLock).Error; err != nil {
+	if err = LockManagement(ctx, tx, ManagementLock); err != nil {
 		return err
 	}
 
+	if err = syncCatalog(ctx, tx); err != nil {
+		return err
+	}
+
+	roleID, err := syncBuiltinRole(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	if _, err = syncAdministrator(ctx, tx, username, password, roleID); err != nil {
+		return err
+	}
+
+	return tx.Commit().Error
+}
+
+// syncCatalog 以代码中的权限目录为准逐键 upsert：缺失插入、元数据更新、移除的键标记 retired。
+func syncCatalog(ctx context.Context, tx *gorm.DB) error {
 	for _, p := range authorization.Catalog() {
-		var compatible bool
-		if err = tx.WithContext(ctx).Raw(
-			`SELECT NOT EXISTS(SELECT 1 FROM iam.permissions WHERE permission_key=$1 AND (module<>$2 OR resource_type<>$3 OR action<>$4 OR scope<>$5))`,
+		err := tx.WithContext(ctx).Exec(
+			`INSERT INTO iam.permissions(permission_key,description,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status='active',updated_at=now()`,
 			p.Key,
-			p.Module,
-			p.ResourceType,
-			p.Action,
-			p.Scope,
-		).Row().Scan(&compatible); err != nil {
-			return err
-		}
-
-		if !compatible {
-			return errors.New("permission meaning changed without a reviewed migration")
-		}
-
-		err = tx.WithContext(ctx).Exec(
-			`INSERT INTO iam.permissions(permission_key,module,resource_type,action,description,scope,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status=EXCLUDED.status,updated_at=now()`,
-			p.Key,
-			p.Module,
-			p.ResourceType,
-			p.Action,
 			p.Description,
-			p.Scope,
 			p.RiskLevel,
 			p.Delegable,
 			p.RequiresRecentAuth,
-			p.Status,
 		).Error
 		if err != nil {
 			return err
 		}
 	}
 
-	userID, err := syncAdministrator(ctx, tx, username, password)
-	if err != nil {
-		return err
+	// 目录里已经删除的键保留历史授权，但标记为 retired 并立即失效。
+	keys := make([]string, 0, len(authorization.Catalog()))
+	for _, p := range authorization.Catalog() {
+		keys = append(keys, p.Key)
 	}
 
-	// 根组织由 00010 迁移创建（slug=master）。这里只保证它有管理员关系，
-	// 不重复建组织，也不依赖 users 是否为空：组织重建后既有账号仍需可登录。
-	var rootID string
-	if err = tx.WithContext(ctx).Raw(`SELECT id::text FROM iam.organizations WHERE parent_id IS NULL`).Row().Scan(&rootID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("root organization is missing; run the organization tree migration before seeding")
-		}
-
-		return err
-	}
-
-	orgID, err := uuid.Parse(rootID)
-	if err != nil {
-		return err
-	}
-
-	var attached bool
-	if err = tx.WithContext(ctx).Raw(
-		`SELECT EXISTS(SELECT 1 FROM iam.organization_users WHERE org_id = $1 AND user_id = $2)`, orgID, userID,
-	).Row().Scan(&attached); err != nil {
-		return err
-	}
-
-	if !attached {
-		if err = AttachRootMembership(ctx, tx, orgID, userID); err != nil {
-			return err
-		}
-
-		if err = AppendAudit(ctx, tx, Audit{ActorType: "deployment_operator", Action: "iam.initialize", TargetType: "organization", TargetID: &orgID, RequestID: uuid.NewString()}); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit().Error
-}
-
-// CreateOrganization 在事务中创建组织，并把指定的初始用户挂到该组织。
-// parentID 为空表示创建根组织；深度由 organization_tree_guard 触发器计算。
-func CreateOrganization(ctx context.Context, tx *gorm.DB, id uuid.UUID, slug, name string, parentID *uuid.UUID, organizationUserID, actorID uuid.UUID) error {
-	if err := tx.WithContext(ctx).Exec(`INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,$2,$3,$4)`, id, slug, name, parentID).Error; err != nil {
-		return err
-	}
-
-	return AttachRootMembership(ctx, tx, id, organizationUserID)
-}
-
-// AttachRootMembership 把指定用户作为有效用户挂到组织下。
-//
-// 组织不再自带内置角色：角色完全由使用者按需创建并授予权限，
-// 因此这里只建用户关系，不写任何角色或授权。
-func AttachRootMembership(ctx context.Context, tx *gorm.DB, orgID, userID uuid.UUID) error {
 	return tx.WithContext(ctx).Exec(
-		`INSERT INTO iam.organization_users(id,org_id,user_id,status) VALUES($1,$2,$3,'active') ON CONFLICT (org_id,user_id) DO NOTHING`,
-		uuid.New(), orgID, userID,
+		`UPDATE iam.permissions SET status='retired',updated_at=now() WHERE status<>'retired' AND NOT (permission_key = ANY($1::text[]))`,
+		keys,
 	).Error
 }
 
-// VerifySchema 校验迁移版本及初始超级管理员，不在服务启动时自动改表。
+// syncBuiltinRole 保证内置角色存在并持有目录中全部 active 权限。
+// 权限只增不删：目录里新增的键在下次启动时补齐，移除的键保留原授权。
+func syncBuiltinRole(ctx context.Context, tx *gorm.DB) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := tx.WithContext(ctx).Raw(`SELECT id FROM iam.roles WHERE builtin`).Row().Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		id = uuid.New()
+		if err = tx.WithContext(ctx).Exec(
+			`INSERT INTO iam.roles(id,name,description,builtin) VALUES($1,$2,'',true)`,
+			id, authorization.BuiltinRoleName,
+		).Error; err != nil {
+			return uuid.Nil, err
+		}
+	} else if err != nil {
+		return uuid.Nil, err
+	} else if err = tx.WithContext(ctx).Exec(
+		`UPDATE iam.roles SET name=$2,description='',updated_at=now() WHERE id=$1`,
+		id, authorization.BuiltinRoleName,
+	).Error; err != nil {
+		return uuid.Nil, err
+	}
+
+	return id, tx.WithContext(ctx).Exec(
+		`INSERT INTO iam.role_permissions(role_id,permission_key) SELECT $1,permission_key FROM iam.permissions WHERE status='active' ON CONFLICT DO NOTHING`,
+		id,
+	).Error
+}
+
+// VerifySchema 校验迁移版本兼容，不在服务启动时自动改表。
+// 内置数据由 Seed 在启动时幂等补齐，因此这里不再把数据存在性当作 schema 状态。
 func (s *Store) VerifySchema(ctx context.Context) error {
-	var err error
 	current, target, pending, err := schemaState(ctx, s.sqlDB)
 	if err != nil || pending || current != target {
 		return errors.New("IAM schema version is incompatible; run the matching migration before serving")
-	}
-
-	var ready bool
-	if err = s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam.users WHERE is_super_admin AND status='active')`).Scan(&ready); err != nil {
-		return err
-	}
-
-	if !ready {
-		return errors.New("IAM is not initialized")
 	}
 
 	return nil

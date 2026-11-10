@@ -27,7 +27,7 @@ func openCache(ctx context.Context, cfg config.Cache) (*redis.Client, error) {
 	client := redis.NewClient(options)
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
-		logging.From(ctx).Error("Redis 连接检查失败", "event", "dependency.failed", "dependency", "redis", "error", logging.Error(err))
+		logging.From(ctx).Error("Redis connection failed", "event", "dependency.failed", "dependency", "redis", "error", logging.Error(err))
 		return nil, errors.New("cache unavailable")
 	}
 

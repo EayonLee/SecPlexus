@@ -133,24 +133,45 @@
     "module": "iam"
   },
   {
-    "name": "OrganizationHasChildren",
-    "code": "iam.organization_has_children",
+    "name": "RoleInUse",
+    "code": "iam.role_in_use",
     "status": 409,
-    "message": "该组织下仍有子组织，无法删除",
+    "message": "该角色下仍有用户，无法删除",
     "module": "iam"
   },
   {
-    "name": "OrganizationHasMembers",
-    "code": "iam.organization_has_members",
+    "name": "RoleNameTaken",
+    "code": "iam.role_name_taken",
     "status": 409,
-    "message": "该组织下仍有成员，无法删除",
+    "message": "该角色名称已被占用",
     "module": "iam"
   },
   {
-    "name": "RootOrganizationImmutable",
-    "code": "iam.root_organization_immutable",
+    "name": "BuiltinRoleImmutable",
+    "code": "iam.builtin_role_immutable",
     "status": 409,
-    "message": "根组织不能删除",
+    "message": "内置角色不可修改或删除",
+    "module": "iam"
+  },
+  {
+    "name": "ConfiguredUserImmutable",
+    "code": "iam.configured_user_immutable",
+    "status": 409,
+    "message": "内置管理员由配置管理，不能删除或停用",
+    "module": "iam"
+  },
+  {
+    "name": "LastSuperAdmin",
+    "code": "iam.last_super_admin",
+    "status": 409,
+    "message": "必须保留至少一名启用中的超级管理员",
+    "module": "iam"
+  },
+  {
+    "name": "SelfTargetForbidden",
+    "code": "iam.self_target_forbidden",
+    "status": 409,
+    "message": "不能对当前登录账号执行该操作",
     "module": "iam"
   }
 ]

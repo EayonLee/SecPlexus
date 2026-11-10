@@ -33,8 +33,8 @@ repository. PostgreSQL stores IAM data and sessions; Redis supports rate limitin
 
 | Location | Responsibility |
 | --- | --- |
-| [`src/apps/iam/`](src/apps/iam/README.md) | Accounts, authentication, sessions, organizations, roles, authorization, and identity audit |
-| [`src/apps/console/`](src/apps/console/README.md) | Business-service entry point; currently organization context and authorized SSE connections |
+| [`src/apps/iam/`](src/apps/iam/README.md) | Accounts, authentication, sessions, users, roles, flat permissions, authorization, and identity audit |
+| [`src/apps/console/`](src/apps/console/README.md) | Business-service entry point; currently identity context and authorized SSE connections |
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js, React, TypeScript, Tailwind CSS, and shadcn/ui; shared application shell and product pages |
 | [`src/packages/`](src/packages/README.md) | Implementations actually shared across applications |
 | `tests/` and `src/apps/web/tests/` | Integration-test runners and Web browser E2E tests |
@@ -160,7 +160,7 @@ All APIs use `/api/v1/{module}/...` on one listener per service. Routes explicit
 3. Web declares only consumed Zod models in `src/spx/api/iam/schemas.ts`; infer TypeScript types from them and call module APIs through Axios. Verify changes with real HTTP and browser tests.
 4. Only when changing shared result codes or permissions, run `pnpm catalogs:generate` and `pnpm catalogs:check`. Their sources live in Go `result` and IAM `authorization`; do not edit `.gen.*` exports manually.
 
-Server-side authorization remains authoritative. Preserve organization scope,
+Server-side authorization remains authoritative. Preserve declared permission checks,
 CSRF protection, session revocation, and transaction and audit guarantees.
 UI visibility does not grant API access. Keep the default same-origin model;
 cross-origin credential access requires an explicit design.

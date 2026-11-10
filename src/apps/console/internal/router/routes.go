@@ -11,11 +11,11 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// Register 保留 SSE 的原生响应和取消语义。
+// Register 保留 SSE 的原生响应和取消语义；上下文与事件流都是扁平的，没有组织段。
 func Register(engine gin.IRouter, server *handler.Server) {
 	engine.GET("/health/ready", func(c *gin.Context) { result.Success(c.Writer, map[string]bool{"ready": true}) })
-	engine.GET("/api/v1/console/orgs/:org_id/context", server.Context)
-	engine.GET("/api/v1/console/orgs/:org_id/events", server.Events)
+	engine.GET("/api/v1/console/context", server.Context)
+	engine.GET("/api/v1/console/events", server.Events)
 }
 
 // Handler 在注册前装配公共中间件及输入边界。

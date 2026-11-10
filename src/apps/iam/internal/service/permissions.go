@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	"github.com/google/uuid"
 )
 
 // PermissionView 描述权限及当前操作者是否可以把它分配给别人。
@@ -14,9 +16,9 @@ type PermissionView struct {
 	CanDelegate bool                     `json:"can_delegate"` // 当前操作者是否可以分配该权限。
 }
 
-// PermissionCatalog 返回组织权限目录，并按当前用户的实际权限计算可委派范围。
-func (s *Service) PermissionCatalog(ctx context.Context, orgID string) ([]PermissionView, error) {
-	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead, orgID); err != nil {
+// PermissionCatalog 返回扁平权限目录，并按当前用户的实际权限计算可委派范围。
+func (s *Service) PermissionCatalog(ctx context.Context) ([]PermissionView, error) {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead); err != nil {
 		return nil, err
 	}
 
@@ -25,26 +27,20 @@ func (s *Service) PermissionCatalog(ctx context.Context, orgID string) ([]Permis
 		return nil, err
 	}
 
-	// 权限来自数据库中的有效授权，不能根据角色名称推断。
-	rows, err := repository.EffectiveRoleGrants(ctx, s.Store.DB, orgID, principal.UserID)
+	userID, err := uuid.Parse(principal.UserID)
+	if err != nil {
+		return nil, repository.ErrUnauthenticated
+	}
+
+	// 权限来自数据库中的有效授权，不能根据角色名称或超管标记推断。
+	granted, err := repository.EffectivePermissions(ctx, s.Store.DB, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	effective := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err = rows.Scan(&key); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-
+	for _, key := range granted {
 		effective[key] = true
-	}
-
-	_ = rows.Close()
-	if err = rows.Err(); err != nil {
-		return nil, err
 	}
 
 	catalog, err := repository.Permissions(ctx, s.Store.DB)
@@ -54,13 +50,13 @@ func (s *Service) PermissionCatalog(ctx context.Context, orgID string) ([]Permis
 
 	items := make([]PermissionView, 0, len(catalog))
 	for _, permission := range catalog {
-		if permission.Scope != "organization" || permission.Status == "retired" {
+		if permission.Status == enum.PermissionStatusRetired {
 			continue
 		}
 
 		items = append(items, PermissionView{
 			Permission:  permission,
-			CanDelegate: permission.Status == "active" && permission.Delegable && (principal.IsSuperAdmin || effective[permission.Key]),
+			CanDelegate: permission.Status == enum.PermissionStatusActive && permission.Delegable && effective[permission.Key],
 		})
 	}
 

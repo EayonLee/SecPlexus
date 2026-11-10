@@ -82,7 +82,7 @@ func responseID(w http.ResponseWriter) string {
 func write(w http.ResponseWriter, status int, value Result[any]) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		slog.Error("响应数据编码失败", "event", "http.encode_failed", "request_id", value.RequestID, "error", logging.Error(err), "source", logging.Stack())
+		slog.Error("Could not encode response", "event", "http.encode_failed", "request_id", value.RequestID, "error", logging.Error(err), "source", logging.Stack())
 		definition, _ := Lookup(CodeInternalError)
 		status = definition.Status
 		// 此分支只包含已知字符串与 nil，不能再次触发业务值的编码错误。
@@ -99,6 +99,6 @@ func write(w http.ResponseWriter, status int, value Result[any]) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := encoded.Render(w); err != nil {
-		slog.Warn("响应已提交但发送失败", "event", "http.write_failed", "request_id", value.RequestID, "error", logging.Error(err))
+		slog.Warn("Response was committed but writing failed", "event", "http.write_failed", "request_id", value.RequestID, "error", logging.Error(err))
 	}
 }

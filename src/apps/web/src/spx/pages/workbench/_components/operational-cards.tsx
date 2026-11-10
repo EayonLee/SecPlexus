@@ -87,7 +87,11 @@ export function OperationalCards() {
           <CardTitle>{t("actionItems")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-2.5">
+          {
+            // 默认只占三条待办的高度，其余在卡片内滚动，避免整行卡片被撑高。
+            // 5.5rem 是单条待办高度、0.625rem 是条目间距：3 × 5.5 + 2 × 0.625 = 17.75rem。
+          }
+          <ul className="max-h-[17.5rem] space-y-2.5 overflow-y-auto overscroll-contain pr-1">
             {actionItems.map((item) => (
               <li key={item.id} className="space-y-2 rounded-md border px-3 py-2">
                 <div className="flex items-center gap-2">

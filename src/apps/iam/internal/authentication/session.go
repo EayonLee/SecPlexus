@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
@@ -63,7 +64,7 @@ func TokenHash(token string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// Resolve 验证当前会话并返回用户身份。
+// Resolve 验证当前会话并返回登录用户。
 func (s *Sessions) Resolve(ctx context.Context) (iamclient.Principal, error) {
 	id, err := uuid.Parse(s.Manager.GetString(ctx, LogicalSessionKey))
 	if err != nil {
@@ -109,7 +110,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		return iamclient.Principal{}, sessionError(err)
 	}
 
-	if user.Status != "active" {
+	if user.Status != enum.UserStatusActive {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
@@ -146,7 +147,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		SessionID:       session.ID.String(),
 		Username:        user.Username,
 		DisplayName:     user.DisplayName,
-		IsSuperAdmin:    user.IsSuperAdmin,
+		Configured:      user.Configured,
 		AuthEpoch:       user.AuthEpoch,
 		AuthenticatedAt: session.AuthenticatedAt,
 	}
@@ -158,7 +159,8 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 }
 
 // Create 轮换会话令牌并将其绑定到会话记录。
-func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, requestID, userAgent, clientIP string, reauthenticate bool) (iamclient.Principal, error) {
+// 会话只保存认证状态与期限；来源信息属于登录审计，不在这里重复存一份。
+func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, requestID string, reauthenticate bool) (iamclient.Principal, error) {
 	oldID, _ := uuid.Parse(s.Manager.GetString(ctx, LogicalSessionKey))
 	oldToken := s.Manager.Token(ctx)
 	// 先生成新随机令牌，再把摘要绑定到数据库逻辑会话。
@@ -196,7 +198,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		return iamclient.Principal{}, sessionError(err)
 	}
 
-	if locked.Status != "active" || locked.AuthEpoch != user.AuthEpoch {
+	if locked.Status != enum.UserStatusActive || locked.AuthEpoch != user.AuthEpoch {
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
@@ -218,7 +220,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 	var reauthenticated *time.Time
 	if reauthenticate {
 		previous, err := q.LockSession(ctx, oldID)
-		if err != nil || previous.State != "active" || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
+		if err != nil || previous.State != enum.SessionStateActive || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
 			return iamclient.Principal{}, repository.ErrUnauthenticated
 		}
 
@@ -238,16 +240,17 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		idle = absolute
 	}
 
-	if len(userAgent) > 512 {
-		userAgent = string([]rune(userAgent)[:min(len([]rune(userAgent)), 128)])
-	}
-
-	var ip any
-	if clientIP != "" {
-		ip = clientIP
-	}
-
-	if err = repository.InsertSession(ctx, tx, newID, user.ID, TokenHash(token), user.AuthEpoch, authenticated, reauthenticated, absolute, idle, now, ip, userAgent); err != nil {
+	if err = repository.InsertSession(ctx, tx, repository.InsertSessionParams{
+		ID:                newID,
+		UserID:            user.ID,
+		TokenHash:         TokenHash(token),
+		AuthEpoch:         user.AuthEpoch,
+		AuthenticatedAt:   authenticated,
+		ReauthenticatedAt: reauthenticated,
+		AbsoluteExpiresAt: absolute,
+		IdleExpiresAt:     idle,
+		Now:               now,
+	}); err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -276,7 +279,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		SessionID:         newID.String(),
 		Username:          user.Username,
 		DisplayName:       user.DisplayName,
-		IsSuperAdmin:      user.IsSuperAdmin,
+		Configured:        user.Configured,
 		AuthEpoch:         user.AuthEpoch,
 		AuthenticatedAt:   authenticated,
 		ReauthenticatedAt: reauthenticated,
@@ -343,7 +346,7 @@ func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID 
 	if err = tx.Commit().Error; err != nil {
 		return err
 	}
-	logging.From(ctx).Info("逻辑会话撤销已提交", "event", "session.revoked", "user_id", p.UserID, "session_id", sessionID, "reason", reason)
+	logging.From(ctx).Info("Session revoked", "event", "session.revoked", "user_id", p.UserID, "session_id", sessionID, "reason", reason)
 	return nil
 }
 

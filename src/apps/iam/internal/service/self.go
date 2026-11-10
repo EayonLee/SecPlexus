@@ -5,90 +5,40 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 )
 
-// Identity 返回当前身份与可见组织的权限投影。
-func (s *Service) Identity(ctx context.Context, orgID string) (map[string]any, error) {
+// Me 返回当前账号、直接持有的角色、有效权限与展示时区偏好。
+// 响应里没有组织、作用域或平台能力：授权只有用户 → 角色 → 权限一条路径。
+func (s *Service) Me(ctx context.Context) (Identity, error) {
 	p, err := s.Sessions.Resolve(ctx)
 	if err != nil {
-		return nil, err
-	}
-
-	result := map[string]any{
-		"principal":             p,
-		"organizations":         []any{},
-		"platform_capabilities": []string{},
-		"capabilities":          []string{},
+		return Identity{}, err
 	}
 
 	userID, err := uuid.Parse(p.UserID)
 	if err != nil {
-		return nil, err
+		return Identity{}, repository.ErrUnauthenticated
 	}
 
-	organizations, err := repository.VisibleOrganizations(ctx, s.Store.DB, userID, p.IsSuperAdmin)
+	roles, err := repository.UserRoles(ctx, s.Store.DB, userID)
 	if err != nil {
-		return nil, err
+		return Identity{}, err
 	}
 
-	result["organizations"] = organizations
+	permissions, err := repository.EffectivePermissions(ctx, s.Store.DB, userID)
+	if err != nil {
+		return Identity{}, err
+	}
 
 	timeZone, err := repository.UserTimeZone(ctx, s.Store.DB, userID)
 	if err != nil {
-		return nil, err
+		return Identity{}, err
 	}
 
-	result["timezone"] = timeZone
-	catalog, err := repository.Permissions(ctx, s.Store.DB)
-	if err != nil {
-		return nil, err
+	if roles == nil {
+		roles = []repository.RoleRef{}
 	}
 
-	platform := []string{}
-	for _, permission := range catalog {
-		if permission.Scope == "platform" && p.IsSuperAdmin && permission.Status != "retired" {
-			platform = append(platform, permission.Key)
-		}
-	}
-
-	result["platform_capabilities"] = platform
-	if orgID != "" {
-		allowed := false
-		for _, org := range organizations {
-			if org.ID == orgID {
-				allowed = true
-			}
-		}
-
-		if !allowed {
-			return nil, authorization.ErrDenied
-		}
-
-		org, err := uuid.Parse(orgID)
-		if err != nil {
-			return nil, repository.ErrInvalid
-		}
-
-		capabilities, err := repository.NewQueries(s.Store.DB).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: org,
-			UserID: userID})
-		if err != nil {
-			return nil, err
-		}
-
-		if p.IsSuperAdmin {
-			capabilities = []string{}
-			for _, permission := range catalog {
-				if permission.Scope == "organization" && permission.Status == "active" {
-					capabilities = append(capabilities, permission.Key)
-				}
-			}
-		}
-
-		result["capabilities"] = capabilities
-		result["org_id"] = orgID
-	}
-
-	return result, nil
+	return Identity{Principal: p, Permissions: permissions, TimeZone: timeZone, Roles: roles}, nil
 }

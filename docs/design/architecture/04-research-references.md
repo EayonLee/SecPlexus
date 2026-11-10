@@ -28,7 +28,7 @@
 | [Exaforce](https://www.exaforce.com) | 4 个对等 Exabot | 统一数据层 + **实时知识图谱**做底座；95% 告警 AI 处理 | — |
 | [Torq](https://torq.io/socrates) | omni-agent + HyperAgents | Socrates 编排 + Context Graph（环境记忆） | ~$60K |
 | Radiant（2026-08 被 Cribl 收购） | 模仿人类分析师 | FP 降 98%；"每分析师每天只升 1–3 条高保真告警" | — |
-| [Intezer](https://intezer.com) | 证据流水线 | 收集→分析（递归解包）→关联（含**组织可信制品库**）→证据级 verdict→聚合告警级 verdict | — |
+| [Intezer](https://intezer.com) | 证据流水线 | 收集→分析（递归解包）→关联（含**环境可信制品库**）→证据级 verdict→聚合告警级 verdict | — |
 | Microsoft Security Copilot | 单职责 agent 套件 | phishing/alert triage、TI、KQL hunting 等各管一摊；每 agent 自治独立配置；责任 AI 护栏；用户实测月省约 200 小时 | — |
 | Google SecOps (2026) | 专业 agent | Detection Engineering agent + Triage agent | — |
 
@@ -90,7 +90,7 @@ CNCF/Apache 的版本选择原则：选"LTS + 已有多轮补丁"的组合，不
 | 3 | 用字符串代替缺失值 | 类型化null，禁止混入展示占位符 |
 | 4 | 编码不兼容造成静默替换 | 严格解码、明确回退编码并保留处理记录 |
 | 5 | 实体类型不明导致错误归桶 | 未知实体不猜测；关联键与分区键一致 |
-| 6 | 集合顺序改变指纹 | 规范化排序，去重范围包含组织标识 |
+| 6 | 集合顺序改变指纹 | 规范化排序，去重范围包含来源标识 |
 
 ## 5. 学术评测数据汇总
 
@@ -101,7 +101,7 @@ CNCF/Apache 的版本选择原则：选"LTS + 已有多轮补丁"的组合，不
 | Self-Refine / CoVe（同上引） | 同上下文自审 | Self-Refine 改对 16 / 改错 79；CoVe 25/132 | 禁止同上下文自审 |
 | ExCyTIn-Bench（arXiv 2507.14201，Microsoft） | 57 张 Sentinel 表、7,542 题 | 最好模型 reward 0.606 | 调查能力远未饱和 |
 | SIABench（arXiv 2603.06422） | triage vs 深度调查 | triage（TP/FP）96–98%；**深度调查 40–60%** | TP/FP 可自动化，溯源人兜底 |
-| CTIBench（arXiv 2406.07599，NeurIPS'24） | 威胁情报 | ATT&CK 开放抽取 macro-F1 **0.3108**；组织归因 correct 52/plausible 86 | ATT&CK 只做候选集分类 |
+| CTIBench（arXiv 2406.07599，NeurIPS'24） | 威胁情报 | ATT&CK 开放抽取 macro-F1 **0.3108**；攻击者归因 correct 52/plausible 86 | ATT&CK 只做候选集分类 |
 | Let Me Speak Freely（arXiv 2408.02442，EMNLP'24） | 格式约束 | JSON 模式下 GPT-3.5 **100%** 把 answer 排在 reason 前 | evidence 排在 verdict 前 |
 | CyberSOCEval（CrowdStrike×Meta） | 安全分析 | 推理模型拿不到 coding/math 那种 test-time scaling 红利 | 换贵模型不是解法 |
 | 温度=0 仍不稳定（Muennohoff 引） | 确定性 | greedy sampling 输出仍显著变化 | 结果留档 + 可复现设计 |
@@ -164,7 +164,7 @@ CNCF/Apache 的版本选择原则：选"LTS + 已有多轮补丁"的组合，不
 - `security_finding`(2001)：`@deprecated since 1.1.0`，superseded_by 含 `detection_finding`
 - `detection_finding`(2004)：77 字段，含 `count`/`start_time`/`end_time`/`duration`/`unmapped`/`vendor_attributes`/`evidences[]`/`observables[]`
 - `incident_finding`(2005)：73 字段，`status_id` 必填、`verdict`/`confidence_id`（"summary across all aggregated findings"）/`assignee`/`ticket` —— 案件模型直接映射
-- 生态：2024-11 入 Linux Foundation（200+ 组织、900+ 贡献者，2026-03 达 1,280）；2025-12 获 ITU 成员国支持、2026-06 成为国际标准；Atlassian 44 亿事件/天案例（成本降 80%、查询 45s→2-3s）
+- 生态：2024-11 入 Linux Foundation（200+ 家机构、900+ 贡献者，2026-03 达 1,280）；2025-12 获 ITU 成员国支持、2026-06 成为国际标准；Atlassian 44 亿事件/天案例（成本降 80%、查询 45s→2-3s）
 - v1.9.0 含 `ai_agent`/`ai_model`/`ai_operation` profile —— 大模型护栏支柱可复用标准 schema
 
 ## 9. 明确未核实清单（不编造）

@@ -6,14 +6,14 @@
 | --- | --- |
 | `/login` | Real IAM username/password login and mandatory password change |
 | `/dashboard` | Authenticated security workbench based on CRM V1; template sample data |
-| `/settings/profile` | Profile details and organization membership |
-| `/settings/account` | Account identity and password changes |
-| `/management/orgs/{org_id}/...` | Organization settings, members, roles, permission previews and audit |
-| `/management/platform/...` | Platform accounts, organization directory and platform audit |
+| `/settings` | Profile details, account security and display time zone |
+| `/settings/users` | Users, their roles and access administration |
+| `/settings/roles` | Roles, permissions and permission previews |
+| `/settings/audit` | Audit log |
 
 The product shell uses the shared Sidebar, form, dialog and table components, plus its existing layout controls and theme switcher. Navigation follows the server capability projection. The single workbench retains CRM V1 sample data and never counts as real business statistics. The Dashboards group contains only “安全智驾工作台”; real IAM navigation remains capability-based.
 
-IAM credentials stay in HttpOnly cookies. Zustand holds only the current in-memory identity and capability projection. No session, token, role, permission or business data is persisted in localStorage; only a remembered username and presentation preferences may persist. Identity epochs and cancellation reject stale responses after logout or organization changes. BroadcastChannel synchronizes session changes across tabs without sharing secrets. URL organization context remains independent per tab.
+IAM credentials stay in HttpOnly cookies. Zustand holds only the current in-memory identity and capability projection. No session, token, role, permission or business data is persisted in localStorage; only a remembered username and presentation preferences may persist. Identity versions and cancellation reject stale responses after logout or identity changes. BroadcastChannel synchronizes session changes across tabs without sharing secrets.
 
 `src/app/api/v1/[module]/[...path]/route.ts` streams IAM/Console API requests to server-configured origins. It forwards Cookie, Origin and CSRF context, preserves response status and Set-Cookie, and does not forward Authorization headers or receive service credentials. Backend authorization remains authoritative. A dependency failure returns 503 and pauses interaction without turning it into a successful logout.
 
@@ -78,7 +78,7 @@ The application uses `next-intl` with `en` and `zh-CN` catalogs in `messages/`. 
 
 Use typed `useTranslations` / `getTranslations` message keys and ICU placeholders or plurals. Add every message to both catalogs; do not concatenate sentence fragments or add locale conditionals to components. Format numbers, money, lists and timestamps with `useFormatter`; displayed timestamps use UTC consistently across both languages. Currency is preserved (the CRM sample uses USD), not converted when switching languages. Pass the locale into components such as the date picker.
 
-Translate platform text, stable permission labels and built-in role names. Preserve account names, organization names, custom role names, identifiers and other user data. API errors use stable result-code-to-message-key mappings; never translate or display raw internal error bodies. CRM sample labels retain their sales meaning: leads are 销售线索 and won projects are 成交项目, not invented security metrics.
+Translate platform text, stable permission labels and built-in role names. Preserve account names, custom role names, identifiers and other user data. API errors use stable result-code-to-message-key mappings; never translate or display raw internal error bodies. CRM sample labels retain their sales meaning: leads are 销售线索 and won projects are 成交项目, not invented security metrics.
 
 Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboard component rendering in both languages. Existing IAM E2E selects Chinese explicitly, so it does not depend on the default locale. Run the local unit/type/build checks after adding translations; browser checks should verify switching, refresh persistence, translated accessibility labels, metadata and narrow layouts.
 
@@ -86,7 +86,7 @@ Unit checks cover catalog parity, ICU interpolation/plurals, and actual Dashboar
 
 `src/spx/api/client.ts` uses Axios interceptors for platform results, bounded requests, cancellation and safe errors. `api/iam/` owns native API functions and consumed Zod models; TypeScript types are inferred from those models. Routes and models are synchronized with Go through real HTTP and browser tests. There is no API code-generation prerequisite. Internal IAM authorization remains server-only.
 
-`spx/iam/session.ts` configures Axios identity/CSRF behavior before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session, identity and organization authorization versions. Logout/organization changes cancel and clear caches. Password login, confirmation, change and reset call module API functions directly and never enter MutationCache or persistent storage.
+`spx/iam/session.ts` configures Axios identity/CSRF behavior before use: same origin, CSRF, bounded requests, identity cancellation and safe HTTP errors. `query.tsx` configures explicit retry/stale/gc/focus/reconnect policies; cache keys include session and identity versions. Logout or identity changes cancel and clear caches. Password login, confirmation, change and reset call module API functions directly and never enter MutationCache or persistent storage.
 
 IAM lists use Query and the existing TanStack Table with controlled server pagination. RHF uses authored Zod schemas and existing shadcn Field/FieldError controls; business pages declare fields explicitly. There is no string-map form DSL or effect/revision list fetcher. See the [role implementation walkthrough](../../../docs/development/role-management.md).
 
@@ -102,18 +102,18 @@ Axios 负责传输、JSON、超时和取消，平台拦截器按模块 API 声�
 
 ## Settings and administration experience
 
-The avatar menu exposes Settings and System. Settings has separate Profile and Account routes under the same application shell. Device management is not exposed. System has three task sections: Members & access, Organization management and Audit logs. Capability-filtered tabs retain the existing management deep links and distinguish organization membership from platform account administration; merging navigation never grants access.
+The avatar menu exposes Settings and System. `/settings` holds profile details, account security and the display time zone under the application shell; device management is not exposed. System has three task sections: Users, Roles & permissions, and Audit logs, backed by `/settings/users`, `/settings/roles` and `/settings/audit`. Navigation entries follow the server capability projection; navigation visibility never grants access.
 
-The read-only system security overview and its unused API/permission were removed. Session policy, authentication, authorization and personal security controls remain. Organization and form pickers use the existing shadcn Select; toolbar actions use ghost buttons. Semantic status badges share success, danger, warning and information colors across both themes, with visible text. Categories remain neutral. This iteration targets desktop browsers; it does not add mobile-specific layouts or tests.
+The read-only system security overview and its unused API/permission were removed. Session policy, authentication, authorization and personal security controls remain. Role and form pickers use the existing shadcn Select; toolbar actions use ghost buttons. Semantic status badges share success, danger, warning and information colors across both themes, with visible text. Categories remain neutral. This iteration targets desktop browsers; it does not add mobile-specific layouts or tests.
 
 
-The single system administrator is configuration-managed. Its identity, profile, status, membership and password cannot be changed through the application or operator password-reset command. Personal settings shows a read-only explanation; account/member lists omit mutation actions for that user. Other accounts keep their normal password and membership workflows. IAM applies its existing bootstrap username/password configuration during explicit initialization and startup, rotating identity versions only when configuration changes. No UI can grant or remove the system administrator identity.
+The single system administrator is a built-in account written to the database from configuration and granted the built-in administrator role. It cannot be deleted, disabled, or have its identity or password changed through the application or the operator password-reset command. IAM applies the bootstrap username/password configuration during explicit initialization and startup, rotating identity versions only when configuration changes. Personal settings shows a read-only explanation and user lists omit mutation actions for that account. No UI can grant or remove the built-in administrator role. Other accounts keep their normal password and role assignment workflows.
 
 Data tables default to 10 rows, with 10/20/30/40/50 rows-per-page controls. Server pagination includes page size in the scoped query key and resets to the first page when the size changes. Selection catalogs are not paginated data tables.
 
 UI copy avoids repeating page titles, tab labels and field purposes as permanent descriptions. Status belongs to the corresponding object or details field. Necessary constraints and recovery guidance appear at the relevant control; configuration-managed password guidance is available on hover or keyboard focus. Localized copy follows professional product terminology and the conventions of each language.
 
-Member selection uses the template's existing Combobox with server search and TanStack infinite queries (10 options per page). Scrolling loads subsequent pages; disabled members cannot be selected. Identity confirmation happens inside the active FormDialog, retaining its RHF draft and selected member. A successful confirmation refreshes the session scope without unmounting the page; the member explicitly submits the original form afterward. Confirmation passwords are not sent through MutationCache, persisted, logged, or replayed. The standalone Account confirmation action is removed. Organization name and identifier limits follow the IAM README.
+User selection uses the template's existing Combobox with server search and TanStack infinite queries (10 options per page). Scrolling loads subsequent pages; disabled users cannot be selected. Identity confirmation happens inside the active FormDialog, retaining its RHF draft and selected user. A successful confirmation refreshes the session projection without unmounting the page; the operator explicitly submits the original form afterward. Confirmation passwords are not sent through MutationCache, persisted, logged, or replayed. The standalone Account confirmation action is removed. Account and role limits follow the IAM README.
 
 ## Offline configuration check
 
