@@ -219,8 +219,49 @@ SecPlexus 使用 [MIT License](LICENSE)。
 
 ## 致谢
 
-SecPlexus 建立在大量开源工作之上。框架、库与工具的来源和许可证见
-[ACKNOWLEDGEMENTS.md](docs/ACKNOWLEDGEMENTS.md)。
+SecPlexus 建立在开源工作之上。感谢以下项目及其依赖的维护者与贡献者。
+
+<p align="center">
+  <a href="https://github.com/vercel/next.js" title="Next.js"><img src="docs/assets/nextjs.png" alt="Next.js" height="56" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/facebook/react" title="React"><img src="docs/assets/react.svg" alt="React" height="56" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/tailwindlabs/tailwindcss" title="Tailwind CSS"><img src="docs/assets/tailwind-mark.svg" alt="Tailwind CSS" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/shadcn-ui/ui" title="shadcn/ui"><img src="docs/assets/shadcn-ui.png" alt="shadcn/ui" height="56" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/postgres/postgres" title="PostgreSQL"><img src="docs/assets/postgresql.png" alt="PostgreSQL" height="56" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/redis/redis" title="Redis"><img src="docs/assets/redis.svg" alt="Redis" height="56" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/gin-gonic/gin" title="Gin"><img src="docs/assets/gin.svg" alt="Gin" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/go-gorm/gorm" title="GORM"><img src="docs/assets/gorm.svg" alt="GORM" width="110" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/pressly/goose" title="Goose"><img src="docs/assets/goose.png" alt="Goose" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/spf13/viper" title="Viper"><img src="docs/assets/viper.png" alt="Viper" height="48" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/TanStack/query" title="TanStack Query"><img src="docs/assets/tanstack-query.svg" alt="TanStack Query" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/colinhacks/zod" title="Zod"><img src="docs/assets/zod.svg" alt="Zod" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/amannn/next-intl" title="next-intl"><img src="docs/assets/next-intl.svg" alt="next-intl" width="140" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/react-hook-form/react-hook-form" title="React Hook Form"><img src="docs/assets/react-hook-form.svg" alt="React Hook Form" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/microsoft/playwright" title="Playwright"><img src="docs/assets/playwright.svg" alt="Playwright" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/vitest-dev/vitest" title="Vitest"><img src="docs/assets/vitest.svg" alt="Vitest" height="48" /></a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/biomejs/biome" title="Biome"><img src="docs/assets/biome.svg" alt="Biome" height="48" /></a>
+</p>
+
+完整列表（含徽标来源与许可证）见 [ACKNOWLEDGEMENTS.md](docs/ACKNOWLEDGEMENTS.md)。
 
 ## 贡献者
 
