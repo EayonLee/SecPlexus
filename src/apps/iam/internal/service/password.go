@@ -83,7 +83,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 	}
 
 	if err = repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: userID,
-		RevokeReason: text("password_change")}); err != nil {
+		RevokeReason: "password_change"}); err != nil {
 		return err
 	}
 

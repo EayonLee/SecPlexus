@@ -26,13 +26,13 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
+	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
 )
 
 // apiClient 为单个测试保存独立 Cookie 和 CSRF 状态。

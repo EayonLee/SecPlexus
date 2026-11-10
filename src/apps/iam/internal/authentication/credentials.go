@@ -134,7 +134,7 @@ func (s *Authenticator) authenticate(ctx context.Context, credentials Credential
 	}
 
 	passwordErr := (account.PasswordHasher{}).CompareHashAndPassword(user.PasswordHash, credentials.Password)
-	locked := user.LockedUntil.Valid && user.LockedUntil.Time.After(now)
+	locked := user.LockedUntil != nil && user.LockedUntil.After(now)
 	if passwordErr != nil || user.Status != enum.UserStatusActive || locked {
 		// 密码确认失败不累计登录失败：操作者已持有有效会话，
 		// 计入锁定会让一次输错的 sudo 确认把账号锁在门外。
@@ -184,7 +184,7 @@ func (s *Authenticator) failure(ctx context.Context, user *repository.LoginUser,
 				return err
 			}
 
-			err = repository.RecordLoginFailure(ctx, tx, user.ID, s.sessions.Config.Auth.LoginMaxFailures, interval(s.sessions.Config.Auth.LoginLockDuration))
+			err = repository.RecordLoginFailure(ctx, tx, user.ID, s.sessions.Config.Auth.LoginMaxFailures, s.sessions.Config.Auth.LoginLockDuration)
 			if err != nil {
 				return err
 			}

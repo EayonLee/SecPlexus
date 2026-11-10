@@ -7,3 +7,11 @@
 id = "GHSA-gcqx-w48m-w2h4"
 effectiveUntil = 2027-03-31
 reason = "dev-only: shadcn 主题包的传递依赖，运行时不加载，当前无修复版本"
+
+# gorilla/csrf 的 TrustedOrigins 缺陷：上游为最新版本且无修复版本。
+# 本项目从未设置 TrustedOrigins，且所有非安全方法先经过自己的 Origin 白名单。
+# 判定依据与复审日期见 docs/development/security-exceptions.md。
+[[IgnoredVulns]]
+id = "GO-2025-3884"
+effectiveUntil = 2027-03-31
+reason = "not reachable: TrustedOrigins is never set and our own Origin allowlist runs first"

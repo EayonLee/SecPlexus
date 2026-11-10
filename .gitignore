@@ -108,3 +108,7 @@ htmlcov/
 /src/apps/web/.swc/
 /src/apps/web/.vercel/
 /src/apps/web/next-env.d.ts
+
+# Build output (go build 在包目录生成的二进制，不进入版本库)
+*.exe
+bin/*.exe

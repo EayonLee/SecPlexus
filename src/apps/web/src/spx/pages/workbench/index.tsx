@@ -1,15 +1,15 @@
 import { useTranslations } from "next-intl";
 
-import { useCRMData } from "./_components/crm.config";
+import { useWorkbenchData } from "./_components/workbench.config";
 import { InsightCards } from "./_components/insight-cards";
 import { OperationalCards } from "./_components/operational-cards";
 import { OverviewCards } from "./_components/overview-cards";
-import { RecentLeadsTable } from "./_components/recent-leads-table/table";
+import { AlertsTable } from "./_components/alerts-table/table";
 
 export default function Page() {
   const t = useTranslations("Dashboard");
 
-  const { recentLeadsData } = useCRMData();
+  const { recentLeadsData } = useWorkbenchData();
   return (
     <div className="@container/main flex flex-col gap-4 md:gap-6">
       <header className="flex flex-col gap-1">
@@ -19,7 +19,7 @@ export default function Page() {
       <OverviewCards />
       <InsightCards />
       <OperationalCards />
-      <RecentLeadsTable data={recentLeadsData} />
+      <AlertsTable data={recentLeadsData} />
     </div>
   );
 }

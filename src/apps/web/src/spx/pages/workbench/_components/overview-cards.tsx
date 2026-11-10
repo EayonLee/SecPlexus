@@ -7,7 +7,7 @@ import { Area, AreaChart, Bar, BarChart, Line, LineChart, XAxis } from "recharts
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
-import { useCRMData } from "./crm.config";
+import { useWorkbenchData } from "./workbench.config";
 
 export function OverviewCards() {
   const t = useTranslations("Dashboard");
@@ -22,7 +22,7 @@ export function OverviewCards() {
     proposalsChartData,
     revenueChartConfig,
     revenueChartData,
-  } = useCRMData();
+  } = useWorkbenchData();
   return (
     <div className="grid grid-cols-1 gap-4 *:data-[slot=card]:shadow-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <Card>

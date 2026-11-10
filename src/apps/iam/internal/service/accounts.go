@@ -143,7 +143,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 			// 状态变化已通过账号版本让旧会话失效；这里再写明撤销原因，便于审计与清理。
 			if statusChanged {
 				return repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
-					RevokeReason: text("account_status")})
+					RevokeReason: "account_status"})
 			}
 
 			return nil
@@ -226,7 +226,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 			}
 
 			return repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
-				RevokeReason: text("password_reset")})
+				RevokeReason: "password_reset"})
 		},
 	)
 }

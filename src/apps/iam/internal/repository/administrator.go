@@ -70,7 +70,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 			return uuid.Nil, err
 		}
 
-		if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason}); err != nil {
+		if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason.String}); err != nil {
 			return uuid.Nil, err
 		}
 
@@ -131,7 +131,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 				}
 			}
 
-			if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason}); err != nil {
+			if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason.String}); err != nil {
 				return uuid.Nil, err
 			}
 		}

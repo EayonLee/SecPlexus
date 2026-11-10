@@ -4,7 +4,7 @@ import type { ChartConfig } from "@/components/ui/chart";
 
 // 工作台示例数据：只表达安全运营的业务形状，尚未接入真实数据源。
 // 真实接口落地时整份替换即可，组件与排版不依赖这里的取值。
-export function useCRMData() {
+export function useWorkbenchData() {
   const t = useTranslations("Dashboard");
   const format = useFormatter();
 

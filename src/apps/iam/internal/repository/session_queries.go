@@ -10,7 +10,9 @@ import (
 )
 
 // RecordLoginFailure 记录登录失败并按数据库时间更新锁定期限。
-func RecordLoginFailure(ctx context.Context, db *gorm.DB, userID uuid.UUID, loginMaxFailures int, value pgtype.Interval) error {
+func RecordLoginFailure(ctx context.Context, db *gorm.DB, userID uuid.UUID, loginMaxFailures int, lockDuration time.Duration) error {
+	value := pgtype.Interval{Microseconds: lockDuration.Microseconds(), Valid: true}
+
 	return db.WithContext(ctx).Exec(`UPDATE iam.password_credentials SET failed_attempts=CASE WHEN locked_until<=clock_timestamp() THEN 1 ELSE failed_attempts+1 END,locked_until=CASE WHEN locked_until>clock_timestamp() THEN locked_until WHEN (CASE WHEN locked_until<=clock_timestamp() THEN 1 ELSE failed_attempts+1 END)>=$2 THEN clock_timestamp()+$3::interval ELSE NULL END,updated_at=now() WHERE user_id=$1`, userID, loginMaxFailures, value).Error
 }
 
