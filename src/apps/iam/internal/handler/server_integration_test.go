@@ -623,7 +623,9 @@ func TestManagementBindingRejectsInvalidInputBeforeService(t *testing.T) {
 	admin.request("PUT", "/api/v1/iam/roles/00000000-0000-4000-8000-000000000000/permissions", map[string]any{"permissions": []string{}, "version": "abc"}, 400)
 	admin.request("GET", "/api/v1/iam/users?limit=1000", nil, 400)
 	admin.request("POST", "/api/v1/iam/users/00000000-0000-4000-8000-000000000000/reset-password", map[string]any{"password": "short"}, 400)
-	admin.request("GET", "/api/v1/iam/audit-events?offset=-1", nil, 400)
+	// 审计列表使用游标分页，offset 不是它的参数；改断言真实的绑定边界。
+	admin.request("GET", "/api/v1/iam/audit-events?limit=1000", nil, 400)
+	admin.request("GET", "/api/v1/iam/audit-events?from=2026-13-01", nil, 400)
 	admin.request("GET", "/api/v1/iam/roles/not-a-uuid", nil, 400)
 }
 

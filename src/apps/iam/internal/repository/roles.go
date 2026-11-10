@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
 
 // Role 保存角色及其当前权限；仅在模块内部用于委派校验。
@@ -21,12 +23,13 @@ type Role struct {
 
 // CreateRole 在调用方事务中创建全局角色。
 func CreateRole(ctx context.Context, tx *gorm.DB, id uuid.UUID, name, description, actorID string) error {
-	err := tx.WithContext(ctx).Table("iam.roles").Create(map[string]any{
-		"id":          id,
-		"name":        name,
-		"description": description,
-		"created_by":  actorID,
-	}).Error
+	err := queries(tx).CreateRole(ctx, sqlcgen.CreateRoleParams{
+		ID:          id,
+		Name:        name,
+		Description: description,
+		CreatedBy:   actorID,
+	})
+
 	return mapRoleError(err)
 }
 
@@ -36,81 +39,117 @@ func GrantRolePermissions(ctx context.Context, tx *gorm.DB, roleID string, permi
 		return nil
 	}
 
-	return tx.WithContext(ctx).Exec(`
-		INSERT INTO iam.role_permissions(role_id,permission_key)
-		SELECT $1, permission_key FROM unnest($2::text[]) AS permission_key
-		ON CONFLICT DO NOTHING`, roleID, permissions).Error
+	return grantRolePermissions(ctx, tx, roleID, permissions)
 }
 
 // RoleGrants 锁定目标角色并读取权限，供相同事务内的委派校验使用。
 func RoleGrants(ctx context.Context, tx *gorm.DB, roleID string) (Role, error) {
 	role := Role{Permissions: []string{}}
-	err := tx.WithContext(ctx).Raw(`
-		SELECT r.id::text,r.name,r.description,r.builtin,
-		       (SELECT count(*) FROM iam.user_roles ur WHERE ur.role_id=r.id) AS user_count
-		FROM iam.roles r WHERE r.id=$1 FOR UPDATE`, roleID).Row().
-		Scan(&role.ID, &role.Name, &role.Description, &role.Builtin, &role.UserCount)
+	id, err := uuid.Parse(roleID)
 	if err != nil {
 		return role, err
 	}
 
-	err = tx.WithContext(ctx).Table("iam.role_permissions").Where("role_id = ?", roleID).
-		Order("permission_key").Pluck("permission_key", &role.Permissions).Error
-	return role, err
+	row, err := queries(tx).RoleGrants(ctx, id)
+	if err != nil {
+		return role, err
+	}
+
+	permissions, err := queries(tx).RolePermissionKeys(ctx, id)
+	if err != nil {
+		return role, err
+	}
+
+	role.ID = row.ID.String()
+	role.Name = row.Name
+	role.Description = row.Description
+	role.Builtin = row.Builtin
+	role.UserCount = row.UserCount
+	role.Permissions = permissions
+	if role.Permissions == nil {
+		role.Permissions = []string{}
+	}
+
+	return role, nil
 }
 
 // UpdateRole 更新角色信息，零值描述仍会写入。
 func UpdateRole(ctx context.Context, tx *gorm.DB, roleID, name, description string) error {
-	err := tx.WithContext(ctx).Table("iam.roles").Where("id = ?", roleID).
-		Updates(map[string]any{
-			"name":        name,
-			"description": description,
-			"updated_at":  gorm.Expr("now()"),
-		}).Error
+	id, err := uuid.Parse(roleID)
+	if err != nil {
+		return err
+	}
+
+	err = queries(tx).UpdateRole(ctx, sqlcgen.UpdateRoleParams{ID: id, Name: name, Description: description})
+
 	return mapRoleError(err)
 }
 
 // DeleteRole 删除角色；角色权限由外键级联删除，用户绑定会阻止删除。
 func DeleteRole(ctx context.Context, tx *gorm.DB, roleID string) error {
-	err := tx.WithContext(ctx).Table("iam.roles").Where("id = ?", roleID).Delete(nil).Error
+	id, err := uuid.Parse(roleID)
+	if err != nil {
+		return err
+	}
+
+	err = queries(tx).DeleteRole(ctx, id)
+
 	return mapRoleError(err)
 }
 
 // ReplaceGrants 保留未变化的授权，只删除本次撤销的键，避免整批重写。
 func ReplaceGrants(ctx context.Context, tx *gorm.DB, roleID string, permissions []string) error {
-	query := tx.WithContext(ctx).Table("iam.role_permissions").Where("role_id = ?", roleID)
-	if len(permissions) > 0 {
-		query = query.Where("permission_key NOT IN ?", permissions)
+	id, err := uuid.Parse(roleID)
+	if err != nil {
+		return err
 	}
 
-	if err := query.Delete(nil).Error; err != nil {
+	keep, err := textArray(permissions)
+	if err != nil {
+		return err
+	}
+
+	if err = queries(tx).DeleteRoleGrantsNotIn(ctx, sqlcgen.DeleteRoleGrantsNotInParams{RoleID: id, Keep: keep}); err != nil {
 		return err
 	}
 
 	if len(permissions) > 0 {
-		if err := tx.WithContext(ctx).Exec(`
-			INSERT INTO iam.role_permissions(role_id,permission_key)
-			SELECT $1, permission_key FROM unnest($2::text[]) AS permission_key
-			ON CONFLICT DO NOTHING`, roleID, permissions).Error; err != nil {
+		if err = grantRolePermissions(ctx, tx, roleID, permissions); err != nil {
 			return err
 		}
 	}
 
-	return tx.WithContext(ctx).Table("iam.roles").Where("id = ?", roleID).
-		Updates(map[string]any{"updated_at": gorm.Expr("now()")}).Error
+	return queries(tx).TouchRole(ctx, id)
 }
 
 // UserRoleIDs 读取目标用户当前持有的角色标识。
 func UserRoleIDs(ctx context.Context, tx *gorm.DB, userID string) ([]string, error) {
-	ids := []string{}
-	err := tx.WithContext(ctx).Table("iam.user_roles").Where("user_id = ?", userID).
-		Order("role_id").Pluck("role_id::text", &ids).Error
-	return ids, err
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	ids, err := queries(tx).UserRoleIDs(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]string, 0, len(ids))
+	for _, roleID := range ids {
+		items = append(items, roleID.String())
+	}
+
+	return items, nil
 }
 
 // ReplaceUserRoles 在已完成委派校验的事务内替换用户角色绑定。
 func ReplaceUserRoles(ctx context.Context, tx *gorm.DB, userID string, ids []string, actorID string) error {
-	if err := tx.WithContext(ctx).Table("iam.user_roles").Where("user_id = ?", userID).Delete(nil).Error; err != nil {
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return err
+	}
+
+	if err = queries(tx).DeleteUserRoles(ctx, id); err != nil {
 		return err
 	}
 
@@ -118,10 +157,27 @@ func ReplaceUserRoles(ctx context.Context, tx *gorm.DB, userID string, ids []str
 		return nil
 	}
 
-	return tx.WithContext(ctx).Exec(`
-		INSERT INTO iam.user_roles(user_id,role_id,created_by)
-		SELECT $1, role_id, $3 FROM unnest($2::uuid[]) AS role_id
-		ON CONFLICT DO NOTHING`, userID, ids, actorID).Error
+	roles, err := textArray(ids)
+	if err != nil {
+		return err
+	}
+
+	return queries(tx).InsertUserRoles(ctx, sqlcgen.InsertUserRolesParams{UserID: id, RoleIds: roles, CreatedBy: actorID})
+}
+
+// grantRolePermissions 把权限集合写入角色；集合以 jsonb 传入，SQL 侧展开。
+func grantRolePermissions(ctx context.Context, tx *gorm.DB, roleID string, permissions []string) error {
+	id, err := uuid.Parse(roleID)
+	if err != nil {
+		return err
+	}
+
+	encoded, err := textArray(permissions)
+	if err != nil {
+		return err
+	}
+
+	return queries(tx).GrantRolePermissions(ctx, sqlcgen.GrantRolePermissionsParams{RoleID: id, Permissions: encoded})
 }
 
 // mapRoleError 把角色名称冲突与被引用删除映射为业务可区分的错误。
