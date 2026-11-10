@@ -1,5 +1,16 @@
 .DEFAULT_GOAL := dev
 
+# 工具版本与工具链集中在这里；升级工具是独立 PR，不要分散到各 target。
+#
+# 环境事实：本机安装的 go 可能是 1.24.x，而 go.mod 声明 go 1.27.3，平时靠 GOTOOLCHAIN=auto 下载。
+# golangci-lint 要求"构建它的 Go 版本 >= 被分析模块的 Go 版本"，否则报
+# "Go language version used to build golangci-lint is lower than the targeted Go version"。
+# 所以这里显式指定同一工具链，不依赖 auto 选择。
+GOTOOLCHAIN := go1.27.3
+GOLANGCI_LINT_VERSION := v2.15.0
+GOVULNCHECK_VERSION := v1.9.0
+
+
 .PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security
 
 dev:
@@ -39,10 +50,10 @@ lint:
 	@pnpm lint
 
 lint-go:
-	@go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./src/...
+	@GOTOOLCHAIN=$(GOTOOLCHAIN) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./src/...
 
 vuln-go:
-	@go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
+	@GOTOOLCHAIN=$(GOTOOLCHAIN) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./src/...
 
 vet:
 	@go vet ./src/...
