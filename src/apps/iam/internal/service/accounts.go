@@ -113,7 +113,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			target, err := repository.LockedAccount(ctx, tx, id)
 			if err != nil {
 				return err
 			}
@@ -142,7 +142,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 
 			// 状态变化已通过账号版本让旧会话失效；这里再写明撤销原因，便于审计与清理。
 			if statusChanged {
-				return repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
+				return repository.RevokeUserSessions(ctx, tx, repository.RevokeUserSessionsParams{UserID: id,
 					RevokeReason: "account_status"})
 			}
 
@@ -165,7 +165,7 @@ func (s *Service) DeleteUser(ctx context.Context, userID, requestID string) erro
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			target, err := repository.LockedAccount(ctx, tx, id)
 			if err != nil {
 				return err
 			}
@@ -207,7 +207,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			target, err := repository.LockedAccount(ctx, tx, id)
 			if err != nil {
 				return err
 			}
@@ -225,7 +225,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 				return err
 			}
 
-			return repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
+			return repository.RevokeUserSessions(ctx, tx, repository.RevokeUserSessionsParams{UserID: id,
 				RevokeReason: "password_reset"})
 		},
 	)

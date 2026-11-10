@@ -99,13 +99,12 @@ func (s *Sessions) Resolve(ctx context.Context) (iamclient.Principal, error) {
 // ResolveTx 在事务中先锁定用户再锁定会话。数据库在取得锁后判断过期时间，
 // 防止延迟请求重新激活已空闲过期的会话。
 func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, token string) (iamclient.Principal, error) {
-	var userID uuid.UUID
-	if err := repository.SessionUser(ctx, tx, id, &userID); err != nil {
+	userID, err := repository.SessionUser(ctx, tx, id)
+	if err != nil {
 		return iamclient.Principal{}, sessionError(err)
 	}
 
-	q := repository.NewQueries(tx)
-	user, err := q.LockUser(ctx, userID)
+	user, err := repository.LockedAccount(ctx, tx, userID)
 	if err != nil {
 		return iamclient.Principal{}, sessionError(err)
 	}
@@ -114,7 +113,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	session, err := q.LockSession(ctx, id)
+	session, err := repository.LockedSession(ctx, tx, id)
 	if err != nil {
 		return iamclient.Principal{}, sessionError(err)
 	}
@@ -123,8 +122,8 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	var stored bool
-	if err = repository.HasStoredSession(ctx, tx, session.TokenHash, &stored); err != nil {
+	stored, err := repository.HasStoredSession(ctx, tx, session.TokenHash)
+	if err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -132,7 +131,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	session, err = q.TouchSession(ctx, repository.TouchSessionParams{
+	session, err = repository.TouchSession(ctx, tx, repository.TouchSessionParams{
 		ID:          id,
 		TokenHash:   session.TokenHash,
 		AuthEpoch:   user.AuthEpoch,
@@ -151,9 +150,7 @@ func (s *Sessions) ResolveTx(ctx context.Context, tx *gorm.DB, id uuid.UUID, tok
 		AuthEpoch:       user.AuthEpoch,
 		AuthenticatedAt: session.AuthenticatedAt,
 	}
-	if session.ReauthenticatedAt.Valid {
-		p.ReauthenticatedAt = &session.ReauthenticatedAt.Time
-	}
+	p.ReauthenticatedAt = session.ReauthenticatedAt
 
 	return p, nil
 }
@@ -179,8 +176,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 
 	userLocks := []uuid.UUID{user.ID}
 	if oldID != uuid.Nil {
-		var previousUser uuid.UUID
-		lookup := repository.SessionUser(ctx, tx, oldID, &previousUser)
+		previousUser, lookup := repository.SessionUser(ctx, tx, oldID)
 		if lookup == nil {
 			userLocks = append(userLocks, previousUser)
 		} else if !errors.Is(lookup, pgx.ErrNoRows) {
@@ -192,8 +188,7 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		return iamclient.Principal{}, err
 	}
 
-	q := repository.NewQueries(tx)
-	locked, err := q.LockUser(ctx, user.ID)
+	locked, err := repository.LockedAccount(ctx, tx, user.ID)
 	if err != nil {
 		return iamclient.Principal{}, sessionError(err)
 	}
@@ -202,8 +197,8 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	var valid bool
-	if err = repository.VerifyLoginCredential(ctx, tx, user.ID, user.PasswordHash, &valid); err != nil {
+	valid, err := repository.VerifyLoginCredential(ctx, tx, user.ID, user.PasswordHash)
+	if err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -211,15 +206,15 @@ func (s *Sessions) Create(ctx context.Context, user repository.LoginUser, reques
 		return iamclient.Principal{}, repository.ErrUnauthenticated
 	}
 
-	var now time.Time
-	if err = repository.DatabaseTime(ctx, tx, &now); err != nil {
+	now, err := repository.DatabaseTime(ctx, tx)
+	if err != nil {
 		return iamclient.Principal{}, err
 	}
 
 	authenticated, absolute := now, now.Add(s.Config.Auth.SessionAbsoluteTimeout)
 	var reauthenticated *time.Time
 	if reauthenticate {
-		previous, err := q.LockSession(ctx, oldID)
+		previous, err := repository.LockedSession(ctx, tx, oldID)
 		if err != nil || previous.State != enum.SessionStateActive || previous.UserID != user.ID || previous.TokenHash != TokenHash(oldToken) || previous.AuthEpoch != locked.AuthEpoch || !previous.IdleExpiresAt.After(now) || !previous.AbsoluteExpiresAt.After(now) {
 			return iamclient.Principal{}, repository.ErrUnauthenticated
 		}
@@ -301,7 +296,7 @@ func (s *Sessions) Revoke(ctx context.Context, p iamclient.Principal, sessionID 
 		return repository.ErrUnauthenticated
 	}
 
-	if _, err = repository.NewQueries(tx).LockUser(ctx, userID); err != nil {
+	if _, err = repository.LockedAccount(ctx, tx, userID); err != nil {
 		return err
 	}
 

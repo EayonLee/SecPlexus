@@ -37,7 +37,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	locked, err := repository.NewQueries(tx).LockUser(ctx, userID)
+	locked, err := repository.LockedAccount(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return repository.ErrUnauthenticated
 	}
 
-	current, err := repository.NewQueries(tx).GetLoginUser(ctx, normalized)
+	current, err := repository.GetLoginUser(ctx, tx, normalized)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	if err = repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: userID,
+	if err = repository.RevokeUserSessions(ctx, tx, repository.RevokeUserSessionsParams{UserID: userID,
 		RevokeReason: "password_change"}); err != nil {
 		return err
 	}

@@ -5,77 +5,54 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
+
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
 
 // RecordLoginFailure 记录登录失败并按数据库时间更新锁定期限。
 func RecordLoginFailure(ctx context.Context, db *gorm.DB, userID uuid.UUID, loginMaxFailures int, lockDuration time.Duration) error {
-	value := pgtype.Interval{Microseconds: lockDuration.Microseconds(), Valid: true}
-
-	return db.WithContext(ctx).Exec(`UPDATE iam.password_credentials SET failed_attempts=CASE WHEN locked_until<=clock_timestamp() THEN 1 ELSE failed_attempts+1 END,locked_until=CASE WHEN locked_until>clock_timestamp() THEN locked_until WHEN (CASE WHEN locked_until<=clock_timestamp() THEN 1 ELSE failed_attempts+1 END)>=$2 THEN clock_timestamp()+$3::interval ELSE NULL END,updated_at=now() WHERE user_id=$1`, userID, loginMaxFailures, value).Error
+	return queries(db).RecordLoginFailure(ctx, sqlcgen.RecordLoginFailureParams{
+		UserID:      userID,
+		MaxFailures: int32(loginMaxFailures),
+		LockMicros:  lockDuration.Microseconds(),
+	})
 }
 
-// SessionUser 读取会话所属用户，供全局锁顺序使用。
-func SessionUser(ctx context.Context, db *gorm.DB, id uuid.UUID, userID *uuid.UUID) error {
-	return db.WithContext(ctx).Raw(`SELECT user_id FROM iam.user_sessions WHERE id=$1`, id).Row().Scan(userID)
+// SessionUser 读取会话所属用户，供全局锁顺序使用；会话不存在时返回 sql.ErrNoRows。
+func SessionUser(ctx context.Context, db *gorm.DB, id uuid.UUID) (uuid.UUID, error) {
+	return queries(db).SessionUserID(ctx, id)
 }
 
 // HasStoredSession 检查 SCS 记录是否仍在有效期内。
-func HasStoredSession(ctx context.Context, db *gorm.DB, tokenHash string, stored *bool) error {
-	return db.WithContext(ctx).Raw(`SELECT EXISTS(SELECT 1 FROM iam.scs_sessions WHERE token=$1 AND expiry>clock_timestamp())`, tokenHash).Row().Scan(stored)
+func HasStoredSession(ctx context.Context, db *gorm.DB, tokenHash string) (bool, error) {
+	return queries(db).HasStoredSession(ctx, tokenHash)
 }
 
 // VerifyLoginCredential 在用户锁内再次校验凭据快照和锁定状态。
-func VerifyLoginCredential(ctx context.Context, db *gorm.DB, userID uuid.UUID, passwordHash string, valid *bool) error {
-	return db.WithContext(ctx).Raw(`SELECT password_hash=$2 AND (locked_until IS NULL OR locked_until<=clock_timestamp()) FROM iam.password_credentials WHERE user_id=$1 FOR UPDATE`, userID, passwordHash).Row().Scan(valid)
+func VerifyLoginCredential(ctx context.Context, db *gorm.DB, userID uuid.UUID, passwordHash string) (bool, error) {
+	return queries(db).VerifyLoginCredential(ctx, sqlcgen.VerifyLoginCredentialParams{
+		UserID:       userID,
+		PasswordHash: passwordHash,
+	})
 }
 
 // DatabaseTime 读取数据库当前时间，避免应用时钟影响授权期限。
-func DatabaseTime(ctx context.Context, db *gorm.DB, now *time.Time) error {
-	return db.WithContext(ctx).Raw(`SELECT clock_timestamp()`).Row().Scan(now)
+func DatabaseTime(ctx context.Context, db *gorm.DB) (time.Time, error) {
+	return queries(db).DatabaseTime(ctx)
 }
 
 // RevokeRotatedSession 只撤销与旧令牌匹配的有效会话。
 func RevokeRotatedSession(ctx context.Context, db *gorm.DB, oldID uuid.UUID, value string) error {
-	return db.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason='rotation' WHERE id=$1 AND token_hash=$2 AND state='active'`, oldID, value).Error
-}
-
-// InsertSessionParams 是一次新会话的全部期限与归属，期限由认证用例计算。
-type InsertSessionParams struct {
-	ID                uuid.UUID  // 会话标识。
-	UserID            uuid.UUID  // 会话所属用户。
-	TokenHash         string     // 会话令牌摘要。
-	AuthEpoch         int64      // 账号版本。
-	AuthenticatedAt   time.Time  // 首次认证时间。
-	ReauthenticatedAt *time.Time // 最近一次密码确认时间。
-	AbsoluteExpiresAt time.Time  // 绝对到期时间。
-	IdleExpiresAt     time.Time  // 空闲到期时间。
-	Now               time.Time  // 数据库时间。
-}
-
-// InsertSession 写入绑定令牌摘要的逻辑会话。
-func InsertSession(ctx context.Context, db *gorm.DB, session InsertSessionParams) error {
-	return db.WithContext(ctx).Exec(
-		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,reauthenticated_at,absolute_expires_at,idle_expires_at,last_seen_at) VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9)`,
-		session.ID,
-		session.UserID,
-		session.TokenHash,
-		session.AuthEpoch,
-		session.AuthenticatedAt,
-		session.ReauthenticatedAt,
-		session.AbsoluteExpiresAt,
-		session.IdleExpiresAt,
-		session.Now,
-	).Error
+	return queries(db).RevokeRotatedSession(ctx, sqlcgen.RevokeRotatedSessionParams{ID: oldID, TokenHash: value})
 }
 
 // ResetLoginFailures 成功登录后清除账户失败计数。
 func ResetLoginFailures(ctx context.Context, db *gorm.DB, userID uuid.UUID) error {
-	return db.WithContext(ctx).Exec(`UPDATE iam.password_credentials SET failed_attempts=0,locked_until=NULL,updated_at=now() WHERE user_id=$1`, userID).Error
+	return queries(db).ResetLoginFailures(ctx, userID)
 }
 
 // CompensateSession 撤销 SCS 提交失败的逻辑会话，禁止产生孤立登录。
 func CompensateSession(ctx context.Context, db *gorm.DB, sessionID string) error {
-	return db.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason='storage_failure' WHERE id=$1`, sessionID).Error
+	return queries(db).CompensateSession(ctx, sessionID)
 }

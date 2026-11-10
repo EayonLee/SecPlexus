@@ -20,7 +20,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if err := store.Seed(ctx, "admin", original); err != nil {
 		t.Fatal(err)
 	}
-	before, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	before, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if err = store.Seed(ctx, "admin", original); err != nil {
 		t.Fatal(err)
 	}
-	repeated, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	repeated, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if err = store.Seed(ctx, "admin", changed); err != nil {
 		t.Fatal(err)
 	}
-	after, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
+	after, err := repository.GetLoginUser(ctx, store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

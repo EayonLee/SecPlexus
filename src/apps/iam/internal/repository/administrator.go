@@ -37,7 +37,6 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 	}
 
 	reason := "administrator_configuration"
-	q := NewQueries(tx)
 	gen := queries(tx)
 	hasher := account.PasswordHasher{}
 
@@ -67,7 +66,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 			return uuid.Nil, err
 		}
 
-		if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason}); err != nil {
+		if err = RevokeUserSessions(ctx, tx, RevokeUserSessionsParams{UserID: current.ID, RevokeReason: reason}); err != nil {
 			return uuid.Nil, err
 		}
 
@@ -124,7 +123,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 				}
 			}
 
-			if err = q.RevokeUserSessions(ctx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason}); err != nil {
+			if err = RevokeUserSessions(ctx, tx, RevokeUserSessionsParams{UserID: target.ID, RevokeReason: reason}); err != nil {
 				return uuid.Nil, err
 			}
 		}

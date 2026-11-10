@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -116,7 +115,7 @@ func (s *Authenticator) authenticate(ctx context.Context, credentials Credential
 		logAuthFailure(ctx, slog.LevelWarn, "auth.login_rejected", "capacity_exhausted", nil)
 		return iamclient.Principal{}, ErrRateLimited
 	}
-	user, err := repository.NewQueries(s.sessions.Store.DB).GetLoginUser(ctx, normalized)
+	user, err := repository.GetLoginUser(ctx, s.sessions.Store.DB, normalized)
 	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
 		_ = (account.PasswordHasher{}).CompareHashAndPassword(s.dummyHash, credentials.Password)
 		logAuthFailure(ctx, slog.LevelWarn, "auth.login_failed", "invalid_credentials", nil)
@@ -128,8 +127,8 @@ func (s *Authenticator) authenticate(ctx context.Context, credentials Credential
 	if err != nil {
 		return iamclient.Principal{}, err
 	}
-	var now time.Time
-	if err := repository.DatabaseTime(ctx, s.sessions.Store.DB, &now); err != nil {
+	now, err := repository.DatabaseTime(ctx, s.sessions.Store.DB)
+	if err != nil {
 		return iamclient.Principal{}, err
 	}
 
@@ -180,7 +179,7 @@ func (s *Authenticator) failure(ctx context.Context, user *repository.LoginUser,
 		}
 
 		if user != nil {
-			if _, err = repository.NewQueries(tx).LockUser(ctx, user.ID); err != nil {
+			if _, err = repository.LockedAccount(ctx, tx, user.ID); err != nil {
 				return err
 			}
 

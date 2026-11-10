@@ -39,7 +39,7 @@ func domainFixture(t *testing.T) (*Service, context.Context) {
 func actorContext(t *testing.T, service *Service, username string) context.Context {
 	t.Helper()
 	ctx := context.Background()
-	user, err := repository.NewQueries(service.Store.DB).GetLoginUser(ctx, username)
+	user, err := repository.GetLoginUser(ctx, service.Store.DB, username)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestConfiguredAdministratorRejectsApplicationAndOperatorWrites(t *testing.T
 	for _, operation := range []string{"disable", "password", "reset", "delete", "operator"} {
 		t.Run(operation, func(t *testing.T) {
 			s, actor := domainFixture(t)
-			user, err := repository.NewQueries(s.Store.DB).GetLoginUser(context.Background(), "admin")
+			user, err := repository.GetLoginUser(context.Background(), s.Store.DB, "admin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -338,7 +338,7 @@ func TestSeedReappliesBuiltinData(t *testing.T) {
 	}
 
 	// 新账号的密码是配置权威值。
-	login, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "renamed")
+	login, err := repository.GetLoginUser(ctx, store.DB, "renamed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestConfiguredAdministratorRolesAreLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, "admin")
+	configured, err := repository.GetLoginUser(ctx, s.Store.DB, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
