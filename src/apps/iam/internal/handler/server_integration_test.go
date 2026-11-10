@@ -289,7 +289,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	}
 }
 
-func TestFlatIdentityRoleAndUserLifecycle(t *testing.T) {
+func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	f := newFixture(t, nil)
 	public, initial, credential := f.public, f.initial, f.credential
 
