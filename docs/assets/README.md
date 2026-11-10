@@ -14,7 +14,7 @@ The README acknowledgements include projects currently used by the application, 
 | Tailwind CSS | [tailwind-mark.svg](https://github.com/tailwindlabs/tailwindcss.com/blob/main/src/app/%28docs%29/brand/img/tailwindcss-mark.svg) |
 | TanStack Query / Table | [tanstack-query.svg](https://github.com/TanStack/query/blob/main/media/emblem-light.svg) |
 | Playwright | [playwright.svg](https://github.com/microsoft/playwright/blob/main/packages/web/src/assets/playwright-logo.svg) |
-| Desloppify | [desloppify.png](https://github.com/peteromallet/desloppify/blob/main/assets/mascot.png) |
+| Desloppify（随仓库分发的本地技能包，`.agents/skills/desloppify`，非运行期依赖） | [desloppify.png](https://github.com/peteromallet/desloppify/blob/main/assets/mascot.png) |
 | Axios | [axios.svg](https://raw.githubusercontent.com/axios/axios-docs/master/assets/logo.svg) |
 | Base UI | [base-ui.png](https://base-ui.com/static/apple-touch-icon.png) |
 | Biome | [biome.svg](https://raw.githubusercontent.com/biomejs/resources/main/svg/icon-light-transparent.svg) |
