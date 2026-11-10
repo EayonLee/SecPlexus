@@ -101,7 +101,8 @@ GOTOOLCHAIN=go1.27.3 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
 与 OpenSSF Scorecard 的 Pinned-Dependencies 检查：浮动标签（`@v4`）可被上游改写，SHA 不能。
 升级由 Dependabot 的 `github-actions` 生态跟进，它会同时更新 SHA 与行尾的 `# vX.Y.Z` 注释。
 
-**忽略与白名单的规则**（两个配置文件都在仓库根目录）：
+**忽略与白名单的规则**（两个配置文件都在仓库根目录；被 dismiss 的告警登记在
+[安全例外登记](security-exceptions.md)，无登记视为未处理）：
 
 - `.gitleaks.toml` 只允许排除本地/构建产物（`node_modules`、`.next`、`logs`、`.spx`、`.env`）。
   禁止在 `allowlist.paths` 里加业务代码路径；误报用 `[[rules.allowlists]]` 精确到规则与正则。

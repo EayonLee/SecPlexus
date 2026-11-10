@@ -37,10 +37,11 @@ test('terminating a dev process leaves no descendants', { timeout: 15000 }, asyn
     setInterval(() => {}, 1000);
   `);
 
-  // Mirror the launcher: pnpm needs a cmd.exe wrapper on Windows; Unix uses a process group.
+  // Mirror the launcher: pnpm needs a cmd.exe wrapper on Windows; Unix spawns node directly,
+  // and detached: true already makes it the process-group leader (no shell string needed).
   const command = process.platform === 'win32'
     ? { file: 'cmd.exe', args: ['/d', '/c', process.execPath, wrapperFile] }
-    : { file: '/bin/sh', args: ['-c', `exec "${process.execPath}" "${wrapperFile}"`] };
+    : { file: process.execPath, args: [wrapperFile] };
   const wrapper = spawn(command.file, command.args, {
     detached: process.platform !== 'win32',
     stdio: 'ignore',

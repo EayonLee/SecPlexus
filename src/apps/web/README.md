@@ -118,3 +118,9 @@ User selection uses the template's existing Combobox with server search and TanS
 ## Offline configuration check
 
 Root startup injects the shared environment; run `pnpm config:check` from the repository root before starting services. For standalone Web, copy this module’s `.env.example` to `.env.local`, then run `pnpm config:check` in the module directory. Use `pnpm config:check --development` to include `.env.development*`; the default checks the production environment used by `start`. This validates listener and upstream fields without starting Next.js or connecting to IAM/Console. Restart after environment changes. See [configuration](../../../docs/development/configuration.md) for required values and service boundaries.
+
+## 依赖边界
+
+`shadcn` 包是**构建期依赖**：`src/app/globals.css` 直接 `@import "shadcn/tailwind.css"` 取设计令牌，
+删掉它会让 `next build` 失败；组件的交互式生成仍用 `pnpm dlx shadcn@latest add <component>`，
+不把 CLI 当项目依赖固定版本。

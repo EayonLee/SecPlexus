@@ -30,5 +30,10 @@
     "test:e2e": "pnpm --dir src/apps/web test:e2e",
     "catalogs:generate": "node scripts/generate-catalogs.mjs",
     "catalogs:check": "node scripts/generate-catalogs.mjs --check && node scripts/migrations-check.mjs"
+  },
+  "pnpm": {
+    "overrides": {
+      "@ts-morph/common>minimatch": "^11.0.1"
+    }
   }
 }
