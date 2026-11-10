@@ -154,28 +154,44 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 只应用第一条迁移：schema 落后于目标版本，必须既不能服务、也要如实报告 pending。
 	if _, err = provider.UpTo(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	// 单一基线应用后 schema 可服务；内置数据尚未同步。
+	if err := store.VerifySchema(ctx); err == nil {
+		t.Fatal("schema behind the target version reported ready")
+	}
+	readStatus := func() (current, target int64, pending bool) {
+		t.Helper()
+		var output bytes.Buffer
+		if err = repository.Status(ctx, store.Pool.Config().ConnConfig.ConnString(), &output); err != nil {
+			t.Fatal(err)
+		}
+		var state struct {
+			Current int64 `json:"current_version"`
+			Target  int64 `json:"target_version"`
+			Pending bool  `json:"pending"`
+		}
+		if err = json.Unmarshal(output.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		return state.Current, state.Target, state.Pending
+	}
+	if current, target, pending := readStatus(); !pending || current == target {
+		t.Fatalf("behind schema reported current=%d target=%d pending=%v", current, target, pending)
+	}
+	// 应用到目标版本后 schema 可服务；内置数据仍未同步。
+	if _, err = provider.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.VerifySchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	if err := repository.Status(ctx, store.Pool.Config().ConnConfig.ConnString(), &output); err != nil {
-		t.Fatal(err)
+	current, target, pending := readStatus()
+	if pending || target != current {
+		t.Fatalf("unexpected migration state current=%d target=%d pending=%v", current, target, pending)
 	}
-	var state struct {
-		Current int64 `json:"current_version"`
-		Target  int64 `json:"target_version"`
-		Pending bool  `json:"pending"`
-	}
-	if err := json.Unmarshal(output.Bytes(), &state); err != nil {
-		t.Fatal(err)
-	}
-	if state.Pending || state.Target != state.Current {
-		t.Fatalf("unexpected migration state %+v", state)
-	}
+	state := struct{ Target int64 }{Target: target}
 
 	var configured int
 	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE configured`).Scan(&configured); err != nil {
