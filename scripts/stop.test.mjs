@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -20,6 +20,24 @@ function workspace(t, files = ['stop.mjs', 'runtime.mjs']) {
 function stop(root, environment = process.env) {
   return execFileSync(process.execPath, [path.join(root, 'scripts/stop.mjs')], {
     env: environment, encoding: 'utf8',
+  });
+}
+
+// POSIX 上被停止的服务是测试进程的子进程。同步 execFileSync 会阻塞事件循环，
+// 让已退出的子进程停留在 zombie 状态，进程组看起来仍存活；异步执行让父进程
+// 能及时回收，测试验证的才是 stop 的真实行为。
+function stopAsync(root, environment = process.env) {
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, [path.join(root, 'scripts/stop.mjs')], {
+      env: environment, encoding: 'utf8',
+    }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}\n${stderr}`;
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
   });
 }
 
@@ -54,7 +72,7 @@ test('stop terminates a registered service tree', { timeout: 20000 }, async (t) 
     processes: [{ pid: child.pid, module: 'iam', ...(process.platform === 'win32' ? { image: 'node.exe' } : {}) }],
   }));
   const exited = once(child, 'exit');
-  const output = stop(root);
+  const output = await stopAsync(root);
   assert.match(output, /Stopping 1 project service process/);
   await exited;
   assert.equal(existsSync(path.join(root, '.spx/run.json')), false);

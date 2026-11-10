@@ -1,6 +1,16 @@
 {
   "name": "secplexus",
+  "description": "An AI-native security operations platform built around identity.",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EayonLee/SecPlexus.git"
+  },
+  "homepage": "https://github.com/EayonLee/SecPlexus#readme",
+  "bugs": {
+    "url": "https://github.com/EayonLee/SecPlexus/issues"
+  },
   "packageManager": "pnpm@10.32.1",
   "engines": {
     "node": ">=22.12.0",
