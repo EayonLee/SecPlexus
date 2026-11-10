@@ -55,7 +55,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	principal, err := first.Create(loaded, user, uuid.NewString(), "integration", "127.0.0.1", false)
+	principal, err := first.Create(loaded, user, uuid.NewString(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 	if err = first.Revoke(loaded, principal, principal.SessionID, "logout", uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
-	// 延迟写入可以恢复库内会话数据，但不能恢复已撤销的逻辑身份。
+	// 延迟写入可以恢复库内会话数据，但不能恢复已撤销的逻辑会话。
 	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.scs_sessions(token,data,expiry) VALUES($1,$2,$3) ON CONFLICT(token) DO UPDATE SET data=EXCLUDED.data,expiry=EXCLUDED.expiry`, TokenHash(token), data, expiry); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 	}
 	// 即使另一实例的并发请求稍后写回 SCS 数据，账号凭据轮换后旧逻辑会话也必须失效。
 	fresh, _ := first.Manager.Load(ctx, "")
-	if _, err = first.Create(fresh, user, uuid.NewString(), "integration", "127.0.0.1", false); err != nil {
+	if _, err = first.Create(fresh, user, uuid.NewString(), false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,7 +121,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 	}
 
 	rotated, _ := first.Manager.Load(ctx, previousToken)
-	if _, err = first.Create(rotated, nextUser, uuid.NewString(), "integration", "127.0.0.1", false); err != nil {
+	if _, err = first.Create(rotated, nextUser, uuid.NewString(), false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,7 +135,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 
 	stale, _ := second.Manager.Load(ctx, previousToken)
 	if _, err = second.Resolve(stale); err == nil {
-		t.Fatal("account rotation left previous identity usable")
+		t.Fatal("credential rotation left the previous session usable")
 	}
 	// 凭据版本改变后，旧密码快照不能创建新会话。
 	if _, err = store.Pool.Exec(ctx, `UPDATE iam.users SET auth_epoch=auth_epoch+1 WHERE id=$1`, user.ID); err != nil {
@@ -147,7 +147,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err = first.Create(other, user, uuid.NewString(), "integration", "127.0.0.1", false); err == nil {
+	if _, err = first.Create(other, user, uuid.NewString(), false); err == nil {
 		t.Fatal("stale password snapshot created a session")
 	}
 	// 重复应用相同的管理员配置不得重置已有凭据。
@@ -191,7 +191,7 @@ func TestSessionIdleAndAbsoluteDeadlines(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			p, err := sessions.Create(loaded, user, uuid.NewString(), "integration", "127.0.0.1", false)
+			p, err := sessions.Create(loaded, user, uuid.NewString(), false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,7 +232,7 @@ func TestSessionIdleAndAbsoluteDeadlines(t *testing.T) {
 	}
 
 	loaded, _ := sessions.Manager.Load(ctx, "")
-	p, err := sessions.Create(loaded, user, uuid.NewString(), "integration", "127.0.0.1", false)
+	p, err := sessions.Create(loaded, user, uuid.NewString(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestConcurrentReauthenticationConsumesSessionOnce(t *testing.T) {
 	}
 
 	initial, _ := first.Manager.Load(ctx, "")
-	old, err := first.Create(initial, user, uuid.NewString(), "integration", "127.0.0.1", false)
+	old, err := first.Create(initial, user, uuid.NewString(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestConcurrentReauthenticationConsumesSessionOnce(t *testing.T) {
 		ctx context.Context
 	}{{first, a}, {second, b}} {
 		go func() {
-			p, err := attempt.s.Create(attempt.ctx, user, uuid.NewString(), "integration", "127.0.0.1", true)
+			p, err := attempt.s.Create(attempt.ctx, user, uuid.NewString(), true)
 			if err == nil {
 				if !p.AuthenticatedAt.Equal(old.AuthenticatedAt) || p.ReauthenticatedAt == nil {
 					err = fmt.Errorf("rotation lost authentication timestamps")

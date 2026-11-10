@@ -29,7 +29,7 @@ async function proxy(request: Request) {
     if (value) headers.set(name, value);
   }
   try {
-    const init: RequestInit & { duplex?: "half" } = {
+    const init: RequestInit = {
       method: request.method,
       headers,
       redirect: "manual",
@@ -37,8 +37,8 @@ async function proxy(request: Request) {
       signal: request.signal,
     };
     if (!["GET", "HEAD"].includes(request.method)) {
-      init.body = request.body;
-      init.duplex = "half";
+      // 先缓冲请求体：上游可能不读请求体就返回 401/405，流式转发会触发 fetch 失败并被误报为 503。
+      init.body = await request.arrayBuffer();
     }
     const response = await fetch(`${apiOrigins[module]}${url.pathname}${url.search}`, init);
     const outgoing = new Headers();
@@ -99,6 +99,9 @@ async function proxy(request: Request) {
         module,
         method: request.method,
         reason,
+        error_name: error instanceof Error ? error.name : undefined,
+        cause_name: cause instanceof Error ? cause.name : undefined,
+        cause_code: typeof code === "string" ? code : undefined,
         duration_ms: Date.now() - started,
       }),
     );

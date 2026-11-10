@@ -4,17 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
-import {
-  ArrowLeft,
-  ChevronsUpDownIcon,
-  Command,
-  KeyRound,
-  LayoutDashboard,
-  LogOut,
-  type LucideIcon,
-  Settings,
-  UserRound,
-} from "lucide-react";
+import { ArrowLeft, Command, LayoutDashboard, LogOut, type LucideIcon, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,7 +17,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -46,11 +35,10 @@ import {
 } from "@/components/ui/sidebar";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-import { OrganizationTree } from "./organization-tree";
-
 import { visibleSettingsPages } from "../iam/navigation";
 import { signOut, useIdentity } from "../iam/session";
 import { useAction } from "./data";
+import { ReauthGate } from "./reauth";
 import { LanguageSwitcher } from "./language-switcher";
 import { LayoutControls } from "./layout-controls";
 import { ThemeSwitcher } from "./theme-switcher";
@@ -68,7 +56,6 @@ export function Shell({ children }: { children: ReactNode }) {
   const settingsItems = visibleSettingsPages(auth);
   const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const navigationLabel = inSettings ? t("settingsNavigation") : t("mainNavigation");
-  const workspace = auth.org_id ? `/dashboard?org_id=${encodeURIComponent(auth.org_id)}` : "/dashboard";
   return (
     <SidebarProvider style={{ "--sidebar-width": "calc(var(--spacing) * 68)" } as CSSProperties}>
       <Sidebar variant={variant} collapsible={collapsible}>
@@ -105,11 +92,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 </SidebarMenuItem>
                 {settingsItems.map((item) => (
                   <SidebarMenuItem key={item.id}>
-                    <SidebarLink
-                      href={item.path(auth.org_id)}
-                      icon={item.icon}
-                      isActive={item.path(auth.org_id) === pathname}
-                    >
+                    <SidebarLink href={item.path} icon={item.icon} isActive={item.path === pathname}>
                       <span className="whitespace-nowrap">{t(item.title)}</span>
                     </SidebarLink>
                   </SidebarMenuItem>
@@ -122,7 +105,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <SidebarFooter>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarLink href={workspace} icon={ArrowLeft}>
+                <SidebarLink href="/dashboard" icon={ArrowLeft}>
                   <span>{t("backToWorkspace")}</span>
                 </SidebarLink>
               </SidebarMenuItem>
@@ -136,31 +119,6 @@ export function Shell({ children }: { children: ReactNode }) {
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger />
               <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
-              {!!auth.organizations.length && (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" aria-label={t("currentOrganization")} className="max-w-56 justify-between">
-                      <span className="truncate">
-                        {auth.organizations.find((org) => org.id === auth.org_id)?.name ?? t("chooseOrganization")}
-                      </span>
-                      <ChevronsUpDownIcon className="text-muted-foreground" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-64 p-1">
-                    <OrganizationTree
-                      items={auth.organizations}
-                      currentID={auth.org_id}
-                      onSelect={(org) => {
-                        if (pathname.startsWith("/settings/orgs/")) {
-                          router.push(pathname.replace(/^(\/settings\/orgs\/)[^/]+/, `$1${org.id}`));
-                          return;
-                        }
-                        router.push(`${inSettings ? pathname : "/dashboard"}?org_id=${org.id}`);
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              )}
             </div>
             <div className="flex items-center gap-2">
               <LanguageSwitcher />
@@ -206,6 +164,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
+        <ReauthGate />
       </SidebarInset>
     </SidebarProvider>
   );

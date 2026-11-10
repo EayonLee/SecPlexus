@@ -60,39 +60,13 @@ func get(t *testing.T, server *handler.Server, path string) *httptest.ResponseRe
 	return recorder
 }
 
-func TestContextRejectsUnparsableOrganization(t *testing.T) {
-	client := fakeIAM(t, func(w http.ResponseWriter) {
-		t.Error("IAM must not be called for an invalid organization identifier")
-		w.WriteHeader(http.StatusInternalServerError)
-	})
-
-	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/not-a-uuid/context")
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
-	}
-
-	var body struct {
-		Code result.Code `json:"code"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-
-	if body.Code != result.CodeInvalidRequest {
-		t.Fatalf("code = %s, want %s", body.Code, result.CodeInvalidRequest)
-	}
-}
-
-func TestContextReturnsVerifiedScope(t *testing.T) {
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
+func TestContextReturnsVerifiedIdentity(t *testing.T) {
 	client := fakeIAM(t, func(w http.ResponseWriter) {
 		_, _ = w.Write(decisionBody(t, iamclient.CapabilityDecision{Allowed: true, DecisionID: "decision-1",
-			Principal: iamclient.Principal{UserID: "user-1", SessionID: "session-1"},
-			Scope:     iamclient.AuthorizedScope{Kind: "organization", OrgID: orgID}}))
+			Principal: iamclient.Principal{UserID: "user-1", SessionID: "session-1"}}))
 	})
 
-	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context")
+	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/context")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
@@ -105,49 +79,19 @@ func TestContextReturnsVerifiedScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if body.Data.OrgID != orgID || body.Data.UserID != "user-1" || body.Data.DecisionID != "decision-1" {
+	if body.Data.UserID != "user-1" || body.Data.DecisionID != "decision-1" {
 		t.Fatalf("unexpected context %+v", body.Data)
-	}
-}
-
-// 组织范围由服务端路由固定，IAM 返回其它组织时必须拒绝，否则可跨组织读取。
-func TestContextRejectsMismatchedScope(t *testing.T) {
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
-	client := fakeIAM(t, func(w http.ResponseWriter) {
-		_, _ = w.Write(decisionBody(t, iamclient.CapabilityDecision{Allowed: true, DecisionID: "decision-1",
-			Principal: iamclient.Principal{UserID: "user-1", SessionID: "session-1"},
-			Scope:     iamclient.AuthorizedScope{Kind: "organization", OrgID: "ffffffff-1111-4222-8333-944455556666"}}))
-	})
-
-	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context")
-
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
-	}
-}
-
-func TestContextRejectsPlatformScope(t *testing.T) {
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
-	client := fakeIAM(t, func(w http.ResponseWriter) {
-		_, _ = w.Write(decisionBody(t, iamclient.CapabilityDecision{Allowed: true, DecisionID: "decision-1",
-			Principal: iamclient.Principal{UserID: "user-1", SessionID: "session-1"},
-			Scope:     iamclient.AuthorizedScope{Kind: "platform"}}))
-	})
-
-	if code := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context").Code; code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", code, http.StatusServiceUnavailable)
 	}
 }
 
 // IAM 拒绝必须原样传递，不能被当成服务故障或成功。
 func TestContextPropagatesDenial(t *testing.T) {
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
 	client := fakeIAM(t, func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write(rejectionBody(result.CodePermissionDenied))
 	})
 
-	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context")
+	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/context")
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", recorder.Code)
@@ -167,13 +111,12 @@ func TestContextPropagatesDenial(t *testing.T) {
 
 // 限流响应必须带 Retry-After，客户端据此退避。
 func TestContextRateLimitCarriesRetryAfter(t *testing.T) {
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
 	client := fakeIAM(t, func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write(rejectionBody(result.CodeRateLimited))
 	})
 
-	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context")
+	recorder := get(t, &handler.Server{IAM: client}, "/api/v1/console/context")
 
 	if recorder.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429", recorder.Code)
@@ -195,8 +138,7 @@ func TestContextUnavailableIAMReturnsServiceUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const orgID = "0b8a0f0f-1111-4222-8333-944455556666"
-	if code := get(t, &handler.Server{IAM: client}, "/api/v1/console/orgs/"+orgID+"/context").Code; code != http.StatusServiceUnavailable {
+	if code := get(t, &handler.Server{IAM: client}, "/api/v1/console/context").Code; code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", code)
 	}
 }

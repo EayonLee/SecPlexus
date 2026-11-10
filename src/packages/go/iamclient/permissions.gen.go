@@ -2,17 +2,11 @@
 package iamclient
 
 const (
-	PermissionIAMPlatformUsersRead           = "iam.platform.users.read"
-	PermissionIAMPlatformUsersManage         = "iam.platform.users.manage"
-	PermissionIAMPlatformOrganizationsRead   = "iam.platform.organizations.read"
-	PermissionIAMPlatformOrganizationsManage = "iam.platform.organizations.manage"
-	PermissionIAMPlatformAuditRead           = "iam.platform.audit.read"
-	PermissionIAMOrganizationsRead           = "iam.organizations.read"
-	PermissionIAMOrganizationsManage         = "iam.organizations.manage"
-	PermissionIAMUsersRead                   = "iam.users.read"
-	PermissionIAMUsersManage                 = "iam.users.manage"
-	PermissionIAMRolesRead                   = "iam.roles.read"
-	PermissionIAMRolesManage                 = "iam.roles.manage"
-	PermissionIAMRolesAssign                 = "iam.roles.assign"
-	PermissionIAMAuditRead                   = "iam.audit.read"
+	PermissionIAMUsersRead   = "iam.users.read"
+	PermissionIAMUsersManage = "iam.users.manage"
+	PermissionIAMUsersReset  = "iam.users.reset"
+	PermissionIAMUsersRoles  = "iam.users.roles"
+	PermissionIAMRolesRead   = "iam.roles.read"
+	PermissionIAMRolesManage = "iam.roles.manage"
+	PermissionIAMAuditRead   = "iam.audit.read"
 )

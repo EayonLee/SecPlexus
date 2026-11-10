@@ -26,21 +26,21 @@ func (l queryLogger) LogMode(level logger.LogLevel) logger.Interface {
 // Info 不展开 GORM 的格式参数，库内提示只保留固定事件类别。
 func (l queryLogger) Info(ctx context.Context, _ string, _ ...any) {
 	if l.level >= logger.Info {
-		logging.From(ctx).Debug("ORM 提示", "event", "db.info")
+		logging.From(ctx).Debug("ORM notice", "event", "db.info")
 	}
 }
 
 // Warn 保留库级警告，不打印可能包含查询值的格式参数。
 func (l queryLogger) Warn(ctx context.Context, _ string, _ ...any) {
 	if l.level >= logger.Warn {
-		logging.From(ctx).Warn("ORM 警告", "event", "db.warning")
+		logging.From(ctx).Warn("ORM warning", "event", "db.warning")
 	}
 }
 
 // Error 保留库级异常，具体查询诊断由 Trace 输出。
 func (l queryLogger) Error(ctx context.Context, _ string, _ ...any) {
 	if l.level >= logger.Error {
-		logging.From(ctx).Error("ORM 异常", "event", "db.error")
+		logging.From(ctx).Error("ORM error", "event", "db.error")
 	}
 }
 
@@ -51,7 +51,7 @@ func (l queryLogger) Trace(ctx context.Context, begin time.Time, _ func() (strin
 	}
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		// 调用方取消请求属于正常中断，保留 Debug 诊断而不触发故障告警。
-		logging.From(ctx).Debug("数据库操作随请求取消", "event", "db.canceled", "duration_ms", time.Since(begin).Milliseconds())
+		logging.From(ctx).Debug("Canceled database operation", "event", "db.canceled", "duration_ms", time.Since(begin).Milliseconds())
 		return
 	}
 
@@ -76,5 +76,5 @@ func (l queryLogger) Trace(ctx context.Context, begin time.Time, _ func() (strin
 	if !log.Enabled(ctx, level) {
 		return
 	}
-	log.Log(ctx, level, "数据库操作结束", "event", event, "duration_ms", elapsed.Milliseconds(), "error", logging.Error(err), "source", logging.Stack())
+	log.Log(ctx, level, "Database operation finished", "event", event, "duration_ms", elapsed.Milliseconds(), "error", logging.Error(err), "source", logging.Stack())
 }

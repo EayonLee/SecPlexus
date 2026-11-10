@@ -36,7 +36,7 @@ func TestOriginAndCSRFBoundary(t *testing.T) {
 			cfg := config.Config{}
 			cfg.Auth.WebOrigin = tc.public
 			cfg.Auth.CSRFKey = strings.Repeat("k", 32)
-			cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.organizations.read"}}}
+			cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.users.read"}}}
 			security, err := NewSecurity(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -83,12 +83,12 @@ func TestOriginAndCSRFBoundary(t *testing.T) {
 	}
 }
 
-// TestServiceCredentialOnHTTP 验证普通 HTTP 仍要求独立服务身份及 action 白名单。
+// TestServiceCredentialOnHTTP 验证普通 HTTP 仍要求独立的服务凭证及 action 白名单。
 func TestServiceCredentialOnHTTP(t *testing.T) {
 	cfg := config.Config{}
 	cfg.Auth.WebOrigin = "http://127.0.0.1:5173"
 	cfg.Auth.CSRFKey = strings.Repeat("k", 32)
-	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.organizations.read"}}}
+	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: strings.Repeat("t", 32), Actions: []string{"iam.users.read"}}}
 	security, err := NewSecurity(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +97,9 @@ func TestServiceCredentialOnHTTP(t *testing.T) {
 		name, token, action string
 		want                bool
 	}{
-		{"allowed", strings.Repeat("t", 32), "iam.organizations.read", true},
-		{"missing", "", "iam.organizations.read", false},
-		{"wrong", strings.Repeat("x", 32), "iam.organizations.read", false},
+		{"allowed", strings.Repeat("t", 32), "iam.users.read", true},
+		{"missing", "", "iam.users.read", false},
+		{"wrong", strings.Repeat("x", 32), "iam.users.read", false},
 		{"action denied", strings.Repeat("t", 32), "iam.users.manage", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

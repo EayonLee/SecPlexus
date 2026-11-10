@@ -16,8 +16,7 @@ function buildWorkspace(t, configuration, overrides = {}) {
   }
   copyFileSync(fileURLToPath(new URL('../.env.example', import.meta.url)),path.join(root,'.env.example'));
   if (configuration !== undefined) writeFileSync(path.join(root, '.env'), configuration);
-  writeFileSync(path.join(root, 'tools/go'), `#!${process.execPath}\n`, { mode: 0o755 });
-  writeFileSync(path.join(root, 'tools/pnpm'), `#!${process.execPath}
+  const fixture = `
 require('node:fs').writeFileSync('web-build.json', JSON.stringify({
   trustedOrigin: process.env.SPX_WEB_ORIGIN,
   iamHost: process.env.SPX_IAM_HOST,
@@ -25,9 +24,25 @@ require('node:fs').writeFileSync('web-build.json', JSON.stringify({
   databasePassword: process.env.SPX_POSTGRES_PASSWORD,
   internalToken: process.env.SPX_CONSOLE_IAM_TOKEN,
 }));
-`, { mode: 0o755 });
+`;
+  if (process.platform === 'win32') {
+    writeFileSync(path.join(root, 'tools/go.cmd'), '@exit /b 0\r\n');
+    writeFileSync(path.join(root, 'tools/pnpm-fixture.cjs'), fixture);
+    writeFileSync(path.join(root, 'tools/pnpm.cmd'), `@echo off\r\n"${process.execPath}" "%~dp0pnpm-fixture.cjs"\r\n`);
+  } else {
+    writeFileSync(path.join(root, 'tools/go'), `#!${process.execPath}\n`, { mode: 0o755 });
+    writeFileSync(path.join(root, 'tools/pnpm'), `#!${process.execPath}\n${fixture}`, { mode: 0o755 });
+  }
+  const environment = { PATH: path.join(root, 'tools'), ...overrides };
+  if (process.platform === 'win32') {
+    Object.assign(environment, {
+      SystemRoot: process.env.SystemRoot,
+      ComSpec: process.env.ComSpec,
+      PATHEXT: process.env.PATHEXT,
+    });
+  }
   const result = spawnSync(process.execPath, [path.join(root, 'scripts/build.mjs')], {
-    env: { PATH: path.join(root, 'tools'), ...overrides }, encoding: 'utf8',
+    env: environment, encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
   return { root, web: JSON.parse(readFileSync(path.join(root, 'web-build.json'), 'utf8')) };

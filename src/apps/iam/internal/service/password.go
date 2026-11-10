@@ -7,8 +7,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 )
 
@@ -20,34 +19,12 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	normalized, err := identity.NormalizeUsername(p.Username)
+	userID, err := uuid.Parse(p.UserID)
 	if err != nil {
 		return repository.ErrUnauthenticated
 	}
 
-	current, err := repository.NewQueries(s.Store.DB).GetLoginUser(ctx, normalized)
-	if err != nil {
-		return err
-	}
-
-	if current.IsSuperAdmin {
-		return authorization.ErrDenied
-	}
-
-	hasher := identity.PasswordHasher{}
-	if err = hasher.CompareHashAndPassword(current.PasswordHash, oldPassword); err != nil {
-		return identity.ErrPasswordMismatch
-	}
-
-	if err = hasher.CompareHashAndPassword(current.PasswordHash, newPassword); err == nil {
-		return repository.ErrInvalid
-	}
-
-	hash, err := hasher.GenerateHash(newPassword)
-	if err != nil {
-		return repository.ErrInvalid
-	}
-
+	hasher := account.PasswordHasher{}
 	tx := s.Store.DB.WithContext(ctx).Begin()
 	err = tx.Error
 	if err != nil {
@@ -60,18 +37,41 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	fresh, err := s.resolve(ctx, tx)
+	locked, err := repository.NewQueries(tx).LockUser(ctx, userID)
 	if err != nil {
 		return err
 	}
 
-	if fresh.UserID != p.UserID || fresh.AuthEpoch != current.AuthEpoch {
+	if locked.Configured {
+		// 配置管理员的密码只能由部署配置更新，否则下次启动会被覆盖。
+		return repository.ErrConfiguredUserImmutable
+	}
+
+	normalized, err := account.NormalizeUsername(p.Username)
+	if err != nil {
 		return repository.ErrUnauthenticated
 	}
 
-	userID, err := uuid.Parse(p.UserID)
+	current, err := repository.NewQueries(tx).GetLoginUser(ctx, normalized)
 	if err != nil {
 		return err
+	}
+
+	if current.AuthEpoch != locked.AuthEpoch {
+		return repository.ErrUnauthenticated
+	}
+
+	if err = hasher.CompareHashAndPassword(current.PasswordHash, oldPassword); err != nil {
+		return account.ErrPasswordMismatch
+	}
+
+	if err = hasher.CompareHashAndPassword(current.PasswordHash, newPassword); err == nil {
+		return repository.ErrInvalid
+	}
+
+	hash, err := hasher.GenerateHash(newPassword)
+	if err != nil {
+		return repository.ErrInvalid
 	}
 
 	if err = repository.BumpUserAuthEpoch(ctx, tx, userID); err != nil {
@@ -102,6 +102,6 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 		return err
 	}
 
-	logging.From(ctx).Info("密码已更新并撤销旧会话", "event", "iam.password_changed", "user_id", p.UserID)
+	logging.From(ctx).Info("Password changed and old sessions revoked", "event", "iam.password_changed", "user_id", p.UserID)
 	return s.Sessions.Manager.Destroy(ctx)
 }

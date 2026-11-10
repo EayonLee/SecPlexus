@@ -39,21 +39,32 @@ func RevokeRotatedSession(ctx context.Context, db *gorm.DB, oldID uuid.UUID, val
 	return db.WithContext(ctx).Exec(`UPDATE iam.user_sessions SET state='revoked',revoked_at=clock_timestamp(),revoke_reason='rotation' WHERE id=$1 AND token_hash=$2 AND state='active'`, oldID, value).Error
 }
 
-// InsertSession 写入绑定令牌摘要的逻辑会话，期限由认证用例确定。
-func InsertSession(ctx context.Context, db *gorm.DB, newID uuid.UUID, userID uuid.UUID, value string, authVersion int64, authenticated time.Time, reauthenticated *time.Time, absolute time.Time, idle time.Time, now time.Time, ip any, userAgent string) error {
+// InsertSessionParams 是一次新会话的全部期限与归属，期限由认证用例计算。
+type InsertSessionParams struct {
+	ID                uuid.UUID  // 会话标识。
+	UserID            uuid.UUID  // 会话所属用户。
+	TokenHash         string     // 会话令牌摘要。
+	AuthEpoch         int64      // 账号版本。
+	AuthenticatedAt   time.Time  // 首次认证时间。
+	ReauthenticatedAt *time.Time // 最近一次密码确认时间。
+	AbsoluteExpiresAt time.Time  // 绝对到期时间。
+	IdleExpiresAt     time.Time  // 空闲到期时间。
+	Now               time.Time  // 数据库时间。
+}
+
+// InsertSession 写入绑定令牌摘要的逻辑会话。
+func InsertSession(ctx context.Context, db *gorm.DB, session InsertSessionParams) error {
 	return db.WithContext(ctx).Exec(
-		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,reauthenticated_at,absolute_expires_at,idle_expires_at,last_seen_at,client_ip,user_agent) VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11)`,
-		newID,
-		userID,
-		value,
-		authVersion,
-		authenticated,
-		reauthenticated,
-		absolute,
-		idle,
-		now,
-		ip,
-		userAgent,
+		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,reauthenticated_at,absolute_expires_at,idle_expires_at,last_seen_at) VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9)`,
+		session.ID,
+		session.UserID,
+		session.TokenHash,
+		session.AuthEpoch,
+		session.AuthenticatedAt,
+		session.ReauthenticatedAt,
+		session.AbsoluteExpiresAt,
+		session.IdleExpiresAt,
+		session.Now,
 	).Error
 }
 

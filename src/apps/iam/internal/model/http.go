@@ -19,16 +19,28 @@ type APIChangePasswordInput struct {
 	OldPassword string `json:"old_password" binding:"required"`
 }
 
+// APIMe 是 /me 的响应：当前账号、直接持有的角色、有效权限与展示时区偏好。
+type APIMe struct {
+	Permissions []string            `json:"permissions"`        // 有效权限键，来自角色并集。
+	Principal   iamclient.Principal `json:"principal"`          // 已验证的登录用户与版本。
+	Roles       []APIRoleRef        `json:"roles"`              // 直接持有的角色，不含继承。
+	TimeZone    string              `json:"timezone,omitempty"` // 展示时区偏好；空表示跟随浏览器。
+}
+
 // APIProfileUpdate 绑定本人资料更新；时区留空表示清除偏好。
 // 指针用于区分“未提交该字段”和“显式清空”，未提交时保留原值。
 type APIProfileUpdate struct {
 	TimeZone *string `json:"timezone,omitempty" binding:"omitempty,max=64"`
 }
 
-// APIGrantsInput 绑定角色权限替换及并发版本。
+// APIProfileUpdateResponse 返回保存后的展示时区偏好；空表示跟随浏览器。
+type APIProfileUpdateResponse struct {
+	TimeZone string `json:"timezone"`
+}
+
+// APIGrantsInput 绑定角色权限的全量替换。
 type APIGrantsInput struct {
-	Permissions APIPermissions `json:"permissions" binding:"required,iam_permissions"`
-	Version     int64          `json:"version,string" binding:"required,min=1"`
+	Permissions APIPermissions `json:"permissions" binding:"iam_permissions"`
 }
 
 // APILoginInput 绑定用户名和密码，仅供凭证用例使用。
@@ -37,88 +49,9 @@ type APILoginInput struct {
 	Username string `json:"username" binding:"required"`
 }
 
-// APILoginResponse 返回认证后的公开身份。
+// APILoginResponse 返回认证后的公开账号信息。
 type APILoginResponse struct {
 	Principal iamclient.Principal `json:"principal"`
-}
-
-// APIOrganizationUserInput 绑定新增账号或加入已有账号的用户请求。
-type APIOrganizationUserInput struct {
-	DisplayName string `json:"display_name,omitempty" binding:"omitempty,min=1,max=100"`
-	Email       string `json:"email,omitempty" binding:"omitempty"`
-	Password    string `json:"password,omitempty" binding:"omitempty,min=12,max=128"`
-	UserID      string `json:"user_id,omitempty" binding:"omitempty"`
-	Username    string `json:"username,omitempty" binding:"omitempty"`
-}
-
-// APIOrganizationUserRolesInput 绑定用户角色替换及组织并发版本。
-type APIOrganizationUserRolesInput struct {
-	AuthzEpoch int64      `json:"authz_epoch,string" binding:"required,min=1"`
-	RoleIDs    APIRoleIDs `json:"role_ids" binding:"required,iam_role_ids"`
-}
-
-// APIOrganizationUserUpdate 绑定用户状态及组织并发版本。
-type APIOrganizationUserUpdate struct {
-	AuthzEpoch int64  `json:"authz_epoch,string" binding:"required,min=1"`
-	Status     string `json:"status" binding:"required,oneof=active disabled"`
-}
-
-// APIOrganization 是组织的公开投影。
-// Path 仅有部分查询填充（组织树）；/me 只需 id 与 parent_id，
-// 前端自行组装面包屑，因此该字段可为空。
-type APIOrganization struct {
-	AuthzEpoch int64    `json:"authz_epoch,string"`
-	Depth      int      `json:"depth"`
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	ParentID   *string  `json:"parent_id"`
-	Path       []string `json:"path" gorm:"-"`
-	Slug       string   `json:"slug"`
-}
-
-// APIOrganizationInput 绑定创建组织及初始管理员请求。
-// ParentID 为空表示创建根组织；全局只允许一个根，实际创建根由迁移完成。
-type APIOrganizationInput struct {
-	AdminUserID string           `json:"admin_user_id" binding:"required"`
-	Name        OrganizationName `json:"name" binding:"required"`
-	ParentID    *string          `json:"parent_id" binding:"omitempty,uuid"`
-	Slug        OrganizationSlug `json:"slug" binding:"required"`
-}
-
-// APIOrganizationUpdate 绑定组织更新请求。slug 不可修改；名称与父组织可改。
-type APIOrganizationUpdate struct {
-	AuthzEpoch int64            `json:"authz_epoch,string" binding:"required,min=1"`
-	Name       OrganizationName `json:"name" binding:"required"`
-	ParentID   *string          `json:"parent_id" binding:"omitempty,uuid"`
-}
-
-// APIOrganizationTree 是组织树的节点投影。
-type APIOrganizationTree struct {
-	Children []APIOrganizationTree `json:"children"`
-	Depth    int                   `json:"depth"`
-	ID       string                `json:"id"`
-	Name     string                `json:"name"`
-	ParentID *string               `json:"parent_id"`
-	Slug     string                `json:"slug"`
-}
-
-// APIPreview 表示授权变更的只读影响。
-type APIPreview struct {
-	Added         []string `json:"added"`
-	AffectedUsers int64    `json:"affected_users"`
-	After         []string `json:"after"`
-	Before        []string `json:"before"`
-	Removed       []string `json:"removed"`
-}
-
-// APIPreviewInput 绑定角色权限或用户角色预览；两类目标互斥。
-type APIPreviewInput struct {
-	AuthzEpoch         int64           `json:"authz_epoch,omitempty,string" binding:"required_with=OrganizationUserID,omitempty,min=1"`
-	OrganizationUserID string          `json:"organization_user_id,omitempty" binding:"omitempty,uuid"`
-	Permissions        *APIPermissions `json:"permissions,omitempty" binding:"required_with=RoleID,omitempty,iam_permissions"`
-	RoleID             string          `json:"role_id,omitempty" binding:"omitempty,uuid"`
-	RoleIDs            *APIRoleIDs     `json:"role_ids,omitempty" binding:"required_with=OrganizationUserID,omitempty,iam_role_ids"`
-	Version            int64           `json:"version,omitempty,string" binding:"required_with=RoleID,omitempty,min=1"`
 }
 
 // APIReauthenticateInput 绑定当前密码确认请求。
@@ -131,93 +64,84 @@ type APIResetPasswordInput struct {
 	Password string `json:"password" binding:"required,min=12,max=128"`
 }
 
-// APIRole 是包含允许操作的角色投影。
+// APIRoleRef 是角色在用户投影中的最小引用。
+type APIRoleRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// APIRole 是角色的公开投影，包含是否内置与权限键。
 type APIRole struct {
-	AllowedActions []string `json:"allowed_actions"`
-	Description    string   `json:"description"`
-	ID             string   `json:"id"`
-	UserCount      int64    `json:"user_count"`
-	Name           string   `json:"name"`
-	Permissions    []string `json:"permissions"`
-	Version        int64    `json:"version,string"`
+	Builtin     bool     `json:"builtin"`
+	Description string   `json:"description"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+	UserCount   int64    `json:"user_count"`
 }
 
 // APIRoleCreate 绑定角色创建：名称、说明与初始权限在创建时一次提交。
 type APIRoleCreate struct {
 	Description omit.Val[string] `json:"description,omitempty,omitzero" binding:"omitempty,max=1000"`
 	Name        string           `json:"name" binding:"required,min=1,max=100"`
-	Permissions APIPermissions   `json:"permissions" binding:"required,iam_permissions"`
+	Permissions APIPermissions   `json:"permissions" binding:"iam_permissions"`
 }
 
 // APIRoleInput 绑定角色更新；描述缺省保留、空值清空、null 拒绝。
 type APIRoleInput struct {
 	Description omit.Val[string] `json:"description,omitempty,omitzero" binding:"omitempty,max=1000"`
 	Name        string           `json:"name" binding:"required,min=1,max=100"`
-	Version     int64            `json:"version,string" binding:"required,min=1"`
 }
 
-// APIUser 是平台账号公开投影，不含密码凭据。
+// APIUser 是账号公开投影，不含密码凭据；角色让列表与服务调用方看到授权来源。
 type APIUser struct {
-	AuthEpoch    int64   `json:"auth_epoch,string"`
-	DisplayName  string  `json:"display_name"`
-	Email        *string `json:"email"`
-	ID           string  `json:"id"`
-	IsSuperAdmin bool    `json:"is_super_admin"`
-	Status       string  `json:"status"`
-	Username     string  `json:"username"`
+	AuthEpoch   int64        `json:"auth_epoch,string"`
+	Configured  bool         `json:"configured"`
+	DisplayName string       `json:"display_name"`
+	Email       *string      `json:"email"`
+	ID          string       `json:"id"`
+	Roles       []APIRoleRef `json:"roles"`
+	Status      string       `json:"status"`
+	Username    string       `json:"username"`
 }
 
-// APIUserInput 绑定平台账号创建请求。
-// OrgID 必填：用户必须属于一个组织，不允许创建无组织账号。
-// RoleIDs 必填：新用户至少获得一个角色，权限只经由角色授予。
+// APIUserInput 绑定账号创建请求。角色可选：新账号可以先无角色，之后再分配。
 type APIUserInput struct {
 	DisplayName string   `json:"display_name" binding:"required,min=1,max=100"`
 	Email       string   `json:"email,omitempty" binding:"omitempty"`
-	OrgID       string   `json:"org_id" binding:"required,uuid"`
 	Password    string   `json:"password" binding:"required,min=12,max=128"`
-	RoleIDs     []string `json:"role_ids" binding:"omitempty,dive,uuid"`
+	RoleIDs     []string `json:"role_ids,omitempty" binding:"omitempty,dive,uuid"`
 	Username    string   `json:"username" binding:"required"`
 }
 
 // APIUserUpdate 绑定账号更新；邮箱缺省保留、空值清空、null 拒绝。
+// 会话失效由服务端在状态变更时推进 auth_epoch，不由客户端回传。
 type APIUserUpdate struct {
-	AuthEpoch   int64            `json:"auth_epoch,string" binding:"required,min=1"`
 	DisplayName string           `json:"display_name" binding:"required,min=1,max=100"`
 	Email       omit.Val[string] `json:"email,omitempty,omitzero" binding:"omitempty"`
 	Status      string           `json:"status" binding:"required,oneof=active disabled"`
 }
 
-// ListQuery 绑定分页、搜索与用户范围。scope 取值 direct（默认）或 subtree。
+// APIUserRolesInput 绑定用户角色全量替换。
+type APIUserRolesInput struct {
+	RoleIDs APIRoleIDs `json:"role_ids" binding:"iam_role_ids"`
+}
+
+// ListQuery 绑定分页与搜索条件。
 type ListQuery struct {
 	Limit  int    `form:"limit,default=10" binding:"min=1,max=100"`
 	Offset int    `form:"offset,default=0" binding:"min=0,max=100000"`
 	Q      string `form:"q"`
-	OrgID  string `form:"org_id" binding:"omitempty,uuid"`
-	Scope  string `form:"scope" binding:"omitempty,oneof=direct subtree"`
 }
 
-// AuditQuery 绑定审计列表的分页与筛选条件。
-// 可见范围由服务端按调用者权限决定，客户端不能用 org_id 扩大范围。
+// AuditQuery 绑定审计列表的筛选与分页条件。
+// 审计只支持向前游标：行数随时间单调增长，OFFSET 深翻会线性变慢。
+// 可见范围由服务端的 iam.audit.read 决定，客户端不能指定额外范围。
 type AuditQuery struct {
 	Limit   int    `form:"limit,default=20" binding:"min=1,max=100"`
-	Offset  int    `form:"offset,default=0" binding:"min=0,max=100000"`
+	Cursor  string `form:"cursor" binding:"omitempty,max=128"`
 	Actor   string `form:"actor" binding:"omitempty,max=100"`
 	Outcome string `form:"outcome" binding:"omitempty,oneof=success failure denied"`
 	From    string `form:"from" binding:"omitempty,datetime=2006-01-02"`
 	To      string `form:"to" binding:"omitempty,datetime=2006-01-02"`
-}
-
-// OrganizationQuery 绑定可选组织范围。
-type OrganizationQuery struct {
-	OrgID string `form:"org_id" binding:"omitempty,uuid"`
-}
-
-// VersionQuery 绑定资源并发版本。
-type VersionQuery struct {
-	Version int64 `form:"version" binding:"required,min=1"`
-}
-
-// AuthorizationVersionQuery 绑定组织授权并发版本。
-type AuthorizationVersionQuery struct {
-	AuthzEpoch int64 `form:"authz_epoch" binding:"required,min=1"`
 }

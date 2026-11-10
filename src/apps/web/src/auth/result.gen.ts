@@ -19,9 +19,12 @@ OriginInvalid: "iam.origin_invalid",
 RecentAuthRequired: "iam.recent_auth_required",
 UsernameTaken: "iam.username_taken",
 EmailTaken: "iam.email_taken",
-OrganizationHasChildren: "iam.organization_has_children",
-OrganizationHasMembers: "iam.organization_has_members",
-RootOrganizationImmutable: "iam.root_organization_immutable",
+RoleInUse: "iam.role_in_use",
+RoleNameTaken: "iam.role_name_taken",
+BuiltinRoleImmutable: "iam.builtin_role_immutable",
+ConfiguredUserImmutable: "iam.configured_user_immutable",
+LastSuperAdmin: "iam.last_super_admin",
+SelfTargetForbidden: "iam.self_target_forbidden",
 } as const;
 export type ResultCode = typeof resultCodes[keyof typeof resultCodes];
-export const resultStatuses: Record<ResultCode, number> = {"ok":200,"invalid_request":400,"unauthenticated":401,"permission_denied":403,"not_found":404,"conflict":409,"rate_limited":429,"internal_error":500,"service_unavailable":503,"payload_too_large":413,"unsupported_media_type":415,"method_not_allowed":405,"iam.invalid_credentials":401,"iam.invalid_current_password":400,"iam.csrf_invalid":403,"iam.origin_invalid":403,"iam.recent_auth_required":403,"iam.username_taken":409,"iam.email_taken":409,"iam.organization_has_children":409,"iam.organization_has_members":409,"iam.root_organization_immutable":409};
+export const resultStatuses: Record<ResultCode, number> = {"ok":200,"invalid_request":400,"unauthenticated":401,"permission_denied":403,"not_found":404,"conflict":409,"rate_limited":429,"internal_error":500,"service_unavailable":503,"payload_too_large":413,"unsupported_media_type":415,"method_not_allowed":405,"iam.invalid_credentials":401,"iam.invalid_current_password":400,"iam.csrf_invalid":403,"iam.origin_invalid":403,"iam.recent_auth_required":403,"iam.username_taken":409,"iam.email_taken":409,"iam.role_in_use":409,"iam.role_name_taken":409,"iam.builtin_role_immutable":409,"iam.configured_user_immutable":409,"iam.last_super_admin":409,"iam.self_target_forbidden":409};

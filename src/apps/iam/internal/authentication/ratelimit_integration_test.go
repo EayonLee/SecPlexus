@@ -27,7 +27,7 @@ func TestLimiterAtomicWindowAndFailClosed(t *testing.T) {
 	options.MaxRetries = -1
 	client := redis.NewClient(options)
 	t.Cleanup(func() { _ = client.Close() })
-	counter, err := NewLimiter(client)
+	counter, err := NewLimiter(client, 60, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

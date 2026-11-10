@@ -19,7 +19,7 @@ func TestContextAndSafeError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 	ctx := With(context.Background(), "request_id", "request-one", "operation", "iam.roles.assign")
-	err := fmt.Errorf("secret connection password: %w", &pgconn.PgError{Code: "23505", Message: "secret row password", Detail: "secret token", ConstraintName: "roles_org_id_code_key"})
+	err := fmt.Errorf("secret connection password: %w", &pgconn.PgError{Code: "23505", Message: "secret row password", Detail: "secret token", ColumnName: "name", ConstraintName: "roles_name_normalized_key"})
 	From(ctx).Error("数据库操作失败", "error", Error(err))
 	var record map[string]any
 	if json.Unmarshal(output.Bytes(), &record) != nil {
@@ -29,7 +29,7 @@ func TestContextAndSafeError(t *testing.T) {
 		t.Fatal("request context lost")
 	}
 	diagnosis := record["error"].(map[string]any)
-	if diagnosis["sqlstate"] != "23505" || diagnosis["constraint"] != "roles_org_id_code_key" {
+	if diagnosis["sqlstate"] != "23505" || diagnosis["column"] != "name" || diagnosis["constraint"] != "roles_name_normalized_key" {
 		t.Fatal("database diagnostic lost")
 	}
 	if strings.Contains(output.String(), "secret") {

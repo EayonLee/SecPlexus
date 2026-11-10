@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/google/uuid"
-	"strings"
 	"sync"
 	"testing"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/migrations"
@@ -64,88 +61,55 @@ func TestFailedMigrationCanBeRetriedAndConcurrentMigrationsConverge(t *testing.T
 		}
 	}
 
-	var count int
-	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='iam' AND table_type='BASE TABLE'`).Scan(&count); err != nil {
+	// 版本账本与业务表同处 iam schema：它随 schema 一起创建、一起销毁。
+	var count, ledger int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='iam' AND table_type='BASE TABLE' AND table_name <> 'goose_db_version'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 
-	if count != 11 {
-		t.Fatalf("expected 11 IAM tables, got %d", count)
+	if count != 9 {
+		t.Fatalf("expected 9 IAM business tables, got %d", count)
+	}
+
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='iam' AND table_name='goose_db_version'`).Scan(&ledger); err != nil {
+		t.Fatal(err)
+	}
+
+	if ledger != 1 {
+		t.Fatal("migration ledger must live inside the iam schema")
 	}
 }
 
-// TestPasswordPolicyUpgradePreservesCredentials 验证已有账号升级后保留凭据和管理员身份。
-func TestPasswordPolicyUpgradePreservesCredentials(t *testing.T) {
-	store := testutil.UnmigratedDatabase(t)
+// TestBaselineHasNoOrganizationSurface 固定最终 schema：没有组织表、组织列或超管标记。
+// 授权只由 users → user_roles → roles → role_permissions → permissions 表达。
+func TestBaselineHasNoOrganizationSurface(t *testing.T) {
+	store := testutil.Database(t)
 	ctx := context.Background()
-	db := stdlib.OpenDBFromPool(store.Pool)
-	defer db.Close()
-
-	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
-	if err != nil {
+	var tables int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='iam' AND table_name LIKE '%organi%'`).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
 
-	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore))
-	if err != nil {
+	if tables != 0 {
+		t.Fatalf("baseline still has %d organization tables", tables)
+	}
+
+	var columns int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='iam' AND (column_name LIKE '%org%' OR column_name IN ('is_super_admin','authz_epoch','scope','slug','membership_id'))`).Scan(&columns); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err = provider.UpTo(ctx, 1); err != nil {
+	if columns != 0 {
+		t.Fatalf("baseline still has %d organization/scope columns", columns)
+	}
+
+	var legacy int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='iam' AND table_name='audit_events' AND column_name LIKE '%org%'`).Scan(&legacy); err != nil {
 		t.Fatal(err)
 	}
 
-	// v1 阶段的列名还是 auth_version；Seed 面向迁移完成后的 schema，不能用来构造历史数据。
-	// 这里直接写入"升级前就存在的管理员"，正是本用例要验证的起点。
-	beforeID := uuid.New()
-	beforeHash, err := (identity.PasswordHasher{}).GenerateHash("SecPlexus#2026")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.users(id,username,username_normalized,display_name,status,is_super_admin,auth_version) VALUES($1,'admin','admin','admin','active',true,1)`, beforeID); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.password_credentials(user_id,password_hash) VALUES($1,$2)`, beforeID, beforeHash); err != nil {
-		t.Fatal(err)
-	}
-
-	before := repository.LoginUser{ID: beforeID, PasswordHash: beforeHash}
-
-	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
-		t.Fatal(err)
-	}
-
-	// 配置是唯一管理员凭据的权威来源；升级后应用配置并保留账号 ID。
-	if err = store.Seed(ctx, "admin", "another configured password"); err != nil {
-		t.Fatal(err)
-	}
-
-	after, err := repository.NewQueries(store.DB).GetLoginUser(ctx, "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if after.ID != before.ID || after.PasswordHash == before.PasswordHash || !after.IsSuperAdmin {
-		t.Fatal("配置同步未保留管理员身份或未更新凭据")
-	}
-
-	if err = (identity.PasswordHasher{}).CompareHashAndPassword(after.PasswordHash, "another configured password"); err != nil {
-		t.Fatal("默认管理员凭据无法验证")
-	}
-
-	if err = store.VerifySchema(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	var obsolete int
-	if err = store.Pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='iam' AND column_name IN ('must_change_password','temporary_expires_at')`).Scan(&obsolete); err != nil {
-		t.Fatal(err)
-	}
-
-	if obsolete != 0 {
-		t.Fatal("过时密码状态列未删除")
+	if legacy != 0 {
+		t.Fatal("audit_events still has organization columns")
 	}
 }
 
@@ -161,7 +125,7 @@ func TestSchemaInspectionNeverInitializesVersionTable(t *testing.T) {
 		t.Fatal("empty schema reported initialized")
 	}
 	var exists bool
-	if err := store.Pool.QueryRow(ctx, `SELECT to_regclass('iam_goose_db_version') IS NOT NULL OR to_regnamespace('iam') IS NOT NULL`).Scan(&exists); err != nil {
+	if err := store.Pool.QueryRow(ctx, `SELECT to_regclass('iam.goose_db_version') IS NOT NULL OR to_regnamespace('iam') IS NOT NULL`).Scan(&exists); err != nil {
 		t.Fatal(err)
 	}
 	if exists {
@@ -169,26 +133,33 @@ func TestSchemaInspectionNeverInitializesVersionTable(t *testing.T) {
 	}
 }
 
-// TestMigrationStatusDistinguishesPendingCurrentAndAhead 验证版本来自Provider而非硬编码常量。
+// TestMigrationStatusDistinguishesPendingCurrentAndAhead 验证版本来自 Provider 而非硬编码常量，
+// 并区分 schema 版本与启动同步的内置数据。
 func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	store := testutil.UnmigratedDatabase(t)
 	ctx := context.Background()
 	db := stdlib.OpenDBFromPool(store.Pool)
 	defer func() { _ = db.Close() }()
-	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
+	versionStore, err := database.NewStore(database.DialectPostgres, "iam.goose_db_version")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore), goose.WithDisableGlobalRegistry(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 1); err != nil {
+	// 账本在 iam schema 内，因此必须先建 schema（与 Migrate 的 ensureSchema 一致）。
+	if _, err = db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS iam"); err != nil {
 		t.Fatal(err)
 	}
-	// 此处不写入管理员：迁移后的"尚未初始化"正是后面要断言的中间态。
-	if err := store.VerifySchema(ctx); err == nil {
-		t.Fatal("pending migrations accepted for serving")
+
+	if _, err = provider.UpTo(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	// 单一基线应用后 schema 可服务；内置数据尚未同步。
+	if err := store.VerifySchema(ctx); err != nil {
+		t.Fatal(err)
 	}
 	var output bytes.Buffer
 	if err := repository.Status(ctx, store.Pool.Config().ConnConfig.ConnString(), &output); err != nil {
@@ -202,70 +173,38 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &state); err != nil {
 		t.Fatal(err)
 	}
-	if !state.Pending || state.Target <= state.Current {
-		t.Fatal("pending state did not reflect migration sources")
+	if state.Pending || state.Target != state.Current {
+		t.Fatalf("unexpected migration state %+v", state)
 	}
-	if err := repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
+
+	var configured int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE configured`).Scan(&configured); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.VerifySchema(ctx); err == nil {
-		t.Fatal("configuration-owned administrator was not initialized after migration")
+	if configured != 0 {
+		t.Fatal("migration created a configured administrator")
 	}
+
 	if err := store.Seed(ctx, "status-admin", "isolated migration status password"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.VerifySchema(ctx); err != nil {
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE configured AND status='active'`).Scan(&configured); err != nil {
 		t.Fatal(err)
+	}
+	if configured != 1 {
+		t.Fatalf("seed created %d configured administrators", configured)
+	}
+	var builtin int
+	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.roles WHERE builtin`).Scan(&builtin); err != nil {
+		t.Fatal(err)
+	}
+	if builtin != 1 {
+		t.Fatalf("seed created %d builtin roles", builtin)
 	}
 	if err := versionStore.Insert(ctx, db, database.InsertRequest{Version: state.Target + 100}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.VerifySchema(ctx); err == nil {
 		t.Fatal("future schema accepted by older application")
-	}
-}
-
-func TestOrganizationUpgradeRejectsInvalidExistingDataWithoutRewriting(t *testing.T) {
-	store := testutil.UnmigratedDatabase(t)
-	ctx := context.Background()
-	db := stdlib.OpenDBFromPool(store.Pool)
-	defer db.Close()
-	versionStore, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = provider.UpTo(ctx, 3); err != nil {
-		t.Fatal(err)
-	}
-	legacy := strings.Repeat("a", 31)
-	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,status) VALUES($1,$2,'Legacy','active')`, uuid.NewString(), legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err == nil {
-		t.Fatal("invalid existing identifier did not stop migration")
-	}
-	var slug string
-	if err = store.Pool.QueryRow(ctx, `SELECT slug FROM iam.organizations`).Scan(&slug); err != nil || slug != legacy {
-		t.Fatal("migration modified existing organization")
-	}
-	if _, err = store.Pool.Exec(ctx, `DELETE FROM iam.organizations WHERE slug=$1`, legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,'soc_team-01',$2,(SELECT id FROM iam.organizations WHERE parent_id IS NULL))`, uuid.NewString(), strings.Repeat("😀", 30)); err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range []struct{ slug, name string }{
-		{"boundary-org", strings.Repeat("中", 31)}, {"boundary-org", "Ops\nTeam"}, {"boundary-org", "Ops\u0085Team"}, {legacy, "Ops"}, {"soc_", "Ops"}, {"1soc", "Ops"},
-	} {
-		if _, err = store.Pool.Exec(ctx, `INSERT INTO iam.organizations(id,slug,name,parent_id) VALUES($1,$2,$3,(SELECT id FROM iam.organizations WHERE parent_id IS NULL))`, uuid.NewString(), input.slug, input.name); err == nil {
-			t.Fatalf("invalid organization accepted: %q", input.slug)
-		}
 	}
 }

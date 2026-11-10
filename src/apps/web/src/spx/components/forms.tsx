@@ -1,5 +1,5 @@
 "use client";
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useId } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslations } from "next-intl";
@@ -29,10 +29,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
 import { APIError } from "../api/client";
-import { zReauthenticateBody } from "../api/iam/schemas";
-import { errorMessageKey, reauthenticate } from "../iam/session";
+import { errorMessageKey } from "../iam/session";
+import { requestReauth } from "./reauth";
+import { SheetPanel } from "./sheet-panel";
 
-/** FormDialog 保留业务 RHF 草稿，在同一对话框中完成服务端要求的身份确认。 */
+// 表单外壳有对话框与抽屉两种形态：字段少的确认走对话框，
+// 字段多的新建/编辑走右侧抽屉，正文独立滚动、底栏固定，绝不出现横向滚动。
 export function FormDialog<TInput extends FieldValues, TOutput extends FieldValues>({
   title,
   description,
@@ -42,6 +44,8 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
   onClose,
   onSubmit,
   submitDisabled = false,
+  variant = "dialog",
+  confirmVariant = "default",
 }: {
   title: string;
   description?: string;
@@ -51,40 +55,86 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
   submitDisabled?: boolean;
   onClose: () => void;
   onSubmit: (values: TOutput) => Promise<unknown>;
+  variant?: "dialog" | "sheet";
+  confirmVariant?: "default" | "destructive";
 }) {
   const t = useTranslations("Common");
   const errors = useTranslations("Errors");
   const descriptionID = useId();
+  const formID = useId();
   const form = useForm<TInput, unknown, TOutput>({ resolver: zodResolver(schema), defaultValues });
   const businessState = useFormState({ control: form.control });
-  const account = useTranslations("Account");
-  const confirmation = useForm<z.infer<typeof zReauthenticateBody>>({
-    resolver: zodResolver(zReauthenticateBody),
-    defaultValues: { password: "" },
-  });
-  const [confirming, setConfirming] = useState(false);
-  const previousStep = useRef<boolean>(false);
-  const submit = useRef<HTMLButtonElement>(null);
-  const busy = businessState.isSubmitting || confirmation.formState.isSubmitting;
-  useEffect(() => {
+  const busy = businessState.isSubmitting;
+
+  // save 在需要近期密码确认时先走全局确认框，确认成功后重放一次提交。
+  // 表单本身不承载确认字段：同一个确认框覆盖抽屉与对话框两种形态。
+  const save = async (values: TOutput) => {
+    try {
+      await onSubmit(values);
+    } catch (error) {
+      if (!(error instanceof APIError) || error.code !== "iam.recent_auth_required") throw error;
+      if (!(await requestReauth())) throw error;
+      await onSubmit(values);
+    }
+  };
+
+  const close = () => {
     if (busy) return;
-    if (confirming) confirmation.setFocus("password");
-    else if (previousStep.current) submit.current?.focus();
-    previousStep.current = confirming;
-  }, [busy, confirming, confirmation]);
+    form.reset();
+    onClose();
+  };
+
+  const body = (
+    <form
+      id={formID}
+      noValidate
+      onSubmit={form.handleSubmit(async (values) => {
+        form.clearErrors("root");
+        try {
+          await save(values);
+          form.reset();
+          onClose();
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "AbortError"))
+            form.setError("root", { message: errors(errorMessageKey(error)) });
+        }
+      })}
+    >
+      <fieldset disabled={busy} className="flex flex-col gap-5">
+        <FieldGroup>{children?.({ ...form, formState: businessState })}</FieldGroup>
+        {businessState.errors.root && <FieldError>{businessState.errors.root.message}</FieldError>}
+      </fieldset>
+    </form>
+  );
+
+  const footer = (
+    <>
+      <Button type="button" variant="outline" onClick={close} disabled={busy}>
+        {t("cancel")}
+      </Button>
+      <Button type="submit" form={formID} variant={confirmVariant} disabled={busy || submitDisabled}>
+        {busy && <Spinner data-icon="inline-start" />}
+        {t("confirm")}
+      </Button>
+    </>
+  );
+
+  if (variant === "sheet")
+    return (
+      <SheetPanel title={title} description={description} footer={footer} onClose={close}>
+        <div className="px-6 py-5">{body}</div>
+      </SheetPanel>
+    );
+
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) {
-          form.reset();
-          confirmation.reset();
-          onClose();
-        }
+        if (!open) close();
       }}
     >
       <DialogContent
-        aria-describedby={description && !confirming ? descriptionID : undefined}
+        aria-describedby={description ? descriptionID : undefined}
         onEscapeKeyDown={(event) => {
           // Base UI 的候选弹层与 Radix Dialog 分别处理 Escape，先让候选框关闭。
           const target = event.target;
@@ -97,105 +147,11 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
         }}
       >
         <DialogHeader>
-          <DialogTitle>{confirming ? account("confirmCurrentPassword") : title}</DialogTitle>
-          {description && !confirming && <DialogDescription id={descriptionID}>{description}</DialogDescription>}
+          <DialogTitle>{title}</DialogTitle>
+          {description && <DialogDescription id={descriptionID}>{description}</DialogDescription>}
         </DialogHeader>
-        <form
-          hidden={confirming}
-          inert={confirming}
-          className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-150"
-          noValidate
-          onSubmit={form.handleSubmit(async (values) => {
-            form.clearErrors("root");
-            try {
-              await onSubmit(values);
-              form.reset();
-              onClose();
-            } catch (error) {
-              if (error instanceof APIError && error.code === "iam.recent_auth_required") {
-                setConfirming(true);
-                return;
-              }
-              if (!(error instanceof DOMException && error.name === "AbortError"))
-                form.setError("root", { message: errors(errorMessageKey(error)) });
-            }
-          })}
-        >
-          <fieldset disabled={busy} className="flex flex-col gap-5">
-            <FieldGroup>{children?.({ ...form, formState: businessState })}</FieldGroup>
-            {businessState.errors.root && <FieldError>{businessState.errors.root.message}</FieldError>}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  form.reset();
-                  onClose();
-                }}
-                disabled={busy}
-              >
-                {t("cancel")}
-              </Button>
-              <Button ref={submit} type="submit" disabled={busy || submitDisabled}>
-                {busy && <Spinner data-icon="inline-start" />}
-                {t("confirm")}
-              </Button>
-            </DialogFooter>
-          </fieldset>
-        </form>
-        {confirming && (
-          <form
-            noValidate
-            className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2 motion-safe:duration-150"
-            onSubmit={confirmation.handleSubmit(async (values) => {
-              confirmation.clearErrors("root");
-              try {
-                await reauthenticate(values.password);
-                confirmation.reset();
-                setConfirming(false);
-              } catch (error) {
-                if (!(error instanceof DOMException && error.name === "AbortError"))
-                  confirmation.setError("root", { message: errors(errorMessageKey(error)) });
-              }
-            })}
-          >
-            <fieldset disabled={busy} className="flex flex-col gap-5">
-              <FieldGroup>
-                <Field data-invalid={!!confirmation.formState.errors.password}>
-                  <FieldLabel htmlFor={`${descriptionID}-password`}>{account("currentPassword")}</FieldLabel>
-                  <Input
-                    id={`${descriptionID}-password`}
-                    {...confirmation.register("password")}
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    aria-invalid={!!confirmation.formState.errors.password}
-                  />
-                  {confirmation.formState.errors.password && <FieldError>{errors("invalidRequest")}</FieldError>}
-                </Field>
-              </FieldGroup>
-              {confirmation.formState.errors.root && (
-                <FieldError>{confirmation.formState.errors.root.message}</FieldError>
-              )}
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    confirmation.reset();
-                    setConfirming(false);
-                  }}
-                >
-                  {t("back")}
-                </Button>
-                <Button type="submit" disabled={busy}>
-                  {busy && <Spinner data-icon="inline-start" />}
-                  {t("confirmAndContinue")}
-                </Button>
-              </DialogFooter>
-            </fieldset>
-          </form>
-        )}
+        {body}
+        <DialogFooter>{footer}</DialogFooter>
       </DialogContent>
     </Dialog>
   );

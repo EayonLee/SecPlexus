@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +43,8 @@ type apiClient struct {
 	sourceIP           string
 }
 
-func (c *apiClient) request(method, path string, input any, status int) map[string]any {
+// exchange 发送请求并返回成功结果的 data 与结果码。
+func (c *apiClient) exchange(method, path string, input any) (map[string]any, string, int) {
 	c.t.Helper()
 	var body io.Reader
 	if input != nil {
@@ -76,6 +76,7 @@ func (c *apiClient) request(method, path string, input any, status int) map[stri
 	defer response.Body.Close()
 
 	data := map[string]any{}
+	code := ""
 	if response.StatusCode != 204 {
 		var result struct {
 			Code      string         `json:"code"`
@@ -91,22 +92,37 @@ func (c *apiClient) request(method, path string, input any, status int) map[stri
 			c.t.Fatal("incomplete Result")
 		}
 
-		if status < 400 && result.Code != "ok" {
+		if response.StatusCode < 400 && result.Code != "ok" {
 			c.t.Fatalf("expected success Result, got %s", result.Code)
 		}
 
-		if status >= 400 && (result.Code == "ok" || result.Data != nil) {
+		if response.StatusCode >= 400 && (result.Code == "ok" || result.Data != nil) {
 			c.t.Fatal("invalid failure Result")
 		}
 
-		data = result.Data
+		data, code = result.Data, result.Code
 	}
 
-	if response.StatusCode != status {
-		c.t.Fatalf("%s %s: expected %d, got %d", method, path, status, response.StatusCode)
+	return data, code, response.StatusCode
+}
+
+func (c *apiClient) request(method, path string, input any, status int) map[string]any {
+	c.t.Helper()
+	data, _, got := c.exchange(method, path, input)
+	if got != status {
+		c.t.Fatalf("%s %s: expected %d, got %d", method, path, status, got)
 	}
 
 	return data
+}
+
+// code 断言失败响应使用稳定的业务结果码，而不只是 HTTP 状态。
+func (c *apiClient) code(method, path string, input any, status int, want string) {
+	c.t.Helper()
+	_, got, actual := c.exchange(method, path, input)
+	if actual != status || got != want {
+		c.t.Fatalf("%s %s: expected %d %s, got %d %s", method, path, status, want, actual, got)
+	}
 }
 
 func (c *apiClient) context() {
@@ -135,35 +151,19 @@ func newAPIClient(t *testing.T, base, origin string) *apiClient {
 	return &apiClient{t: t, base: base, origin: origin, sourceIP: "2001:db8::" + strconv.FormatUint(port, 16), client: &http.Client{Jar: jar, Timeout: 10 * time.Second}}
 }
 
-// organizationEpoch 从平台组织列表读取目标组织的权限版本；
-// 按组织读取详情的端点已随「当前组织」页面一并移除。
-func (c *apiClient) organizationEpoch(orgID string) string {
+// builtinRole 从角色列表读取内置角色行。
+func (c *apiClient) builtinRole() map[string]any {
 	c.t.Helper()
-	items := c.request("GET", "/api/v1/iam/organizations?limit=100", nil, 200)["items"].([]any)
+	items := c.request("GET", "/api/v1/iam/roles?limit=100", nil, 200)["items"].([]any)
 	for _, item := range items {
 		row := item.(map[string]any)
-		if row["id"] == orgID {
-			return row["authz_epoch"].(string)
+		if row["builtin"] == true {
+			return row
 		}
 	}
 
-	c.t.Fatalf("organization %s missing from platform list", orgID)
-	return ""
-}
-
-// roleVersion 读取角色的当前版本，用于区分「版本过期」与「仍有用户」两种冲突。
-func (c *apiClient) roleVersion(orgID, roleID string) string {
-	c.t.Helper()
-	items := c.request("GET", "/api/v1/iam/orgs/"+orgID+"/roles?limit=100", nil, 200)["items"].([]any)
-	for _, item := range items {
-		row := item.(map[string]any)
-		if row["id"] == roleID {
-			return row["version"].(string)
-		}
-	}
-
-	c.t.Fatalf("role %s missing from role list", roleID)
-	return ""
+	c.t.Fatal("builtin role missing from role list")
+	return nil
 }
 
 // httpFixture 持有本用例独占的服务、数据和调用凭证。
@@ -179,7 +179,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	adminUsername := "admin" + uuid.NewString()[:8]
-	organizationUserName := "auditor" + uuid.NewString()[:8]
+	memberUsername := "auditor" + uuid.NewString()[:8]
 	initial := "isolated initial password"
 	password := initial
 	if err := store.Seed(ctx, adminUsername, initial); err != nil {
@@ -203,7 +203,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	cfg.Bootstrap.Password = initial
 	cfg.App.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
 	credential := hex.EncodeToString(key) + hex.EncodeToString(key)
-	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: credential, Actions: []string{"iam.organizations.read"}}}
+	cfg.ServiceClients = map[string]config.ServiceClient{"console": {Token: credential, Actions: []string{"iam.users.read"}}}
 	options, err := redis.ParseURL(os.Getenv("SPX_TEST_REDIS_URL"))
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		keys := []string{}
 		digest := sha256.Sum256([]byte(sourceIP))
 		keys = append(keys, cachekey.IAMLoginIP.Format(hex.EncodeToString(digest[:])))
-		accounts := []string{adminUsername, organizationUserName}
+		accounts := []string{adminUsername, memberUsername}
 		connection, err := pgx.Connect(context.Background(), store.Pool.Config().ConnConfig.ConnString())
 		if err != nil {
 			t.Error("cannot connect for owned key cleanup")
@@ -262,7 +262,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	}
 
 	service := &service.Service{Store: store, Sessions: authentication.NewSessions(store, cfg), Config: cfg}
-	limiter, err := authentication.NewLimiter(redisClient)
+	limiter, err := authentication.NewLimiter(redisClient, 60, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	public.Config.Handler = router.Handler(server)
 	public.Start()
 	t.Cleanup(public.Close)
-	return &httpFixture{redis: redisClient, admin: adminUsername, member: organizationUserName,
+	return &httpFixture{redis: redisClient, admin: adminUsername, member: memberUsername,
 		server:     server,
 		public:     public,
 		initial:    initial,
@@ -289,111 +289,134 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	}
 }
 
-func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
+func TestFlatIdentityRoleAndUserLifecycle(t *testing.T) {
 	f := newFixture(t, nil)
-	public, initial, password, credential := f.public, f.initial, f.password, f.credential
+	public, initial, credential := f.public, f.initial, f.credential
 
 	admin := newAPIClient(t, public.URL, public.URL)
 	admin.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": initial}, 403)
 	admin.login(f.admin, initial)
-	admin.request("GET", "/api/v1/iam/users", nil, 200)
-	admin.request("POST", "/api/v1/iam/me/password", map[string]string{"old_password": initial, "new_password": "another changed password"}, 403)
-	admin.request("GET", "/api/v1/iam/me", nil, 200)
-	admin.request("POST", "/api/v1/iam/auth/reauthenticate", map[string]string{"password": "incorrect password"}, 400)
-	admin.request("POST", "/api/v1/iam/me/password", map[string]string{"old_password": "incorrect password", "new_password": "another changed password"}, 403)
 	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	userID := me["principal"].(map[string]any)["user_id"].(string)
-	orgPath := "/api/v1/iam/orgs/" + org
-	admin.request("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": "Changed", "status": "disabled", "auth_epoch": me["principal"].(map[string]any)["auth_epoch"]}, 403)
-	admin.request("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "not configured password"}, 403)
-	members := admin.request("GET", orgPath+"/users", nil, 200)["items"].([]any)
-	var configuredMembership string
-	for _, item := range members {
-		row := item.(map[string]any)
-		if row["user_id"] == userID {
-			configuredMembership = row["id"].(string)
+	principal := me["principal"].(map[string]any)
+	userID := principal["user_id"].(string)
+	for _, gone := range []string{"organizations", "org_id", "capabilities", "platform_capabilities"} {
+		if _, exists := me[gone]; exists {
+			t.Fatalf("/me still exposes %q", gone)
 		}
 	}
-	if configuredMembership == "" {
-		t.Fatal("configured administrator membership missing")
-	}
-	configuredVersion := admin.organizationEpoch(org)
-	protectedPath := orgPath + "/users/" + configuredMembership
-	admin.request("PATCH", protectedPath, map[string]any{"status": "disabled", "authz_epoch": configuredVersion}, 403)
-	admin.request("DELETE", protectedPath+"?authz_epoch="+configuredVersion, nil, 403)
-	admin.request("PUT", protectedPath+"/roles", map[string]any{"role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
-	admin.request("POST", orgPath+"/permission-preview", map[string]any{"organization_user_id": configuredMembership, "role_ids": []string{}, "authz_epoch": configuredVersion}, 403)
 
-	catalog := admin.request("GET", "/api/v1/iam/permissions?org_id="+org, nil, 200)["items"].([]any)
-	foundAudit := false
+	if principal["configured"] != true || principal["username"] != f.admin || principal["session_id"] == "" || principal["auth_epoch"] == "" {
+		t.Fatalf("unexpected principal %v", principal)
+	}
+
+	roles := me["roles"].([]any)
+	if len(roles) != 1 || roles[0].(map[string]any)["name"] != "超级管理员" {
+		t.Fatalf("configured administrator roles = %v", roles)
+	}
+
+	permissions := me["permissions"].([]any)
+	if len(permissions) != 7 {
+		t.Fatalf("configured administrator permissions = %v", permissions)
+	}
+
+	// 内置角色由启动同步写入：可查看、不可改、不可删。
+	builtin := admin.builtinRole()
+	if builtin["name"] != "超级管理员" || builtin["description"] != "" || len(builtin["permissions"].([]any)) != 7 || builtin["version"] != nil {
+		t.Fatalf("unexpected builtin role %v", builtin)
+	}
+
+	builtinID := builtin["id"].(string)
+	admin.code("PATCH", "/api/v1/iam/roles/"+builtinID, map[string]any{"name": "改名"}, 409, "iam.builtin_role_immutable")
+	admin.code("PUT", "/api/v1/iam/roles/"+builtinID+"/permissions", map[string]any{"permissions": []string{"iam.audit.read"}}, 409, "iam.builtin_role_immutable")
+	admin.code("DELETE", "/api/v1/iam/roles/"+builtinID, nil, 409, "iam.builtin_role_immutable")
+
+	// 配置托管账号不可删除、停用、重置密码；自身改密也被拒绝。
+	admin.code("PATCH", "/api/v1/iam/users/"+userID, map[string]any{"display_name": f.admin, "status": "disabled"}, 409, "iam.configured_user_immutable")
+	admin.code("DELETE", "/api/v1/iam/users/"+userID, nil, 409, "iam.configured_user_immutable")
+	admin.code("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "another reset password"}, 409, "iam.configured_user_immutable")
+	admin.code("POST", "/api/v1/iam/me/password", map[string]any{"old_password": initial, "new_password": "another changed password"}, 409, "iam.configured_user_immutable")
+
+	// 权限目录来自数据库投影，超级管理员可委派全部 7 项。
+	catalog := admin.request("GET", "/api/v1/iam/permissions", nil, 200)["items"].([]any)
+	if len(catalog) != 7 {
+		t.Fatalf("permission catalog has %d items", len(catalog))
+	}
+
 	for _, item := range catalog {
 		entry := item.(map[string]any)
 		permission := entry["permission"].(map[string]any)
-		if permission["key"] == "iam.audit.read" {
-			foundAudit = entry["can_delegate"] == true
-			break
+		if permission["scope"] != nil {
+			t.Fatal("permission catalog still exposes a scope field")
+		}
+
+		if entry["can_delegate"] != true {
+			t.Fatalf("configured administrator cannot delegate %v", permission["key"])
 		}
 	}
 
-	if !foundAudit {
-		t.Fatal("超级管理员应能在权限目录中看到并分配组织审计权限")
+	// 全局角色名唯一：与内置角色同名、与已有角色同名都必须冲突。
+	admin.code("POST", "/api/v1/iam/roles", map[string]any{"name": "超级管理员", "permissions": []string{}}, 409, "iam.role_name_taken")
+	roleID := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "审计员", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
+	admin.code("POST", "/api/v1/iam/roles", map[string]any{"name": "审计员", "permissions": []string{}}, 409, "iam.role_name_taken")
+
+	// 创建用户并在同一事务内授予角色。
+	memberPassword := "isolated member password"
+	memberID := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": f.member, "display_name": "审计用户", "password": memberPassword, "role_ids": []string{roleID}}, 201)["id"].(string)
+	user := admin.request("GET", "/api/v1/iam/users/"+memberID, nil, 200)
+	if user["username"] != f.member || user["configured"] != false || len(user["roles"].([]any)) != 1 {
+		t.Fatalf("unexpected user projection %v", user)
 	}
 
-	admin.request("PUT", "/api/v1/iam/users/"+userID+"/super-admin", map[string]any{"enabled": false, "reason": "identity is configuration-owned"}, 404)
-	initialMember := "123456789012"
-	organizationUserPassword := "isolated member password"
-	organizationUserID := admin.request("POST", orgPath+"/users", map[string]string{"username": f.member, "display_name": "审计用户", "password": initialMember}, 201)["id"].(string)
-	roleID := admin.request("POST", orgPath+"/roles", map[string]any{"name": "审计员", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
-	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{"iam.audit.read"}, "version": "1"}, 204)
-	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{}, "version": "1"}, 409)
-	version := admin.organizationEpoch(org)
-	admin.request("PUT", orgPath+"/users/"+organizationUserID+"/roles", map[string]any{"role_ids": []string{roleID}, "authz_epoch": version}, 204)
+	// 角色仍被持有：删除必须返回专门的冲突码。
+	admin.code("DELETE", "/api/v1/iam/roles/"+roleID, nil, 409, "iam.role_in_use")
+
+	// PUT /users/:id/roles 生效后，成员自身 /me 的权限随之变化。
 	member := newAPIClient(t, public.URL, public.URL)
-	member.login(f.member, initialMember)
+	member.login(f.member, memberPassword)
+	if got := member.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 1 || got[0] != "iam.audit.read" {
+		t.Fatalf("member permissions = %v", got)
+	}
 	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	member.change(initialMember, organizationUserPassword)
-	member.login(f.member, organizationUserPassword)
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	organizationUserAccountID := member.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["user_id"].(string)
-	admin.request("POST", "/api/v1/iam/users/"+organizationUserAccountID+"/reset-password", map[string]string{"password": "123456789012"}, 204)
-	member.request("GET", "/api/v1/iam/audit-events", nil, 401)
-	member.login(f.member, "123456789012")
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	member.request("GET", orgPath+"/users", nil, 403)
 	member.request("GET", "/api/v1/iam/users", nil, 403)
-	otherOrg := admin.request("POST", "/api/v1/iam/organizations", map[string]string{"slug": "isolated-team", "name": "Other organization", "admin_user_id": userID}, 201)["id"].(string)
-	otherRole := admin.request("POST", "/api/v1/iam/orgs/"+otherOrg+"/roles", map[string]any{"name": "Other reader", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
-	// 权限沿祖先链向下继承：member 在根组织获得的审计权限对全部后代组织生效，
-	// 因此读取兄弟子组织的审计是允许的；跨到无亲缘关系的组织才会被拒。
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	currentVersion := admin.organizationEpoch(org)
-	admin.request("PUT", orgPath+"/users/"+organizationUserID+"/roles", map[string]any{"role_ids": []string{otherRole}, "authz_epoch": currentVersion}, 404)
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	admin.request("POST", "/api/v1/iam/auth/login", map[string]string{"username": f.admin, "password": password, "return_to": "https://untrusted.invalid"}, 400)
-	// 角色显示名称可以改变，稳定的能力语义不随名称改变。
-	admin.request("PATCH", orgPath+"/roles/"+roleID, map[string]any{"name": "只读审计", "description": "", "version": "2"}, 204)
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	// 版本取自角色本身而非硬编码：只有版本正确时仍然 409，才能证明拦截来自「仍有绑定用户」。
-	admin.request("DELETE", orgPath+"/roles/"+roleID+"?version="+admin.roleVersion(org, roleID), nil, 409)
-	admin.request("PUT", orgPath+"/roles/"+roleID+"/permissions", map[string]any{"permissions": []string{}, "version": "3"}, 204)
-	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
-	// 服务凭证不能代替浏览器原始身份。
-	call := func(cookie string, method string, want int, resources ...any) {
-		t.Helper()
-		input := map[string]any{
-			"cookie":     cookie,
-			"method":     method,
-			"path":       "/api/v1/console/orgs/" + org + "/overview",
-			"action":     "iam.organizations.read",
-			"org_id":     org,
-			"origin":     public.URL,
-			"csrf_token": admin.csrf,
-		}
-		if len(resources) > 0 {
-			input["resource"] = resources[0]
+
+	admin.request("PUT", "/api/v1/iam/users/"+memberID+"/roles", map[string]any{"role_ids": []string{}}, 204)
+	if got := member.request("GET", "/api/v1/iam/me", nil, 200); len(got["permissions"].([]any)) != 0 || len(got["roles"].([]any)) != 0 {
+		t.Fatalf("member grants survived role removal: %v", got)
+	}
+	member.request("GET", "/api/v1/iam/audit-events", nil, 403)
+
+	// 角色不再被持有后可以删除，且版本正确时才允许。
+	admin.request("DELETE", "/api/v1/iam/roles/"+roleID, nil, 204)
+
+	// 列表投影包含角色与总数，搜索按用户名、显示名或邮箱模糊匹配。
+	list := admin.request("GET", "/api/v1/iam/users?q="+f.member, nil, 200)
+	if list["total"] != float64(1) {
+		t.Fatalf("user search total = %v", list["total"])
+	}
+
+	row := list["items"].([]any)[0].(map[string]any)
+	if row["id"] != memberID || row["roles"] == nil || row["auth_epoch"] == "" {
+		t.Fatalf("unexpected user list row %v", row)
+	}
+
+	// 删除普通用户不影响调用者会话。
+	admin.request("DELETE", "/api/v1/iam/users/"+memberID, nil, 204)
+	admin.request("GET", "/api/v1/iam/users/"+memberID, nil, 404)
+	admin.request("GET", "/api/v1/iam/me", nil, 200)
+
+	// 服务间授权只接收 action；返回固定 platform 范围。
+	request, _ := http.NewRequest("GET", public.URL, nil)
+	cookieHeader := ""
+	for _, cookie := range admin.client.Jar.Cookies(request.URL) {
+		if cookieHeader != "" {
+			cookieHeader += "; "
 		}
 
+		cookieHeader += cookie.Name + "=" + cookie.Value
+	}
+
+	call := func(input map[string]any, want int) {
+		t.Helper()
 		body, _ := json.Marshal(input)
 		req, _ := http.NewRequest("POST", public.URL+"/api/v1/iam/authorize", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+credential)
@@ -408,40 +431,39 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 		if len(response.Cookies()) != 0 {
 			t.Fatal("service authorization must not set browser cookies")
 		}
+
 		if response.StatusCode != want {
 			t.Fatalf("service authorization expected %d, got %d", want, response.StatusCode)
 		}
 	}
-	request, _ := http.NewRequest("GET", public.URL, nil)
-	cookies := admin.client.Jar.Cookies(request.URL)
-	cookieHeader := ""
-	for _, cookie := range cookies {
-		if cookieHeader != "" {
-			cookieHeader += "; "
-		}
 
-		cookieHeader += cookie.Name + "=" + cookie.Value
+	base := map[string]any{"cookie": cookieHeader, "method": "GET", "path": "/api/v1/console/context", "action": "iam.users.read", "origin": public.URL, "csrf_token": admin.csrf}
+	call(base, 200)
+	withScope := map[string]any{}
+	for key, value := range base {
+		withScope[key] = value
 	}
 
-	// 同一入口中，仅用户 Cookie 或错误服务凭证不能请求鉴权。
-	for _, serviceToken := range []string{"", strings.Repeat("x", 64)} {
-		body, _ := json.Marshal(map[string]string{"cookie": cookieHeader, "method": "GET", "path": "/api/v1/console/context", "action": "iam.organizations.read", "org_id": org})
-		req, _ := http.NewRequest("POST", public.URL+"/api/v1/iam/authorize", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Cookie", cookieHeader)
-		if serviceToken != "" {
-			req.Header.Set("Authorization", "Bearer "+serviceToken)
-		}
-		response, err := public.Client().Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = response.Body.Close()
-		if response.StatusCode != 403 || len(response.Cookies()) != 0 {
-			t.Fatal("user Cookie or invalid service credential crossed authentication boundary")
-		}
+	withScope["org_id"] = uuid.NewString()
+	call(withScope, 400)
+	withoutCookie := map[string]any{}
+	for key, value := range base {
+		withoutCookie[key] = value
 	}
-	// 服务凭证也不能代替用户会话访问用户 API。
+
+	withoutCookie["cookie"] = ""
+	call(withoutCookie, 401)
+
+	// 可信服务转交的写请求仍须通过 Origin 和 CSRF 校验。
+	write := map[string]any{}
+	for key, value := range base {
+		write[key] = value
+	}
+
+	write["method"], write["csrf_token"] = "POST", "invalid"
+	call(write, 403)
+
+	// 服务凭证不能代替用户会话访问用户 API，也不能以用户 Cookie 代替服务凭证。
 	req, _ := http.NewRequest("GET", public.URL+"/api/v1/iam/me", nil)
 	req.Header.Set("Authorization", "Bearer "+credential)
 	response, err := public.Client().Do(req)
@@ -452,35 +474,58 @@ func TestIdentityAndCustomRoleLifecycle(t *testing.T) {
 	if response.StatusCode != 401 {
 		t.Fatal("service credential authenticated a user route")
 	}
-	old, err := public.Client().Get(public.URL + "/internal/v1/iam/authorize")
+
+	req, _ = http.NewRequest("POST", public.URL+"/api/v1/iam/authorize", bytes.NewReader([]byte(`{"action":"iam.users.read","method":"GET","path":"/","cookie":"x"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookieHeader)
+	response, err = public.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = old.Body.Close()
-	if old.StatusCode != 404 {
-		t.Fatal("legacy route still registered")
+	_ = response.Body.Close()
+	if response.StatusCode != 403 {
+		t.Fatal("user cookie crossed the service authentication boundary")
 	}
-	call(cookieHeader, "GET", 200)
-	call(cookieHeader, "GET", 400, map[string]string{"type": "unsupported", "id": uuid.NewString()})
-	call("", "GET", 401)
-	// 可信服务转交的写请求仍须通过 Origin 和 CSRF 校验。
-	saved := admin.csrf
-	admin.csrf = "invalid"
-	call(cookieHeader, "POST", 403)
-	admin.csrf = saved
-	var activeSessions int
-	if err := f.server.Service.Store.Pool.QueryRow(context.Background(), "SELECT count(*) FROM iam.user_sessions WHERE user_id=$1 AND state='active'", userID).Scan(&activeSessions); err != nil {
+
+	// 组织路由与旧的授权入口都不再存在。
+	for _, gone := range []string{"/api/v1/iam/organizations", "/api/v1/iam/orgs/" + uuid.NewString() + "/users", "/api/v1/iam/me/sessions", "/internal/v1/iam/authorize"} {
+		admin.request("GET", gone, nil, 404)
+	}
+
+	// 审计列表的字段是前端消费的契约：时间字段必须叫 occurred_at，且没有范围维度。
+	audit := admin.request("GET", "/api/v1/iam/audit-events?limit=50", nil, 200)
+	items := audit["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("audit list is empty; the contract assertions below would not run")
+	}
+
+	for _, item := range items {
+		row := item.(map[string]any)
+		if _, exists := row["org_id"]; exists {
+			t.Fatal("audit event still exposes org_id")
+		}
+
+		if _, exists := row["time"]; exists {
+			t.Fatal("audit event renamed occurred_at to time")
+		}
+
+		if _, err := time.Parse(time.RFC3339Nano, row["occurred_at"].(string)); err != nil {
+			t.Fatalf("audit occurred_at is not RFC3339: %v", err)
+		}
+	}
+
+	var orgColumns int
+	if err := f.server.Service.Store.Pool.QueryRow(context.Background(), "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam' AND table_name='audit_events' AND column_name LIKE '%org%'").Scan(&orgColumns); err != nil {
 		t.Fatal(err)
 	}
-	if activeSessions != 1 {
-		t.Fatalf("expected one active root session, got %d", activeSessions)
+
+	if orgColumns != 0 {
+		t.Fatalf("audit_events still has %d organization columns", orgColumns)
 	}
-	admin.request("GET", "/api/v1/iam/me/sessions", nil, 404)
-	admin.request("POST", "/api/v1/iam/auth/logout-all", nil, 404)
+
 	admin.request("POST", "/api/v1/iam/auth/logout", nil, 204)
-	call(cookieHeader, "GET", 401)
 	admin.request("GET", "/api/v1/iam/me", nil, 401)
-	t.Log(fmt.Sprintf("identity, custom role, version conflicts, last administrator and internal authorization verified for org %s", org))
+	t.Log(fmt.Sprintf("flat accounts, builtin protections, role conflicts and internal authorization verified for %s", f.admin))
 }
 
 func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
@@ -488,173 +533,81 @@ func TestPatchPreservesOmittedFieldsAndClearsExplicitEmptyValues(t *testing.T) {
 	admin := newAPIClient(t, f.public.URL, f.public.URL)
 	admin.login(f.admin, f.initial)
 	admin.login(f.admin, f.password)
-	createOrg := admin.request("GET", "/api/v1/iam/me", nil, 200)["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	organizationUserRoleID := admin.request("POST", "/api/v1/iam/orgs/"+createOrg+"/roles",
+	roleID := admin.request("POST", "/api/v1/iam/roles",
 		map[string]any{"name": "只读用户", "permissions": []string{"iam.users.read"}}, 201)["id"].(string)
 
-	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password, "org_id": createOrg, "role_ids": []string{organizationUserRoleID}}, 201)
+	user := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": "patch_member", "display_name": "Before", "email": "patch@example.com", "password": f.password, "role_ids": []string{roleID}}, 201)
 	userPath := "/api/v1/iam/users/" + user["id"].(string)
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "1"}, 204)
+	// 改显示名称不改变账号版本，因此不打断该用户已有的会话。
+	beforeEpoch := admin.request("GET", userPath, nil, 200)["auth_epoch"]
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active"}, 204)
+	if got := admin.request("GET", userPath, nil, 200)["auth_epoch"]; got != beforeEpoch {
+		t.Fatalf("profile change bumped auth_epoch: %v -> %v", beforeEpoch, got)
+	}
 	if got := admin.request("GET", userPath, nil, 200)["email"]; got != "patch@example.com" {
 		t.Fatalf("omitted email changed stored value: %v", got)
 	}
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "2", "email": ""}, 204)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "email": ""}, 204)
 	if got := admin.request("GET", userPath, nil, 200)["email"]; got != nil {
 		t.Fatalf("explicit empty email was not cleared: %v", got)
 	}
-	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "auth_epoch": "3", "email": nil}, 400)
-	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	role := admin.request("POST", "/api/v1/iam/orgs/"+org+"/roles", map[string]any{"name": "Before", "description": "Preserve me", "permissions": []string{"iam.roles.read"}}, 201)
-	rolePath := "/api/v1/iam/orgs/" + org + "/roles/" + role["id"].(string)
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "1"}, 204)
+	admin.request("PATCH", userPath, map[string]any{"display_name": "After", "status": "active", "email": nil}, 400)
+	role := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "Before", "description": "Preserve me", "permissions": []string{"iam.roles.read"}}, 201)
+	rolePath := "/api/v1/iam/roles/" + role["id"].(string)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After"}, 204)
 	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "Preserve me" {
 		t.Fatalf("omitted description changed stored value: %v", got)
 	}
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "2", "description": ""}, 204)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "description": ""}, 204)
 	if got := admin.request("GET", rolePath, nil, 200)["description"]; got != "" {
 		t.Fatalf("explicit empty description was not cleared: %v", got)
 	}
-	admin.request("PATCH", rolePath, map[string]any{"name": "After", "version": "3", "description": nil}, 400)
+	admin.request("PATCH", rolePath, map[string]any{"name": "After", "description": nil}, 400)
 }
 
-func TestPreviewAndWriteShareInputConstraints(t *testing.T) {
-	f := newFixture(t, nil)
-	admin := newAPIClient(t, f.public.URL, f.public.URL)
-	admin.login(f.admin, f.initial)
-	admin.login(f.admin, f.password)
-	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	base := "/api/v1/iam/orgs/" + org
-	admin.request("POST", base+"/roles", map[string]any{"name": "Missing code"}, 400)
-	role := admin.request("POST", base+"/roles", map[string]any{"name": "Review", "permissions": []string{"iam.roles.read"}}, 201)["id"].(string)
-	admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Missing status"}, 400)
-	permissions := []string{"iam.audit.read", "iam.audit.read"}
-	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": role, "permissions": permissions, "version": "1"}, 400)
-	admin.request("PUT", base+"/roles/"+role+"/permissions", map[string]any{"permissions": permissions, "version": "1"}, 400)
-	roles := make([]string, 51)
-	for i := range roles {
-		roles[i] = uuid.NewString()
-	}
-	member := uuid.NewString()
-	admin.request("POST", base+"/permission-preview", map[string]any{"organization_user_id": member, "role_ids": roles, "authz_epoch": "1"}, 400)
-	admin.request("PUT", base+"/users/"+member+"/roles", map[string]any{"role_ids": roles, "authz_epoch": "1"}, 400)
-
-	for _, version := range []string{"0", "9223372036854775808", "invalid"} {
-		admin.request("PATCH", base+"/roles/"+role, map[string]any{"name": "Review", "version": version}, 400)
-	}
-	admin.request("GET", base+"/roles?limit=0", nil, 400)
-	admin.request("GET", base+"/roles?offset=-1", nil, 400)
-	admin.request("GET", base+"/roles?limit=9223372036854775808", nil, 400)
-	admin.request("GET", base+"/roles/invalid", nil, 400)
-	if got := admin.request("GET", base+"/roles/"+role, nil, 200)["version"]; got != "1" {
-		t.Fatal("rejected input changed the role")
-	}
-}
-
-// TestProfileTimeZonePreference 固定服务端时区契约：只接受合法表达，
-// 写入后可读回，非法值拒绝，且不因该偏好撤销会话。
-func TestProfileTimeZonePreference(t *testing.T) {
-	f := newFixture(t, nil)
-	public, initial := f.public, f.initial
-
-	admin := newAPIClient(t, public.URL, public.URL)
-	admin.login(f.admin, initial)
-
-	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	orgPath := "/api/v1/iam/orgs/" + org
-
-	organizationUserPassword := "isolated timezone password"
-	admin.request("POST", orgPath+"/users", map[string]string{"username": f.member, "display_name": "时区用户", "password": organizationUserPassword}, 201)
-
-	client := newAPIClient(t, public.URL, public.URL)
-	client.login(f.member, organizationUserPassword)
-
-	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != nil && got != "" {
-		t.Fatalf("fresh account timezone = %v, want empty", got)
-	}
-
-	sessionBefore := client.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["session_id"]
-
-	for _, value := range []string{"utc", "browser", "Asia/Shanghai", "America/Los_Angeles"} {
-		written := client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": value}, 200)
-		if written["timezone"] != value {
-			t.Fatalf("PATCH response timezone = %v, want %v", written["timezone"], value)
-		}
-
-		if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != value {
-			t.Fatalf("GET /me timezone = %v, want %v", got, value)
-		}
-	}
-
-	for _, value := range []string{"Not/AZone", "../../etc/passwd", "Shanghai"} {
-		client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": value}, 400)
-	}
-
-	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != "America/Los_Angeles" {
-		t.Fatalf("rejected values changed stored timezone to %v", got)
-	}
-
-	cleared := client.request("PATCH", "/api/v1/iam/me", map[string]any{"timezone": ""}, 200)
-	if cleared["timezone"] != "" {
-		t.Fatalf("clearing timezone returned %v", cleared["timezone"])
-	}
-
-	if got := client.request("GET", "/api/v1/iam/me", nil, 200)["timezone"]; got != nil && got != "" {
-		t.Fatalf("cleared timezone = %v, want empty", got)
-	}
-
-	if sessionAfter := client.request("GET", "/api/v1/iam/me", nil, 200)["principal"].(map[string]any)["session_id"]; sessionBefore != sessionAfter {
-		t.Fatal("timezone preference must not rotate the session")
-	}
-}
-
-// TestCrossOrganizationAccessIsDenied 固定长期安全契约：组织用户不能读写
-// 其它组织的资源，即使持有本组织的全部管理权限。
-func TestCrossOrganizationAccessIsDenied(t *testing.T) {
+// TestDelegationLimitsAndPreview 固定委派上限：只能授予自己持有且 delegable 的权限。
+func TestDelegationLimitsAndPreview(t *testing.T) {
 	f := newFixture(t, nil)
 	admin := newAPIClient(t, f.public.URL, f.public.URL)
 	admin.login(f.admin, f.initial)
 	admin.login(f.admin, f.password)
 
-	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	homeOrg := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
+	readRole := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "用户只读", "permissions": []string{"iam.users.read"}}, 201)["id"].(string)
+	auditRole := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "审计员", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
+	delegatorRole := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "用户管理员", "permissions": []string{"iam.users.read", "iam.users.manage", "iam.users.roles"}}, 201)["id"].(string)
 
-	organizationUserPassword := "cross org member password"
-	admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/users",
-		map[string]string{"username": f.member, "display_name": "跨组织用户", "password": organizationUserPassword}, 201)
+	delegatorPassword := "delegated manager password"
+	delegatorUsername := "delegate" + uuid.NewString()[:6]
+	delegatorID := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": delegatorUsername, "display_name": "委派管理员", "password": delegatorPassword, "role_ids": []string{delegatorRole}}, 201)["id"].(string)
 
-	homeMemberRole := admin.request("POST", "/api/v1/iam/orgs/"+homeOrg+"/roles",
-		map[string]any{"name": "只读用户", "permissions": []string{"iam.users.read"}}, 201)["id"].(string)
+	delegator := newAPIClient(t, f.public.URL, f.public.URL)
+	delegator.login(delegatorUsername, delegatorPassword)
+	// 没有 iam.roles.manage，不能创建或修改角色。
+	delegator.request("POST", "/api/v1/iam/roles", map[string]any{"name": "偷建角色", "permissions": []string{"iam.users.read"}}, 403)
+	delegator.request("PUT", "/api/v1/iam/roles/"+delegatorRole+"/permissions", map[string]any{"permissions": []string{"iam.users.read"}}, 403)
 
-	// 第二个组织由超级管理员创建，用户不属于它。
-	foreignAdmin := admin.request("POST", "/api/v1/iam/users",
-		map[string]any{"username": "foreignadm" + uuid.NewString()[:8], "display_name": "外部管理员", "password": "foreign admin password", "org_id": homeOrg, "role_ids": []string{homeMemberRole}}, 201)
-	foreign := admin.request("POST", "/api/v1/iam/organizations",
-		map[string]any{"slug": "foreign-" + uuid.NewString()[:8], "name": "外部组织",
-			"admin_user_id": foreignAdmin["id"]}, 201)
-	foreignOrg := foreign["id"].(string)
-	if foreignOrg == homeOrg {
-		t.Fatal("fixture produced identical organizations")
+	// 可以授予自己持有的只读角色，但不能授予未持有的审计角色。
+	memberPassword := "delegated member password"
+	delegator.request("POST", "/api/v1/iam/users", map[string]any{"username": "sub" + uuid.NewString()[:8], "display_name": "下属用户", "password": memberPassword, "role_ids": []string{auditRole}}, 403)
+	memberUsername := "sub" + uuid.NewString()[:8]
+	delegator.request("POST", "/api/v1/iam/users", map[string]any{"username": memberUsername, "display_name": "下属用户", "password": memberPassword, "role_ids": []string{readRole}}, 201)
+
+	// 不能把自己的账号提升到内置超级管理员角色。
+	builtin := admin.builtinRole()
+	delegator.request("PUT", "/api/v1/iam/users/"+delegatorID+"/roles", map[string]any{"role_ids": []string{builtin["id"].(string)}}, 403)
+
+	// 预览与写入共享委派边界，且不落库。
+	if got := delegator.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 3 {
+		t.Fatalf("delegator permissions = %v", got)
 	}
 
-	member := newAPIClient(t, f.public.URL, f.public.URL)
-	member.login(f.member, organizationUserPassword)
-
-	// 读写外部组织的用户、角色与审计都必须拒绝，不能因为持有本组织权限而通过。
-	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/users", nil, 403)
-	member.request("GET", "/api/v1/iam/orgs/"+foreignOrg+"/roles", nil, 403)
-	member.request("GET", "/api/v1/iam/audit-events?actor=nobody-matches", nil, 200)
-	member.request("POST", "/api/v1/iam/orgs/"+foreignOrg+"/roles", map[string]any{"name": "偷建", "permissions": []string{"iam.roles.read"}}, 403)
-
-	// 用外部组织 org_id 请求身份上下文同样被拒，说明边界在服务端而非菜单。
-	member.request("GET", "/api/v1/iam/me?org_id="+foreignOrg, nil, 403)
-
-	// 本组织仍有有效身份，排除「会话已失效」这一替代解释。
-	if got := member.request("GET", "/api/v1/iam/me", nil, 200); got["principal"].(map[string]any)["user_id"] == "" {
-		t.Fatal("member session became invalid during cross-organization checks")
+	sub := newAPIClient(t, f.public.URL, f.public.URL)
+	sub.login(memberUsername, memberPassword)
+	if got := sub.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 1 || got[0] != "iam.users.read" {
+		t.Fatalf("subordinate permissions = %v", got)
 	}
+	sub.request("GET", "/api/v1/iam/users", nil, 200)
+	sub.request("GET", "/api/v1/iam/audit-events", nil, 403)
 }
 
 // TestManagementBindingRejectsInvalidInputBeforeService 固定管理接口的输入边界：
@@ -665,16 +618,36 @@ func TestManagementBindingRejectsInvalidInputBeforeService(t *testing.T) {
 	admin.login(f.admin, f.initial)
 	admin.login(f.admin, f.password)
 
-	me := admin.request("GET", "/api/v1/iam/me", nil, 200)
-	org := me["organizations"].([]any)[0].(map[string]any)["id"].(string)
-	base := "/api/v1/iam/orgs/" + org
-
-	admin.request("POST", base+"/roles", map[string]any{"name": "", "permissions": []string{}}, 400)
-	admin.request("PATCH", base+"/roles/00000000-0000-4000-8000-000000000000", map[string]any{"name": "Role"}, 400)
-	admin.request("PUT", base+"/roles/00000000-0000-4000-8000-000000000000/permissions", map[string]any{"permissions": []string{}, "version": "abc"}, 400)
-	admin.request("POST", "/api/v1/iam/organizations", map[string]any{"name": "", "slug": "", "admin_user_id": ""}, 400)
-	admin.request("GET", "/api/v1/iam/organizations?limit=1000", nil, 400)
+	admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": ""}, 400)
+	admin.request("PATCH", "/api/v1/iam/roles/00000000-0000-4000-8000-000000000000", map[string]any{"description": "缺名称"}, 400)
+	admin.request("PUT", "/api/v1/iam/roles/00000000-0000-4000-8000-000000000000/permissions", map[string]any{"permissions": []string{}, "version": "abc"}, 400)
+	admin.request("GET", "/api/v1/iam/users?limit=1000", nil, 400)
+	admin.request("POST", "/api/v1/iam/users/00000000-0000-4000-8000-000000000000/reset-password", map[string]any{"password": "short"}, 400)
 	admin.request("GET", "/api/v1/iam/audit-events?offset=-1", nil, 400)
-	admin.request("POST", base+"/permission-preview", map[string]any{"role_id": ""}, 400)
-	admin.request("GET", "/api/v1/iam/orgs/not-a-uuid/users", nil, 400)
+	admin.request("GET", "/api/v1/iam/roles/not-a-uuid", nil, 400)
+}
+
+// 密码确认失败不累计登录失败：否则一次输错的 sudo 确认会把账号锁在门外。
+func TestReauthenticateFailureDoesNotLockAccount(t *testing.T) {
+	f := newFixture(t, nil)
+	admin := newAPIClient(t, f.public.URL, f.public.URL)
+	admin.login(f.admin, f.initial)
+	admin.login(f.admin, f.password)
+
+	for range 3 {
+		admin.request("POST", "/api/v1/iam/auth/reauthenticate", map[string]any{"password": "wrong confirmation"}, 400)
+	}
+
+	var failed int32
+	if err := f.server.Service.Store.Pool.QueryRow(context.Background(),
+		`SELECT c.failed_attempts FROM iam.password_credentials c JOIN iam.users u ON u.id=c.user_id WHERE u.configured`).Scan(&failed); err != nil {
+		t.Fatal(err)
+	}
+
+	if failed != 0 {
+		t.Fatalf("failed_attempts = %d after password confirmation, want 0", failed)
+	}
+
+	// 正确密码仍可完成确认，说明账号没有被锁。
+	admin.request("POST", "/api/v1/iam/auth/reauthenticate", map[string]any{"password": f.password}, 200)
 }

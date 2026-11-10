@@ -45,9 +45,9 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		MaxHeaderBytes:    16 * 1024,
 	}
 
-	slog.Info("HTTP 监听启动中", "event", "service.starting", "addr", cfg.App.Addr())
+	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr())
 	if err := httpx.Serve(ctx, server); err != nil {
-		logging.From(ctx).Error("HTTP 服务关闭失败", "event", "service.listener_failed", "error", logging.Error(err))
+		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(err))
 		return err
 	}
 	return nil

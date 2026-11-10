@@ -31,13 +31,13 @@ func NewEngine() *gin.Engine {
 		if c.FullPath() == "/health/ready" && c.Writer.Status() < 400 {
 			level = slog.LevelDebug
 		}
-		logging.From(c.Request.Context()).Log(c.Request.Context(), level, "HTTP 请求完成",
+		logging.From(c.Request.Context()).Log(c.Request.Context(), level, "HTTP request finished",
 			"event", "http.completed", "route", c.FullPath(), "status", c.Writer.Status(),
 			"bytes", c.Writer.Size(), "duration_ms", time.Since(started).Milliseconds())
 	})
 	// nil 禁用 Gin 内置请求转储，避免 Cookie、原始 panic 和请求头进入日志。
 	router.Use(gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, failure any) {
-		logging.From(c.Request.Context()).Error("HTTP 请求异常", "event", "http.panic",
+		logging.From(c.Request.Context()).Error("HTTP request panicked", "event", "http.panic",
 			"panic_kind", fmt.Sprintf("%T", failure), "stack", logging.Stack())
 		c.Abort()
 		if !c.Writer.Written() {

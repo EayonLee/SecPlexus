@@ -20,8 +20,8 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 1. `ingestor` 服务骨架：`src/apps/ingestor`，Go + Gin，模块自有 `config.yaml`、迁移与启动，经 `iamclient` 接入 IAM。
 2. 三种通道：HTTP 接收、syslog 监听（UDP+TCP）、Kafka 消费转发，全部产出 OCSF 事件。
 3. 解析层：格式探测（JSON/CEF/LEEF/KV/纯文本）+ 厂商 YAML 模板映射（dot-path、severity 值表、常量、时间/消息字段、`kind` 声明），未映射字段进 `unmapped`。
-4. 发布层：批量写 Kafka topic `spx.ingest.event`，分区键 `org:entity`，背压阻塞不丢数据。
-5. 数据源注册（connectors）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定，归属 org 在注册时落定。
+4. 发布层：批量写 Kafka topic `spx.ingest.event`，分区键为实体标识，背压阻塞不丢数据。
+5. 数据源注册（connectors）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与模板在注册时落定。
 6. 可观测：结构化日志 + 指标（接收速率、解析失败、映射告警、发布延迟/失败）。
 
 明确不做：
@@ -63,7 +63,7 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 
 - 从已注册的 Kafka 接入点消费外部 topic（客户已有总线场景）；一条接入点 = 一组 brokers + topic + 反序列化模板。
 - 消费组 `spx-ingestor-<connector_id>`，`offset_reset=earliest`，手动提交：仅当该批事件**已成功发布**到 `spx.ingest.event` 才提交位移。
-- 无消息身份，归属与模板完全来自接入点注册（与 syslog 同语义）。
+- 无消息身份，模板与接入方式完全来自接入点注册（与 syslog 同语义）。
 
 ### 解析与映射
 
@@ -97,9 +97,9 @@ constants:
 
 ### 发布
 
-- 单一出口 topic `spx.ingest.event`，value 为 OCSF 事件 JSON；分区键 `org_id:entity`（entity 优先级 src_ip → device → user → 域名，无实体回退 `event_id`，禁止回退 org_id 造成热分区）。
+- 单一出口 topic `spx.ingest.event`，value 为 OCSF 事件 JSON；分区键为实体标识（entity 优先级 src_ip → device → user → 域名，无实体回退 `event_id`，禁止回退固定常量造成热分区）。
 - 批量发布：满 500 条或 2s 刷出（与 AiSOC 默认一致）；Kafka 不可用时**阻塞接收**（channel 背压），不丢数据、不落本地盘（第一版明确取舍：Kafka 是唯一缓冲层，其保留期即重放窗口）。
-- 每条事件确定性 `event_id`（UUIDv5：org_id + connector_id + 原始指纹），为下游幂等去重提供键。
+- 每条事件确定性 `event_id`（UUIDv5：connector_id + 原始指纹），为下游幂等去重提供键。
 - 发布成功前通道层不确认（HTTP 202 已述异步；syslog/Kafka 由批发布与位移提交语义保证）。
 
 ### 隔离区
@@ -108,9 +108,9 @@ constants:
 
 ### 数据源注册（connectors）
 
-- 模块自有表 `ingestor.connectors`：`id, org_id, name, kind(http|syslog|kafka), template_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
-- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/换绑定），用户会话鉴权走 IAM；`org_id` 创建时落定，之后不可变。
-- 权限点：`ingestor.connectors.read` / `ingestor.connectors.manage`，进 IAM 权限目录（组织级，delegable 集中评审）。
+- 模块自有表 `ingestor.connectors`：`id, name, kind(http|syslog|kafka), template_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
+- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/换绑定），用户会话鉴权走 IAM；通道类型与模板绑定在创建时落定，之后不可变。
+- 权限点：`ingestor.connectors.read` / `ingestor.connectors.manage`，进 IAM 扁平权限目录（delegable 集中评审）。
 
 ## 验收
 

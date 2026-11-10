@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { ApiMe } from "../../src/spx/api/iam/schemas";
-import { organizationFromPath, settingsPageFor, visibleSettingsPages } from "../../src/spx/iam/navigation";
+import { settingsPageFor, visibleSettingsPages } from "../../src/spx/iam/navigation";
 
 const identity: ApiMe = {
   principal: {
@@ -10,44 +10,43 @@ const identity: ApiMe = {
     auth_epoch: "1",
     username: "member",
     display_name: "Member",
-    is_super_admin: false,
+    configured: false,
     authenticated_at: "2026-10-28T00:00:00Z",
   },
-  organizations: [],
-  org_id: "one",
-  capabilities: ["iam.users.read"],
-  platform_capabilities: [],
+  roles: [],
+  permissions: ["iam.users.read"],
 };
 
 describe("settings area navigation", () => {
-  test("an explicit organization in the settings URL wins over the query fallback", () => {
-    expect(organizationFromPath("/settings/orgs/two/users", "?org_id=one")).toBe("two");
-    expect(organizationFromPath("/dashboard", "?org_id=one")).toBe("one");
-    expect(organizationFromPath("/settings", "")).toBeUndefined();
-  });
-
-  test("organization actions do not grant platform pages", () => {
-    // 组织成员与平台成员已合并为「用户管理」一页，组织级权限即可见。
+  test("every flat read permission exposes exactly its own settings page", () => {
     expect(visibleSettingsPages(identity).map((page) => page.id)).toEqual(["users"]);
-    expect(visibleSettingsPages({ ...identity, org_id: undefined })).toEqual([]);
-    expect(visibleSettingsPages({ ...identity, capabilities: [], platform_capabilities: ["iam.platform.users.read"] })).toEqual([]);
+    expect(visibleSettingsPages({ ...identity, permissions: ["iam.roles.read"] }).map((page) => page.id)).toEqual([
+      "roles",
+    ]);
+    expect(visibleSettingsPages({ ...identity, permissions: ["iam.audit.read"] }).map((page) => page.id)).toEqual([
+      "audit",
+    ]);
+    // 只有写入权限、没有读取权限时不显示任何管理页：菜单跟随可读能力。
+    expect(visibleSettingsPages({ ...identity, permissions: ["iam.users.manage"] })).toEqual([]);
+    expect(visibleSettingsPages({ ...identity, permissions: [] })).toEqual([]);
   });
 
   test("page resolution is flat: every settings page maps to one path", () => {
-    expect(settingsPageFor("/settings/orgs/one/roles", "one")?.id).toBe("roles");
-    expect(settingsPageFor("/settings/orgs/one/audit", "one")?.id).toBe("audit");
-    expect(settingsPageFor("/settings/platform/organizations", "one")?.id).toBe("organizations");
-    expect(settingsPageFor("/settings", "one")).toBeUndefined();
-    expect(settingsPageFor("/management/orgs/one/roles", "one")).toBeUndefined();
+    expect(settingsPageFor("/settings/roles")?.id).toBe("roles");
+    expect(settingsPageFor("/settings/users")?.id).toBe("users");
+    expect(settingsPageFor("/settings/audit")?.id).toBe("audit");
+    expect(settingsPageFor("/settings")).toBeUndefined();
+    expect(settingsPageFor("/settings/platform/organizations")).toBeUndefined();
+    expect(settingsPageFor("/settings/orgs/one/audit")).toBeUndefined();
   });
 
   test("audit is a single entry, not split by scope", () => {
     const ids = visibleSettingsPages({
       ...identity,
-      capabilities: ["iam.audit.read"],
-      platform_capabilities: ["iam.platform.audit.read"],
+      permissions: ["iam.users.read", "iam.roles.read", "iam.audit.read"],
     }).map((page) => page.id);
 
     expect(ids.filter((id) => id === "audit")).toHaveLength(1);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

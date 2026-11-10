@@ -5,6 +5,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
@@ -18,11 +19,18 @@ func (s *Handler) ListAuditEvents(c *gin.Context) {
 		return
 	}
 
-	response, err := s.Service.ListAuditEvents(c.Request.Context(), params)
+	page, err := s.Service.ListAuditEvents(c.Request.Context(), service.AuditFilter{
+		Limit:   params.Limit,
+		Cursor:  params.Cursor,
+		Actor:   params.Actor,
+		Outcome: params.Outcome,
+		From:    params.From,
+		To:      params.To,
+	})
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(c.Writer, response)
+	result.Success(c.Writer, map[string]any{"items": page.Items, "limit": params.Limit, "next_cursor": page.NextCursor})
 }

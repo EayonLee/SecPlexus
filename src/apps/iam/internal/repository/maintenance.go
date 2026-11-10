@@ -7,7 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 )
 
 // Maintain 使用模块数据库连接分批清理过期审计记录和会话。
@@ -30,6 +31,11 @@ func (s *Store) Maintain(ctx context.Context, auditDays, sessionDays int) error 
 
 	if err = tx.WithContext(ctx).Exec(`DELETE FROM iam.user_sessions WHERE id IN (SELECT id FROM iam.user_sessions WHERE absolute_expires_at<clock_timestamp()-$1::interval LIMIT 1000)`, pgtype.Interval{Microseconds: (time.Duration(sessionDays) * 24 * time.Hour).Microseconds(),
 		Valid: true}).Error; err != nil {
+		return err
+	}
+
+	// 保留期清理是唯一允许删除审计的路径：在本次事务内显式开闸。
+	if err = tx.WithContext(ctx).Exec(`SELECT set_config('iam.audit_purge','on',true)`).Error; err != nil {
 		return err
 	}
 
@@ -72,7 +78,7 @@ func (s *Store) RevokeAfterRestore(ctx context.Context) error {
 	}
 
 	if err = AppendAudit(ctx, tx, Audit{
-		ActorType:  "deployment_operator",
+		ActorType:  enum.ActorTypeDeploymentOperator,
 		Action:     "iam.sessions.revoke_after_restore",
 		TargetType: "platform",
 		RequestID:  uuid.NewString(),
@@ -85,7 +91,7 @@ func (s *Store) RevokeAfterRestore(ctx context.Context) error {
 
 // RecoverPassword 使用与管理员重置密码相同的密码策略、会话撤销和审计规则。
 func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password string) error {
-	hash, err := (identity.PasswordHasher{}).GenerateHash(password)
+	hash, err := (account.PasswordHasher{}).GenerateHash(password)
 	if err != nil {
 		return err
 	}
@@ -103,8 +109,13 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 	}
 
 	q := NewQueries(tx)
-	if _, err = q.LockMutableUser(ctx, userID); err != nil {
+	user, err := q.LockUser(ctx, userID)
+	if err != nil {
 		return err
+	}
+
+	if user.Configured {
+		return ErrConfiguredUserImmutable
 	}
 
 	if err = BumpUserAuthEpoch(ctx, tx, userID); err != nil {
@@ -122,7 +133,7 @@ func (s *Store) RecoverPassword(ctx context.Context, userID uuid.UUID, password 
 	}
 
 	if err = AppendAudit(ctx, tx, Audit{
-		ActorType:  "deployment_operator",
+		ActorType:  enum.ActorTypeDeploymentOperator,
 		Action:     "iam.password.recover",
 		TargetType: "user",
 		TargetID:   &userID,

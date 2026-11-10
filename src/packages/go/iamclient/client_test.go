@@ -29,7 +29,7 @@ func TestTransportFailureKeepsCauseAndSafeResult(t *testing.T) {
 	defer client.Close()
 	request := httptest.NewRequest("GET", "/items?token=secret-query", nil)
 	request.Header.Set("Cookie", "secret-cookie")
-	_, err = client.Authorize(logging.With(context.Background(), "request_id", "caller-one"), request, "iam.organizations.read", "", nil)
+	_, err = client.Authorize(logging.With(context.Background(), "request_id", "caller-one"), request, "iam.users.read")
 	var failure *Error
 	if !errors.As(err, &failure) || failure.Code != result.CodeServiceUnavailable || failure.Cause == nil || failure.Reason != "transport" {
 		t.Fatal("transport cause or public classification lost")
@@ -47,7 +47,7 @@ func TestClientKeepsResultAndResourceBoundaries(t *testing.T) {
 		payload string
 		want    int
 	}{
-		{"valid", 200, `{"code":"ok","message":"ok","request_id":"9b843a09-850c-4194-b3f7-733b62ac5eb9","data":{"allowed":true,"decision_id":"decision","principal":{"user_id":"user","session_id":"session"},"scope":{"kind":"organization","org_id":"org"}}}`, 200},
+		{"valid", 200, `{"code":"ok","message":"ok","request_id":"9b843a09-850c-4194-b3f7-733b62ac5eb9","data":{"allowed":true,"decision_id":"decision","principal":{"user_id":"user","session_id":"session"}}}`, 200},
 		{"denied", 403, `{"code":"permission_denied","message":"denied","data":null,"request_id":"9b843a09-850c-4194-b3f7-733b62ac5eb9"}`, 403},
 		{"mismatch", 403, `{"code":"conflict","message":"denied","data":null,"request_id":"9b843a09-850c-4194-b3f7-733b62ac5eb9"}`, 503},
 		{"trailing", 200, `{"code":"ok","data":{}} {}`, 503},
@@ -72,7 +72,7 @@ func TestClientKeepsResultAndResourceBoundaries(t *testing.T) {
 			client.http.Transport = server.Client().Transport
 			original := httptest.NewRequest("GET", "/items", nil)
 			original.Header.Set("Cookie", "browser-cookie-stays-in-authorize-body")
-			_, err = client.Authorize(context.Background(), original, "iam.organizations.read", "org", nil)
+			_, err = client.Authorize(context.Background(), original, "iam.users.read")
 			if tc.want == 200 {
 				if err != nil {
 					t.Fatal(err)

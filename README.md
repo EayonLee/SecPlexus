@@ -19,35 +19,47 @@ An AI-native security operations platform.
 
 ## Development
 
-Install Go 1.27.3, Node.js 22.12+ (24 recommended), and pnpm 10.32.1.
+Install Go 1.27.3, Node.js 22.12+ (24 recommended), pnpm 10.32.1, and GNU Make.
+Make is the single outer entry on macOS, Linux, and Windows. Recipes stay
+shell-agnostic and delegate environment-specific work to the Node scripts; a
+POSIX shell is not required. Windows users can install GNU Make through
+w64devkit, Chocolatey, MSYS2, or an equivalent distribution and run `make` from
+PowerShell or `cmd.exe`.
 
 ```sh
-cp .env.example .env
-chmod 600 .env
+make config      # Creates .env on first run, then stops for review
 # Fill the database/administrator passwords, CSRF key and internal token in .env.
 # Use existing PostgreSQL/Redis, or explicitly deploy them:
-pnpm compose:up postgres redis
-pnpm config:check
+make compose-up SERVICES="postgres redis"
 make dev
 ```
 
-`make dev` runs IAM, Console, and Web with hot reload. It connects to the configured
-services and never starts Docker. Missing `.env` is created from the example;
-startup stops so you can review it. Existing configuration is never overwritten.
+`make dev` runs IAM, Console, and Web with hot reload on all three platforms.
+It connects to the configured services and never starts Docker. Missing `.env` is
+created from the example and startup stops so you can review it; existing
+configuration is never overwritten.
 
 ```sh
 make build       # Build both Go services and Web
-pnpm preview     # Run services and preview built Web; configure the matching public origin
-pnpm compose:up  # Explicitly build and deploy the complete stack
+make preview     # Run services and preview built Web; configure the matching public origin
+make compose-up  # Explicitly build and deploy the complete stack
 make stop        # Stop this checkout's applications and containers; retain data
+make test        # Run script, Go, and Web unit tests
 ```
 
-IAM provides real login, voluntary password changes, revocable sessions, organizations,
-custom roles, and audit records. The unique system administrator defaults to `admin/secplexus` and is configuration-managed.
-Set `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` and restart all IAM replicas to update it; application pages cannot change its identity or password.
+`make stop` uses the checkout-local `.spx/run.json` registry written by the
+launcher, so it can stop the exact process trees it started on every platform.
+On first run, protect the generated `.env` with your platform's file permissions;
+it is ignored by Git.
+
+IAM provides real login, voluntary password changes, revocable sessions, users,
+custom roles, flat permissions, and audit records. Authorization is expressed only by
+user → role → permission. The unique system administrator defaults to `admin/secplexus` and is a
+built-in account written to the database from configuration.
+Set `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` and restart all IAM replicas to update it; application pages cannot delete it, disable it, or change its identity or password.
 The management center and personal settings pages use real APIs. Console currently
-verifies organization access and SSE authorization through IAM; business workflows
-are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based intelligent security workbench at `/dashboard` and real IAM pages at `/login`, `/settings/profile`, `/settings/account` and `/management`. Other template pages and menus are removed; the workbench currently displays sample data. The Web interface supports English and Simplified Chinese through next-intl.
+verifies identity and SSE authorization through IAM; business workflows
+are not implemented. Web uses the Next.js/shadcn baseline with one CRM V1-based intelligent security workbench at `/dashboard` and real IAM pages at `/login`, `/settings`, `/settings/users`, `/settings/roles` and `/settings/audit`. Other template pages and menus are removed; the workbench currently displays sample data. The Web interface supports English and Simplified Chinese through next-intl.
 
 See [configuration and startup](docs/development/configuration.md), [testing](docs/development/testing.md),
 [IAM architecture](src/apps/iam/README.md), and [Web](src/apps/web/README.md).

@@ -72,9 +72,9 @@ Superpowers 的 `test-driven-development` 技能给出核心法则：**没有失
 
 | 包 | 现状 | 需要补 |
 |---|---|---|
-| `iam/internal/handler/management` | 6 个源文件，0 测试 | 组织、角色、成员、审计四组接口的允许/拒绝集成测试 |
+| `iam/internal/handler/management` | 6 个源文件，0 测试 | 用户、角色、权限与审计四组接口的允许/拒绝集成测试 |
 | `iam/internal/router` | 1 个源文件，0 测试 | 路由注册与鉴权分组的契约测试（可用集成测试覆盖） |
-| `iam/internal/service` | 12 源文件，1 集成测试 | 账号、成员、组织、密码、角色、预览的规则单测 + 关键路径集成测试 |
+| `iam/internal/service` | 12 源文件，1 集成测试 | 账号、角色、权限、密码、预览的规则单测 + 关键路径集成测试 |
 | `iam/internal/repository` | 17 源文件，3 测试 | 查询与锁、维护清理、迁移状态的集成测试 |
 | `console/internal/handler` | 2 源文件，0 测试 | SSE 与访问上下文的集成测试 |
 | `console/internal/bootstrap` | 1 源文件，0 测试 | 启动装配与配置校验测试 |

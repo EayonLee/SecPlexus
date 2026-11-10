@@ -198,7 +198,7 @@ func TestServiceClientActionsMustExistInTheContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data = []byte(strings.Replace(string(data), "iam.organizations.read", "iam.unknown.action", 1))
+	data = []byte(strings.Replace(string(data), "iam.users.read", "iam.unknown.action", 1))
 	if err := os.WriteFile(file, data, 0600); err != nil {
 		t.Fatal(err)
 	}

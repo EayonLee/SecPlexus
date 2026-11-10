@@ -2,99 +2,25 @@ package service
 
 import (
 	"context"
-	"errors"
 
-	"github.com/google/uuid"
-
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-// Roles 返回角色和当前用户可执行的操作；实际写入时仍须在 Manage 中重新鉴权。
-func (s *Service) Roles(ctx context.Context, orgID, roleID string, limit, offset int) ([]model.APIRole, int64, error) {
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	err := tx.Error
-	if err != nil {
-		return nil, 0, err
+// Roles 返回全局角色列表；实际写入时仍须在 Manage 中重新鉴权。
+func (s *Service) Roles(ctx context.Context, limit, offset int) (map[string]any, error) {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead); err != nil {
+		return nil, err
 	}
 
-	defer tx.Rollback()
+	return repository.ListRoles(ctx, s.Store.DB, limit, offset)
+}
 
-	p, err := s.resolve(ctx, tx)
-	if err != nil {
-		return nil, 0, err
+// Role 返回单个角色的公开投影。
+func (s *Service) Role(ctx context.Context, roleID string) ([]byte, error) {
+	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead); err != nil {
+		return nil, err
 	}
 
-	if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesRead, orgID); err != nil {
-		return nil, 0, err
-	}
-
-	canManage := true
-	if _, err = s.authorizeTx(ctx, tx, p, iamclient.PermissionIAMRolesManage, orgID); err != nil {
-		if errors.Is(err, authorization.ErrDenied) {
-			canManage = false
-		} else {
-			return nil, 0, err
-		}
-	}
-
-	org, err := uuid.Parse(orgID)
-	if err != nil {
-		return nil, 0, repository.ErrInvalid
-	}
-
-	user, err := uuid.Parse(p.UserID)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	effective, err := repository.NewQueries(tx).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: org,
-		UserID: user})
-	if err != nil {
-		return nil, 0, err
-	}
-
-	catalog, err := repository.Permissions(ctx, tx)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if p.IsSuperAdmin {
-		for _, permission := range catalog {
-			if permission.Scope == "organization" {
-				effective = append(effective, permission.Key)
-			}
-		}
-	}
-
-	var target any
-	if roleID != "" {
-		id, err := uuid.Parse(roleID)
-		if err != nil {
-			return nil, 0, repository.ErrInvalid
-		}
-
-		target = id
-	}
-
-	items, total, err := repository.ListRoles(ctx, tx, org, target, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	for i := range items {
-		role := &items[i]
-		role.AllowedActions = []string{iamclient.PermissionIAMRolesRead}
-		if canManage && authorization.CheckDelegation(effective, role.Permissions, role.Permissions, catalog) == nil {
-			role.AllowedActions = append(role.AllowedActions, iamclient.PermissionIAMRolesManage)
-		}
-	}
-
-	if err = tx.Commit().Error; err != nil {
-		return nil, 0, err
-	}
-
-	return items, total, nil
+	return repository.RoleJSON(ctx, s.Store.DB, roleID)
 }

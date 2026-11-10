@@ -35,7 +35,7 @@
 - [ ] 引入 `leodido/go-syslog/v4`、`ubyte-source/go-cef`；KV 解析器自写（多分隔符探测）。
 - [ ] 失败测试先行：模板引擎——加载校验（非法 class_uid、severity 越界拒绝启动）、dot-path 读写（含 `x[0]`）、`type: int` 转换失败置 null+warning、`extends` 继承与逐键覆盖、`constants`、`unmapped` 收集、`time_formats` 失败置 null。
 - [ ] 失败测试先行：severity 归一——中文档位（高危/中危/低危）、CEF 0–10 数字档、大小写/空白归一、未映射 → 0 + warning。
-- [ ] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、org/connector 维度隔离）。
+- [ ] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、connector 维度隔离）。
 - [ ] 内置模板目录 `internal/normalizer/templates/*.yaml` + `go:embed`；模板 schema 校验函数。
 
 ### 第三组：通道
@@ -49,13 +49,13 @@
 
 ### 第四组：发布与隔离区
 
-- [ ] 失败测试先行（集成）：分区键 `org:entity` 保序（同实体同分区）、无实体回退 event_id、不回退 org_id。
+- [ ] 失败测试先行（集成）：分区键按实体标识保序（同实体同分区）、无实体回退 event_id、不回退固定常量。
 - [ ] 发布器实现：channel 背压、批量 500 条/2s、确定性 event_id。
 - [ ] 隔离区：解析失败/模板缺失 → `spx.ingest.quarantine`（原因码），指标计数。
 
 ### 第五组：connectors 注册表与管理 API
 
-- [ ] 失败测试先行（集成）：创建（org 落定不可变）、列表、启停、换 token、syslog 端口唯一性约束、跨组织访问拒绝。
+- [ ] 失败测试先行（集成）：创建（通道与模板绑定不可变）、列表、启停、换 token、syslog 端口唯一性约束、越权访问拒绝。
 - [ ] 迁移 `ingestor.connectors` 表；管理路由挂 `/api/v1/ingestor/connectors`，IAM 用户会话 + 权限点校验。
 - [ ] 模板回归：18 家模板 × 5–10 条真实样本，断言关键字段与 severity；填充率报表脚本。
 

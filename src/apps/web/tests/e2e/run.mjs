@@ -5,8 +5,11 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateProcessTree } from "../../../../../scripts/processes.mjs";
 
 const root = fileURLToPath(new URL("../../../../../", import.meta.url));
+const executableSuffix = process.platform === "win32" ? ".exe" : "";
+const pnpmShell = process.platform === "win32" ? { shell: true } : {};
 process.chdir(root);
 
 const systemEnv = Object.fromEntries(
@@ -22,7 +25,7 @@ const children = [];
 const listenerPorts = [];
 let stackReady = false;
 function command(binary, args, options = {}) {
-  const result = spawnSync(binary, args, { encoding: "utf8", ...options });
+  const result = spawnSync(binary, args, { encoding: "utf8", ...(binary === "pnpm" ? pnpmShell : {}), ...options });
   if (result.status !== 0) throw new Error(`${binary} ${args[0]} failed; no credentials are logged.`);
   return result.stdout?.trim();
 }
@@ -33,8 +36,12 @@ async function port() {
   await new Promise((resolve) => server.close(resolve));
   return number;
 }
-function launch(binary, args, env) {
-  const child = spawn(binary, args, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+function launch(binary, args, env, options = {}) {
+  const child = spawn(binary, args, {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: options.detached ?? process.platform !== "win32",
+  });
   child.stdout.resume();
   child.stderr.resume();
   children.push(child);
@@ -128,8 +135,8 @@ try {
   listenerPorts.push(webPort, iamPort, consolePort, iamPort2, consolePort2);
   const publicURL = `http://127.0.0.1:${webPort}`;
   const csrf = randomBytes(16).toString("hex");
-  const iamBinary = path.join(directory, "iam");
-  const consoleBinary = path.join(directory, "console");
+  const iamBinary = path.join(directory, `iam${executableSuffix}`);
+  const consoleBinary = path.join(directory, `console${executableSuffix}`);
   command("go", ["build", "-o", iamBinary, "./src/apps/iam/cmd"]);
   command("go", ["build", "-o", consoleBinary, "./src/apps/console/cmd"]);
   command(iamBinary, ["migrate", "--config", "src/apps/iam/config.yaml"], {
@@ -178,7 +185,15 @@ try {
   // 构建环境不带数据库密码及内部调用凭证。
   if (mode === "preview")
     command("pnpm", ["--dir", "src/apps/web", "build"], {
-      env: { ...systemEnv, SPX_WEB_ORIGIN: publicURL, SPX_WEB_PORT: String(webPort), SPX_IAM_HOST:"127.0.0.1",SPX_IAM_PORT:String(iamPort),SPX_CONSOLE_HOST:"127.0.0.1",SPX_CONSOLE_PORT:String(consolePort) },
+      env: {
+        ...systemEnv,
+        SPX_WEB_ORIGIN: publicURL,
+        SPX_WEB_PORT: String(webPort),
+        SPX_IAM_HOST: "127.0.0.1",
+        SPX_IAM_PORT: String(iamPort),
+        SPX_CONSOLE_HOST: "127.0.0.1",
+        SPX_CONSOLE_PORT: String(consolePort),
+      },
     });
   const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv);
   await ready(`${publicURL}/login`, stack);
@@ -248,6 +263,7 @@ try {
         ...process.argv.slice(2).filter((arg) => arg !== "--docker" && arg !== "--dev"),
       ],
       {
+        ...pnpmShell,
         env: {
           ...systemEnv,
           SPX_E2E_BASE_URL: publicURL,
@@ -261,7 +277,12 @@ try {
         stdio: "inherit",
       },
     );
-    for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
+    for (const signal of ["SIGINT", "SIGTERM"])
+      process.once(signal, () => {
+        if (process.platform === "win32" && child.pid)
+          spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        else child.kill(signal);
+      });
     process.exitCode = await new Promise((resolve, reject) => {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code ?? 1));
@@ -278,10 +299,9 @@ try {
       headers: { Origin: publicURL, "X-CSRF-Token": token },
     });
     if (authenticated.status() !== 200) throw new Error("Cannot establish the owned lifecycle test session.");
-    const identity = (await (await api.get("/api/v1/iam/me")).json()).data;
-    const org = identity.organizations[0].id;
+    // 扁平授权：Console 事件流只按调用者身份授权，不再携带组织标识。
     const cookies = (await api.storageState()).cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-    const stream = await fetch(`http://127.0.0.1:${consolePort2}/api/v1/console/orgs/${org}/events`, {
+    const stream = await fetch(`http://127.0.0.1:${consolePort2}/api/v1/console/events`, {
       headers: { Cookie: cookies, Origin: publicURL },
       signal: AbortSignal.timeout(8000),
     });
@@ -291,12 +311,16 @@ try {
     if (!new TextDecoder().decode(first.value).includes("authorized"))
       throw new Error("Console stream did not authorize.");
     const closed = new Promise((resolve) => console2.once("exit", (code, signal) => resolve({ code, signal })));
-    console2.kill("SIGTERM");
+    // Windows has no SIGTERM; Node terminates the process directly, so only POSIX
+    // can assert the graceful zero exit. The stream must still close on both.
+    if (process.platform === "win32") console2.kill();
+    else console2.kill("SIGTERM");
     while (!(await reader.read()).done) {
       /* Read through the final event until normal EOF. */
     }
     const exit = await closed;
-    if (exit.code !== 0 || exit.signal) throw new Error("Console needed forced shutdown.");
+    if (process.platform !== "win32" && (exit.code !== 0 || exit.signal))
+      throw new Error("Console needed forced shutdown.");
     console.log("Actual Console SSE observed cancellation and ended before normal process exit.");
   } finally {
     await api.dispose();
@@ -323,27 +347,10 @@ try {
 } finally {
   for (const child of children.reverse()) {
     if (child.exitCode !== null || child.signalCode !== null) continue;
-    try {
-      if (process.platform === "win32") child.kill("SIGTERM");
-      else process.kill(-child.pid, "SIGTERM");
-    } catch (error) {
-      if (error.code !== "ESRCH") process.exitCode = 1;
-    }
-    await Promise.race([
-      new Promise((resolve) => {
-        if (child.exitCode !== null) resolve();
-        else child.once("exit", resolve);
-      }),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
+    await terminateProcessTree(child);
     if (child.exitCode === null && child.signalCode === null) {
       console.error("An owned service required forced shutdown.");
       process.exitCode = 1;
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        /* 下一次就绪检查仍受总截止时间约束。 */
-      }
     }
   }
   if (stackReady)

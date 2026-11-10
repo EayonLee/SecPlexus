@@ -19,31 +19,36 @@ AI 原生安全运营平台。
 
 ## 本地开发
 
-准备Go 1.27.3、Node.js 22.12+（建议24）和pnpm 10.32.1。
+准备Go 1.27.3、Node.js 22.12+（建议24）、pnpm 10.32.1与GNU Make。
+Make是macOS、Linux和Windows统一的唯一外层入口：配方本身不依赖POSIX shell，
+平台差异全部下沉到Node脚本。Windows可通过w64devkit、Chocolatey、MSYS2等
+安装GNU Make，然后在PowerShell或`cmd.exe`中直接运行`make`。
 
 ```sh
-cp .env.example .env
-chmod 600 .env
+make config      # 首次运行会生成.env，随后停止以便检查
 # 填写.env中的数据库/管理员密码、CSRF密钥与服务凭证。
 # 可以连接已有PG/Redis，也可以显式部署本项目的基础组件：
-pnpm compose:up postgres redis
-pnpm config:check
+make compose-up SERVICES="postgres redis"
 make dev
 ```
 
-`make dev`启动IAM、Console与Web并支持热更新，只连接配置的依赖，不调用Docker。
-缺少`.env`时会从示例生成并提示检查后重试，不覆盖已有文件。
+`make dev`在三个平台上启动IAM、Console与Web并支持热更新，只连接配置的依赖，
+不调用Docker。缺少`.env`时会从示例生成并提示检查后重试，不覆盖已有文件。
 
 ```sh
 make build       # 构建两个Go服务及Web
-pnpm preview     # 启动后端并预览Web产物；公共origin须与实际地址一致
-pnpm compose:up  # 显式构建并部署整套服务
+make preview     # 启动后端并预览Web产物；公共origin须与实际地址一致
+make compose-up  # 显式构建并部署整套服务
 make stop        # 停止本工作区应用与容器，保留数据
+make test        # 运行脚本、Go与Web单元测试
 ```
 
-IAM已提供真实登录、主动改密、可撤销会话、组织、自定义角色和审计。首位管理员默认是`admin`，
-唯一超级管理员默认 `admin/secplexus`，身份与密码由 `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` 持续管理，修改后重启全部 IAM 副本，不能在页面中修改。管理中心和个人设置已接入真实API。
-Console当前提供组织访问与SSE鉴权，还没有业务工作流；Web基于Next.js/shadcn，仅保留`/dashboard`的CRM V1安全智驾工作台和`/login`、`/settings/profile`、`/settings/account`、`/management`真实IAM页面；其他模板页面及菜单已删除，工作台当前展示示例数据；Web通过next-intl支持英文与简体中文切换。
+`make stop`读取启动器写入的仓库内`.spx/run.json`进程登记，因此能在三个平台
+精确停止本次启动的进程树。首次生成的`.env`请按平台方式限制文件权限；
+该文件已被Git忽略。
+
+IAM已提供真实登录、主动改密、可撤销会话、用户、自定义角色、扁平权限和审计；授权只由用户→角色→权限表达。唯一超级管理员默认 `admin/secplexus`，是由配置写入数据库的内置账号，身份与密码由 `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD` 持续管理；修改后重启全部 IAM 副本，页面不能删除、停用或修改其身份与密码。管理中心和个人设置已接入真实API。
+Console当前提供身份访问与SSE鉴权，还没有业务工作流；Web基于Next.js/shadcn，仅保留`/dashboard`的CRM V1安全智驾工作台和`/login`、`/settings`、`/settings/users`、`/settings/roles`、`/settings/audit`真实IAM页面；其他模板页面及菜单已删除，工作台当前展示示例数据；Web通过next-intl支持英文与简体中文切换。
 
 启动方式、配置优先级和维护步骤见[配置指南](docs/development/configuration.md)。
 测试入口见[测试指南](docs/development/testing.md)，模块设计见[IAM README](src/apps/iam/README.md)与

@@ -1,7 +1,7 @@
 let version = 0;
 let controller = new AbortController();
 
-/** requestScope 给请求及身份刷新提供同一个周期快照。 */
+/** requestScope 给请求及会话刷新提供同一个周期快照。 */
 export function requestScope() {
   return { version, signal: controller.signal };
 }

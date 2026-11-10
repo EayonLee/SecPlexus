@@ -23,8 +23,8 @@ SecPlexus 当前在同一仓库内维护两个 Go 服务和一个 React 应用�
 
 | 位置 | 职责 |
 | --- | --- |
-| [`src/apps/iam/`](src/apps/iam/README.md) | 账号、认证、会话、组织、角色、授权与身份审计 |
-| [`src/apps/console/`](src/apps/console/README.md) | 业务服务入口；当前提供组织上下文与带授权检查的 SSE 连接 |
+| [`src/apps/iam/`](src/apps/iam/README.md) | 账号、认证、会话、用户、角色、扁平权限、授权与身份审计 |
+| [`src/apps/console/`](src/apps/console/README.md) | 业务服务入口；当前提供身份上下文与带授权检查的 SSE 连接 |
 | [`src/apps/web/`](src/apps/web/README.md) | Next.js、React、TypeScript、Tailwind CSS、shadcn/ui；统一应用框架与产品页面 |
 | [`src/packages/`](src/packages/README.md) | 应用之间实际复用的实现 |
 | `tests/` 和 `src/apps/web/tests/` | 集成测试运行器与 Web 浏览器 E2E 测试 |
@@ -119,7 +119,7 @@ Spec 说明行为、边界、兼容性与验收标准；Plan 记录实施方案�
 3. Web 在 `src/spx/api/iam/schemas.ts` 维护实际消费的 Zod 模型，类型由模型推导，模块 API 使用 Axios。字段同步通过真实 HTTP 和浏览器测试验证。
 4. 仅在修改跨语言结果码或权限目录时执行 `pnpm catalogs:generate`、`pnpm catalogs:check`。业务源归 Go `result` 和 IAM `authorization`；不手改 `.gen.*` 导出。
 
-服务端授权始终是最终依据。保留组织范围、CSRF 防护、会话撤销，以及事务和审计保证；页面或按钮可见不代表 API 已授权。默认保持同源访问，跨域凭证访问需要明确设计。
+服务端授权始终是最终依据。保留路由声明的权限校验、CSRF 防护、会话撤销，以及事务和审计保证；页面或按钮可见不代表 API 已授权。默认保持同源访问，跨域凭证访问需要明确设计。
 
 ### 代码与文档风格
 

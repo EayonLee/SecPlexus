@@ -8,91 +8,54 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/identity"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-// UserInput 是创建用户的请求参数。
-type UserInput = model.APIUserInput
-
-// UserUpdate 是更新用户的请求参数。
-type UserUpdate = model.APIUserUpdate
-
-// OrganizationInput 是创建组织的请求参数。
-type OrganizationInput = model.APIOrganizationInput
-
-// OrganizationUpdate 是更新组织的请求参数。
-type OrganizationUpdate = model.APIOrganizationUpdate
-
-// OrganizationUserInput 是创建组织用户的请求参数。
-type OrganizationUserInput = model.APIOrganizationUserInput
-
-// OrganizationUserUpdate 是更新组织用户的请求参数。
-type OrganizationUserUpdate = model.APIOrganizationUserUpdate
-
-// CreateUser 创建账号、用户关系与角色绑定；三者同一事务，任一失败全部回滚。
-// 账号必须属于一个组织：不允许创建无组织用户。
-func (s *Service) CreateUser(ctx context.Context, input UserInput, requestID string) (string, error) {
-	normalized, err := identity.NormalizeUsername(input.Username)
+// CreateUser 创建账号、密码与可选角色绑定；任一失败全部回滚。
+func (s *Service) CreateUser(ctx context.Context, input UserCreate, requestID string) (string, error) {
+	normalized, err := account.NormalizeUsername(input.Username)
 	if err != nil {
 		return "", repository.ErrInvalid
 	}
 
-	if err = identity.ValidateUsernameAvailable(normalized); err != nil {
+	if err = account.ValidateUsernameAvailable(normalized); err != nil {
 		return "", repository.ErrInvalid
 	}
 
-	displayName, err := identity.ValidateDisplayName(input.DisplayName)
+	displayName, err := account.ValidateDisplayName(input.DisplayName)
 	if err != nil {
 		return "", repository.ErrInvalid
 	}
 
-	if err = identity.ValidateEmail(input.Email); err != nil {
+	if err = account.ValidateEmail(input.Email); err != nil {
 		return "", repository.ErrInvalid
 	}
 
-	orgID, err := uuid.Parse(input.OrgID)
+	hash, err := (account.PasswordHasher{}).GenerateHash(input.Password)
 	if err != nil {
 		return "", repository.ErrInvalid
 	}
 
-	hash, err := (identity.PasswordHasher{}).GenerateHash(input.Password)
-	if err != nil {
-		return "", repository.ErrInvalid
-	}
-
+	input.DisplayName = displayName
+	input.Email = account.NormalizeEmail(input.Email)
 	id := uuid.New()
 	err = s.Manage(
 		ctx,
-		iamclient.PermissionIAMPlatformUsersManage,
-		"",
+		iamclient.PermissionIAMUsersManage,
 		requestID,
 		"user",
 		&id,
 		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
-			metadata["org_id"] = input.OrgID
-
-			input.DisplayName = displayName
-			input.Email = identity.NormalizeEmail(input.Email)
+			metadata["username"] = input.Username
 			if err := insertUser(ctx, tx, id, input, normalized, hash); err != nil {
 				return err
 			}
 
-			organizationUserID := uuid.New()
-			if err := repository.InsertOrganizationUser(ctx, tx, organizationUserID, input.OrgID, id); err != nil {
-				return err
-			}
-
-			// 角色必须属于同一组织，且授予范围不得超过操作者自身权限。
-			// 允许空角色：创建组织时先建账号再把它设为组织管理员，
-			// 此时该账号在目标组织内尚无角色可授。
 			if len(input.RoleIDs) > 0 {
-				if err := s.assignRolesWithinScope(ctx, tx, p, orgID, organizationUserID, input.RoleIDs); err != nil {
-					return err
-				}
+				return s.assignRoles(ctx, tx, p, id, input.RoleIDs)
 			}
 
 			return nil
@@ -101,87 +64,46 @@ func (s *Service) CreateUser(ctx context.Context, input UserInput, requestID str
 	return id.String(), err
 }
 
-// assignRolesWithinScope 校验角色归属组织并复用委派上限，再写入用户角色关系。
-func (s *Service) assignRolesWithinScope(ctx context.Context, tx *gorm.DB, p iamclient.Principal, orgID uuid.UUID, organizationUserID uuid.UUID, roleIDs []string) error {
-	catalog, err := repository.Permissions(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	granted := []string{}
-	for _, raw := range roleIDs {
-		roleID, err := uuid.Parse(raw)
-		if err != nil {
-			return repository.ErrInvalid
-		}
-
-		role, err := repository.RoleGrants(ctx, tx, orgID.String(), roleID.String())
-		if err != nil {
-			return repository.ErrInvalid
-		}
-
-		granted = append(granted, role.Permissions...)
-	}
-
-	effective, err := repository.NewQueries(tx).GetOrganizationPermissions(ctx, repository.GetOrganizationPermissionsParams{OrgID: orgID, UserID: uuid.MustParse(p.UserID)})
-	if err != nil {
-		return err
-	}
-
-	if p.IsSuperAdmin {
-		for _, permission := range catalog {
-			if permission.Scope == "organization" {
-				effective = append(effective, permission.Key)
-			}
-		}
-	}
-
-	if err = authorization.CheckDelegation(effective, nil, granted, catalog); err != nil {
-		return err
-	}
-
-	for _, raw := range roleIDs {
-		roleID, err := uuid.Parse(raw)
-		if err != nil {
-			return repository.ErrInvalid
-		}
-
-		if err = tx.WithContext(ctx).Exec(`INSERT INTO iam.organization_user_roles(org_id,organization_user_id,role_id,created_by) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, orgID, organizationUserID, roleID, p.UserID).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // insertUser 在当前管理事务内创建资料与密码。
-func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserInput, normalized, hash string) error {
-	if err := repository.InsertUser(ctx, tx, id, strings.TrimSpace(input.Username), normalized, input.DisplayName, input.Email); err != nil {
+func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserCreate, normalized, hash string) error {
+	if err := repository.InsertUser(ctx, tx, id, strings.TrimSpace(input.Username), normalized, input.DisplayName, input.Email, false); err != nil {
 		return err
 	}
 
-	err := repository.InsertPassword(ctx, tx, id, hash)
-	return err
+	return repository.InsertPassword(ctx, tx, id, hash)
 }
 
-// UpdateUser 更新用户信息并检查版本。
+// assignRoles 复用委派上限校验并写入用户角色绑定。
+func (s *Service) assignRoles(ctx context.Context, tx *gorm.DB, p iamclient.Principal, userID uuid.UUID, roleIDs []string) error {
+	granted, err := grantsFor(ctx, tx, roleIDs)
+	if err != nil {
+		return err
+	}
+
+	if err = s.delegation(ctx, tx, p, nil, granted); err != nil {
+		return err
+	}
+
+	return repository.ReplaceUserRoles(ctx, tx, userID.String(), roleIDs, p.UserID)
+}
+
+// UpdateUser 更新用户信息；配置托管账号不能被停用。
 func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdate, requestID string) error {
-	displayName, err := identity.ValidateDisplayName(input.DisplayName)
+	displayName, err := account.ValidateDisplayName(input.DisplayName)
 	if err != nil {
 		return repository.ErrInvalid
 	}
 
-	if err = identity.ValidateEmail(input.Email.GetOrZero()); err != nil {
+	if err = account.ValidateEmail(input.Email.GetOrZero()); err != nil {
 		return repository.ErrInvalid
 	}
 
 	input.DisplayName = displayName
-	input.Email = omit.Map(input.Email, identity.NormalizeEmail)
+	input.Email = omit.Map(input.Email, account.NormalizeEmail)
 
 	return s.Manage(
 		ctx,
-		iamclient.PermissionIAMPlatformUsersManage,
-		"",
+		iamclient.PermissionIAMUsersManage,
 		requestID,
 		"user",
 		uuidPointer(userID),
@@ -191,41 +113,91 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 				return repository.ErrInvalid
 			}
 
-			target, err := repository.NewQueries(tx).LockMutableUser(ctx, id)
+			target, err := repository.NewQueries(tx).LockUser(ctx, id)
 			if err != nil {
 				return err
 			}
 
-			metadata["status"] = input.Status
-			if target.AuthEpoch != input.AuthEpoch {
-				return repository.ErrConflict
+			status := input.Status
+			// 配置托管管理员由部署配置决定是否启用，页面停用会与下次启动的配置同步冲突。
+			if target.Configured && status == enum.UserStatusDisabled {
+				return repository.ErrConfiguredUserImmutable
 			}
 
-			if err = repository.UpdateUser(ctx, tx, id, input.DisplayName, input.Email, input.Status); err != nil {
+			if status == enum.UserStatusDisabled && target.Status != enum.UserStatusDisabled && p.UserID == userID {
+				return repository.ErrSelfTarget
+			}
+
+			if status == enum.UserStatusDisabled && target.Status != enum.UserStatusDisabled {
+				if err = s.requireOtherSuperAdmin(ctx, tx, id); err != nil {
+					return err
+				}
+			}
+
+			statusChanged := target.Status != status
+			metadata["status"] = string(status)
+			if err = repository.UpdateUser(ctx, tx, id, input.DisplayName, input.Email, status, statusChanged); err != nil {
 				return err
 			}
 
-			if err = repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
-				RevokeReason: text("account_change")}); err != nil {
-				return err
+			// 状态变化已通过账号版本让旧会话失效；这里再写明撤销原因，便于审计与清理。
+			if statusChanged {
+				return repository.NewQueries(tx).RevokeUserSessions(ctx, repository.RevokeUserSessionsParams{UserID: id,
+					RevokeReason: text("account_status")})
 			}
 
-			return repository.ProtectPlatformAdministrator(ctx, tx)
+			return nil
 		},
 	)
 }
 
-// ResetPassword 重置密码并撤销相关会话。
+// DeleteUser 删除用户资料、角色绑定与会话；配置托管账号不可删除。
+func (s *Service) DeleteUser(ctx context.Context, userID, requestID string) error {
+	return s.Manage(
+		ctx,
+		iamclient.PermissionIAMUsersManage,
+		requestID,
+		"user",
+		uuidPointer(userID),
+		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+			id, err := uuid.Parse(userID)
+			if err != nil {
+				return repository.ErrInvalid
+			}
+
+			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			if err != nil {
+				return err
+			}
+
+			if target.Configured {
+				return repository.ErrConfiguredUserImmutable
+			}
+
+			if p.UserID == userID {
+				return repository.ErrSelfTarget
+			}
+
+			if err = s.requireOtherSuperAdmin(ctx, tx, id); err != nil {
+				return err
+			}
+
+			metadata["username"] = target.Username
+			return repository.DeleteUser(ctx, tx, id)
+		},
+	)
+}
+
+// ResetPassword 管理员重置密码并撤销目标用户的所有会话。
 func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID string) error {
-	hash, err := (identity.PasswordHasher{}).GenerateHash(password)
+	hash, err := (account.PasswordHasher{}).GenerateHash(password)
 	if err != nil {
 		return repository.ErrInvalid
 	}
 
 	return s.Manage(
 		ctx,
-		iamclient.PermissionIAMPlatformUsersManage,
-		"",
+		iamclient.PermissionIAMUsersReset,
 		requestID,
 		"user",
 		uuidPointer(userID),
@@ -235,8 +207,14 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 				return repository.ErrInvalid
 			}
 
-			if _, err = repository.NewQueries(tx).LockMutableUser(ctx, id); err != nil {
+			target, err := repository.NewQueries(tx).LockUser(ctx, id)
+			if err != nil {
 				return err
+			}
+
+			// 配置托管账号的密码只能由配置更新，页面重置会在下次启动被覆盖。
+			if target.Configured {
+				return repository.ErrConfiguredUserImmutable
 			}
 
 			if err = repository.BumpUserAuthEpoch(ctx, tx, id); err != nil {

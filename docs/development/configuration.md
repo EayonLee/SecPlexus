@@ -29,7 +29,7 @@
 
 所有模块共享一个 PostgreSQL，因此迁移必须遵守三条纪律：
 
-1. **版本表放自己 schema 里，命名 `<module>_goose_db_version`**（IAM 现行 `iam_goose_db_version` 即此约定）。一个模块的迁移失败只污染自己的版本历史，不影响其他模块部署。
+1. **版本账本放自己 schema 里**，路径 `<module>.goose_db_version`（IAM 现行 `iam.goose_db_version`）。账本与表结构同生共死：`DROP SCHEMA iam CASCADE` 就是一次完整重置，不会出现「账本记着已应用、schema 却是空的」这种错位；一个模块的迁移历史也不影响其他模块部署。
 2. **统一使用 goose Provider + `WithSessionLocker`**。goose 的 advisory lock ID 是固定常量（`crc64("goose")`），所有模块的迁移天然互斥排队，避免并发 DDL；不要绕开锁自造并行迁移。
 3. **禁止跨 schema 外键**。模块 A 的迁移不得 `REFERENCES` 模块 B 的表——那会把两个模块的迁移顺序、回滚顺序和表生命周期绑死。跨模块引用存标识符，关系通过对方模块的 API 解析。此规则由 `pnpm catalogs:check` 中的 `scripts/migrations-check.mjs` 机器强制：跨 schema `REFERENCES` 或一个模块触碰多个 schema 都会使检查失败。
 
@@ -70,7 +70,7 @@ SPX_WEB_ORIGIN=
 
 同机启动读取实际 Go 监听结果，对未填写的连接位置推导可连接地址；不能将 `0.0.0.0` 用作客户端目标。进程环境、根 `.env` 的明确服务位置保持优先。
 
-`pnpm dev` / `pnpm preview` 默认启动本地全部模块。`pnpm dev web` / `pnpm preview web` 仅启动 Web，连接配置指定的已有 IAM/Console，不执行 Go 迁移或启动其他模块；`pnpm dev iam`、`pnpm dev console` 单独启动指定后端。不会依据 IP 自动猜测拓扑或远程启动进程。
+`make dev` / `make preview` 默认启动本地全部模块。`make dev MODULES="web"` / `make preview MODULES="web"` 仅启动 Web，连接配置指定的已有 IAM/Console，不执行 Go 迁移或启动其他模块；`make dev MODULES="iam"`、`make dev MODULES="console"` 单独启动指定后端。不会依据 IP 自动猜测拓扑或远程启动进程。
 
 Compose 使用相同字段，通过容器服务名连接；公开映射端口由根配置推导。已有静态部署文件随契约同步，本轮不构建/部署容器。
 
@@ -93,32 +93,32 @@ YAML 使用标准参数表达式 `${NAME-default}`（未设置才后备）或 `$
 
 ## 运行
 
-需要Go 1.27.3、Node.js 22.12+（建议24）、pnpm 10.32.1。
+需要Go 1.27.3、Node.js 22.12+（建议24）、pnpm 10.32.1与GNU Make。Make是macOS、Linux和Windows统一的唯一外层入口，配方不依赖POSIX shell；平台差异由Node脚本承担。Windows可用w64devkit、Chocolatey或MSYS2安装GNU Make，并在PowerShell或`cmd.exe`中运行。根`package.json`中的`pnpm`脚本是Make的内部实现，不作为日常公开入口。
 
 ```sh
-cp .env.example .env
-chmod 600 .env
+make config      # 首次运行生成.env，然后停止以便检查
 # 在根 .env 一次填写服务位置、数据库/Redis、管理员密码、CSRF密钥与Console凭证
 # 使用已有PG/Redis，或显式部署基础组件：
-pnpm compose:up postgres redis
-pnpm config:check
+make compose-up SERVICES="postgres redis"
 make dev
 ```
 
 `make dev`不部署基础组件，按配置连接；先离线校验全部选中模块，校验通过后使用同一数据库连接执行迁移/幂等初始化，再启动IAM、Console和Web。配置托管的唯一超级管理员默认 `admin/secplexus`，由 `SPX_IAM_BOOTSTRAP_USERNAME` / `SPX_IAM_BOOTSTRAP_PASSWORD`（对应 IAM YAML 的 bootstrap）指定。显式迁移和 IAM 启动会同步该配置；密码改变时更新哈希并撤销旧会话，配置不变时保持哈希和会话。该账号不能在平台内编辑、停用、移除或修改/重置密码，也不能通过运维重置命令绕过。修改配置后重启所有 IAM 副本，各副本须一致。普通账号仍支持自助改密与管理员重置。密码要求 8–128 个字符，管理员配置同样校验。
 
-本地开发用 PostgreSQL、Redis 是持久资源：`pnpm compose:up postgres redis` 创建或启动同一套容器，数据使用命名卷保存；以后可在 Docker Desktop 中直接启动已有容器，也可重复执行该命令。`make stop` 只停止它们，不删除容器、卷或账号数据。普通启动、停止和测试清理都不能对这套开发资源执行 `down -v`、`rm -v` 或全局 prune；自动化测试另用隔离测试资源（临时数据库或显式测试容器），并仅清理本次测试资源。
+本地开发用 PostgreSQL、Redis 是持久资源：`make compose-up SERVICES="postgres redis"` 创建或启动同一套容器，数据使用命名卷保存；以后可在 Docker Desktop 中直接启动已有容器，也可重复执行该命令。`make stop`只停止它们，不删除容器、卷或账号数据。普通启动、停止和测试清理都不能对这套开发资源执行 `down -v`、`rm -v` 或全局 prune；自动化测试另用隔离测试资源（临时数据库或显式测试容器），并仅清理本次测试资源。
 
 | 命令 | 行为 |
 |---|---|
-| pnpm config:check [iam console web] | 离线检查选中模块，不连接依赖、不迁移、不创建业务日志；省略模块时检查全部 |
+| make config [MODULES="iam console web"] | 离线检查选中模块，不连接依赖、不迁移、不创建业务日志；省略模块时检查全部 |
 | make dev | 迁移、启动三个应用，Go/React代码热更新 |
 | make build | 构建Go二进制到bin/、Web到模块.next/；可无.env，存在时加载Web所属配置 |
-| pnpm preview | 启动后端并预览已构建Web，公共地址需与实际访问地址一致 |
-| pnpm compose:up | 显式构建并部署整套服务 |
+| make preview | 启动后端并预览已构建Web，公共地址需与实际访问地址一致 |
+| make compose-up [SERVICES="postgres redis"] | 显式构建并部署整套服务 |
 | make stop | 停当前工作区应用/容器，保留数据，无需.env |
+| make test | 运行脚本、Go与Web单元测试 |
+| make test-e2e [ARGS="--docker"] / make integration [ARGS="--docker --race"] | 浏览器 E2E / 集成测试 |
 
-所有统一启动入口都先检查.env：缺失则生成并提示检查，不覆盖已有文件。开发编译使用系统临时目录，正常退出后清理，不创建.local。
+所有统一启动入口都先检查.env：缺失则生成并提示检查，不覆盖已有文件。开发编译使用系统临时目录，正常退出后清理，不创建.local。启动器把本次服务根进程写入仓库内`.spx/run.json`（已被Git忽略），`stop`据此按进程树清理；Windows、macOS与Linux使用同一记录。首次生成的`.env`请按平台方式限制权限，例如macOS/Linux的`chmod 600 .env`或Windows的ACL设置。
 
 模块独立运行不自动读取根.env，由进程环境提供密码等值：
 

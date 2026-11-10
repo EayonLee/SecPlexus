@@ -56,13 +56,13 @@ cache:
 # ---- 服务间调用凭证 ----
 # 每个调用方（console 等）有独立 token，且只能请求这里列出的 action。
 # token 同时充当两件事：证明"我是某个内部服务"，以及限定"我能问哪些权限问题"。
-# 它不能替代用户身份——IAM 校验完服务凭证后，还要再校验调用方带来的用户 Cookie。
+# 它不能替代登录用户——IAM 校验完服务凭证后，还要再校验调用方带来的用户 Cookie。
 service_clients:
   console:
     # console 调用 IAM 用的凭证，至少要 32 字节。两边必须配成同一个值。
     token: "${SPX_CONSOLE_IAM_TOKEN-}"
     # console 被允许请求的 action 白名单。不在这个列表里的 action 一律拒绝。
-    actions: [iam.organizations.read]
+    actions: [iam.users.read]
 
 # ---- 账号与登录策略 ----
 auth:
@@ -77,22 +77,29 @@ auth:
   # 会话绝对超时：从登录那一刻算，无论怎么操作到点就失效。默认 8 小时（一个工作日）。
   # 必须 >= 空闲超时，且不超过 168h（7 天）。
   session_absolute_timeout: "${SPX_IAM_SESSION_ABSOLUTE_TIMEOUT-8h}"
-  # 近期认证窗口：标记为"高风险"的操作（改权限、改组织状态、重置密码等）要求在这个时间内重新输过密码。
+  # 近期认证窗口：标记为"高风险"的操作（改角色权限、重置密码等）要求在这个时间内重新输过密码。
   # 默认 30 分钟。调大 = 少打扰，但他人借用已登录的浏览器时风险更高。
   reauth_window: "${SPX_IAM_REAUTH_WINDOW-30m}"
   # 同一账号连续登录失败多少次后锁定。默认 5 次。
   login_max_failures: "${SPX_IAM_LOGIN_MAX_FAILURES-5}"
   # 锁定时长。默认 15 分钟。到期自动解锁，不需要人工干预。
   login_lock_duration: "${SPX_IAM_LOGIN_LOCK_DURATION-15m}"
+  # 同一来源地址每分钟允许的认证请求数（含密码确认）。默认 60。
+  # 调小可以更快压制自动化撞库，但共享出口 IP 的办公网会先被限。
+  login_ip_rate: "${SPX_IAM_LOGIN_IP_RATE-60}"
+  # 同一账号每 15 分钟允许的认证请求数。默认 20。
+  # 与「连续失败锁定」分工：限流压制高频尝试，锁定压制针对单账号的持续猜测。
+  login_account_rate: "${SPX_IAM_LOGIN_ACCOUNT_RATE-20}"
 
-# ---- 唯一超级管理员 ----
-# 由配置指定，不能在应用页面里创建、删除或改密码。改这里要重启所有副本，且所有副本必须一致。
+# ---- 配置托管的内置管理员 ----
+# 每次启动都幂等写入数据库：这里是 username/password 的权威来源，页面不能删除、停用、改密或摘除其内置角色。
+# 改这里要重启所有副本，且所有副本必须一致。
 bootstrap:
-  # 超级管理员用户名。首次启动时创建；之后改名会创建新账号并收回旧账号的超管身份。
+  # 管理员用户名。首次启动时创建；改名会创建或接管目标账号，并收回旧账号的内置标记。
   username: "${SPX_IAM_BOOTSTRAP_USERNAME-admin}"
-  # 超级管理员密码，8-128 个字符。
-  # 这是"持续权威凭据"：改这个值并重启 → 密码被更新、旧会话全部撤销。明文不会出现在响应或日志里。
-  password: "${SPX_IAM_BOOTSTRAP_PASSWORD}"
+  # 管理员密码，12–128 个字符。
+  # 改这个值并重启 → 密码被更新、旧会话全部撤销。明文不会出现在响应或日志里。
+  password: "${SPX_IAM_BOOTSTRAP_PASSWORD-SecPlexus#2026}"
 
 # ---- 数据保留期 ----
 # 过期数据由 `iam maintain` 命令分批清理（每次每表最多 1000 条），需要由部署侧定时调度。

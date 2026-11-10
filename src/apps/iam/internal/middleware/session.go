@@ -39,21 +39,21 @@ func Session(sessions *authentication.Sessions) gin.HandlerFunc {
 
 		loaded, err := sessions.Manager.Load(ctx, token)
 		if err != nil {
-			logging.From(ctx).Error("会话数据加载失败", "event", "session.load_failed", "error", logging.Error(err))
+			logging.From(ctx).Error("Could not load session data", "event", "session.load_failed", "error", logging.Error(err))
 			result.Fail(w, result.CodeServiceUnavailable)
 			c.Abort()
 			return
 		}
 
-		a := &authentication.Attempt{RequestID: id}
+		a := authentication.NewAttempt()
 		committed := false
 		defer func() {
 			// 逻辑会话已落库但响应/缓存未提交时，包括 panic 路径，必须撤销该次新会话。
-			if a.Principal != nil && !committed {
+			if principal, _ := a.Session(); principal != nil && !committed {
 				cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
-				if err := repository.CompensateSession(cleanup, sessions.Store.DB, a.Principal.SessionID); err != nil {
-					logging.From(loaded).Error("未提交会话补偿失败", "event", "session.compensation_failed", "session_id", a.Principal.SessionID, "error", logging.Error(err))
+				if err := repository.CompensateSession(cleanup, sessions.Store.DB, principal.SessionID); err != nil {
+					logging.From(loaded).Error("Could not roll back an uncommitted session", "event", "session.compensation_failed", "session_id", principal.SessionID, "error", logging.Error(err))
 				}
 			}
 		}()
@@ -71,19 +71,19 @@ func Session(sessions *authentication.Sessions) gin.HandlerFunc {
 			case scs.Modified:
 				token, expiry, err := manager.Commit(loaded)
 				if err != nil {
-					logging.From(loaded).Error("会话保存失败，拒绝发送成功响应", "event", "session.commit_failed", "error", logging.Error(err))
+					logging.From(loaded).Error("Could not save session; success response refused", "event", "session.commit_failed", "error", logging.Error(err))
 
 					result.Fail(w, result.CodeServiceUnavailable)
 					return
 				}
 				committed = true
 				manager.WriteSessionCookie(loaded, buffer, token, expiry)
-				if a.Principal != nil {
+				if principal, reauthenticated := a.Session(); principal != nil {
 					event := "auth.login_succeeded"
-					if a.Reauthenticate {
+					if reauthenticated {
 						event = "auth.reauthenticated"
 					}
-					logging.From(loaded).Info("认证会话已持久化", "event", event, "user_id", a.Principal.UserID, "session_id", a.Principal.SessionID)
+					logging.From(loaded).Info("Session saved", "event", event, "user_id", principal.UserID, "session_id", principal.SessionID)
 				}
 			case scs.Destroyed:
 				manager.WriteSessionCookie(loaded, buffer, "", time.Time{})

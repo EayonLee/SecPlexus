@@ -8,6 +8,8 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 - Features, significant designs, contract changes, and migrations need `docs/plans/<request-slug>/spec.md` and `plan.md`; update [the index](docs/plans/README.md). Implement after approval without asking again. Small fixes need no plan.
 - Preserve user changes and task scope; avoid speculative features, unrelated refactoring, upgrades, or framework replacements.
 - Exclude credentials, private project details, and external workspace paths; preserve licenses. Staging, commits, pushes, merges, deployment, and delegation require current authorization, except Computer Use delegation authorized below.
+- Decisions need evidence, not preference. Before adopting a convention, structure, library rule or fix, find how widely used projects or official documentation do it (upstream repos, official docs, standards) and name the source in the plan, commit message or review reply. If evidence is missing or conflicting, say so and keep the smaller change.
+- Assume large data volume, high concurrency, and hostile input. For any table, endpoint, job or cache, state the expected growth, the query and lock the hot path takes, what happens on retry or partial failure, and how it degrades; if a risk is real but out of scope, record it as a gap instead of ignoring it.
 
 ## Project conventions
 
@@ -21,6 +23,23 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 - Read environment variables only during configuration loading. Assemble dependencies at startup and pass explicitly; context carries cancellation, deadlines, and request data, not dependencies. Extract shared code only for actual cross-app reuse.
 - Servers are always UTC. Store and transmit time in `timestamptz`/UTC, call `.UTC()` before persisting, and never read `time.Local`. A deployment-level `TZ` environment variable must not change server behaviour: a local offset leaks into serialized timestamps and log lines while the database stays UTC, and it still cannot express two users reading the same record in different zones. Time zone is a display concern, resolved from the user's preference and then the browser; see [the time zone plan](docs/plans/timezone-and-user-preference/spec.md).
 - Duration semantics (session idle, lockout window, retention) use intervals, not dates, and are independent of time zone. A scheduled business entity that means "09:00 local" must carry its own `timezone` column bound at creation, not read a global setting.
+
+## Logging
+
+Follow the structured logging conventions used by large Go services (Kubernetes, Prometheus) and the OWASP Logging Cheat Sheet. Logs are operational diagnostics; security audit facts still belong in `audit_events`.
+
+- Emit structured `log/slog` records through `logging.From(ctx)`; never use `fmt.Print`, `log.Printf`, or Gin's default logger for business events. Add request fields with `logging.With` and pass context inward.
+- Write log messages and event values in plain, simple English, never Chinese: short sentences, common words, one idea per message, first letter capitalized, no trailing period. A reader with basic English must understand it without a dictionary. Prefer `Could not save session` over `Session persistence operation aborted`, and avoid rare or literary words (`terminate`, `facilitate`, `aforementioned`, `utilize`). Technical terms (`PostgreSQL`, `CSRF`, `advisory lock`) and machine fields (`event`, `request_id`) keep their exact spelling.
+- Log at ownership boundaries, once per outcome: HTTP middleware logs one completion record; services log domain outcomes; repository/query logging logs database failures; bootstrap logs readiness/startup. Do not log the same failure at every layer.
+- Required security/operation events: authentication success and failure, reauthentication failure, authorization denial, session creation/revocation, management mutations, dependency readiness, migration/startup, external calls and background jobs.
+- Use stable event names in `snake_case` as `<domain>.<subject>.<outcome>` (for example `auth.login_failed`, `iam.management.completed`). Keep stable fields: `event`, `request_id`, `user_id`, `session_id`, `action`, `target_type`, `target_id`, `outcome`, `duration_ms`, `error`.
+- Levels: `Error` for dependency/database/invariant failures; `Warn` for denied, rejected, throttled or retryable operations; `Info` for committed state changes and security successes; `Debug` for diagnostics. Validation and expected user errors are not `Error`.
+- Never log passwords, password hashes, session tokens, cookies, CSRF values, Authorization headers, API keys, request bodies, SQL parameters or full PII. Use `logging.Error(err)` for controlled error fields; never log `err.Error()` blindly. PostgreSQL diagnostics may include `sqlstate`, `column`, `constraint` and `table`, but never `Detail` or row values.
+- Wrap errors with `%w`; log once at the boundary that decides the outcome and preserve the error for callers. Do not add a log statement that only repeats an error already logged by the owning layer.
+- Security audit and operational logs are different products: write durable security facts through `audit_events`; use logs for correlation, diagnosis and operational visibility.
+- Tests assert stable event names and fields, never human-facing prose; logging tests must also assert that secrets do not appear in output.
+
+References: [Kubernetes logging conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md), [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html), [Go slog](https://pkg.go.dev/log/slog).
 
 ## Style Guide
 
@@ -43,7 +62,10 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 - Run `gofmt`/`goimports`. Leave blank lines between functions/methods (before their doc comments) and between logical steps. Use idiomatic names, explicit errors/context, and interfaces only for concrete boundaries; separate routing from handlers.
 - Use Chinese Go comments: exported types/functions start with their names; key fields explain purpose, units, and constraints, aligned by `gofmt`. Explain non-obvious authentication, transaction, and concurrency constraints, not every statement.
-- Database columns use `snake_case`.
+- Database columns use `snake_case`. Table structure, types, closed value sets, comments, indexes and migration rules follow [database design](docs/development/database-design.md); module layout, layering, dependency direction and naming follow [backend structure](docs/development/backend-structure.md). Both apply to every future module, not only IAM.
+- A closed set of stored values uses a `CHECK` constraint plus typed constants in the module's `internal/enum` package; Go comparisons and assignments use those constants, never string literals. HTTP `oneof` binding tags restate the values because tags are compile-time strings, so a test asserts the tag vocabulary equals the constant set.
+- Every table and every business column carries a `COMMENT ON` statement explaining meaning, value range and constraint, added by a forward migration rather than by editing an applied one.
+- Use cases accept their own input types from `service/input.go` with already-parsed values; handlers bind the HTTP DTO and map it. `service` must not import `internal/model` or `*gin.Context`. Tables whose row count grows with time use keyset pagination; offset pagination is only for bounded administrative lists and needs a cap.
 
 ## Testing and delivery
 
@@ -117,4 +139,4 @@ Use the following original prompt for requested UI work within the approved scop
 
 ## References
 
-[Code standard](.agents/skills/spx-mode/SKILL.md) · [Design system](DESIGN.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/design/architecture/README.md) · module READMEs.
+[Code standard](.agents/skills/spx-mode/SKILL.md) · [Database design](docs/development/database-design.md) · [Backend structure](docs/development/backend-structure.md) · [Design system](DESIGN.md) · [shadcn](.agents/skills/shadcn/SKILL.md) · [Plans](docs/plans/README.md) · [Architecture](docs/design/architecture/README.md) · module READMEs.

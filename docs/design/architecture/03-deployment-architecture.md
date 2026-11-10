@@ -61,13 +61,13 @@ IAM单端口、统一 `/api/v1/iam` 前缀；用户接口与服务鉴权按路�
 
 根`make dev`启动三个应用并热更新，只连接配置的PG/Redis；不会根据是否填写连接字段来猜测或部署基础组件。开发编译使用系统临时目录并清理。
 
-模块可独立启动，显式`--config`选择自己的config.yaml；省略时读取工作目录下config.yaml。根.env只是统一入口加载的环境，不要求模块依赖根脚本。`make build`按模块产出Go二进制及Next.js的`.next/`服务端与客户端产物。停止按工作区归属识别进程，不依赖某个dev标记文件。
+模块可独立启动，显式`--config`选择自己的config.yaml；省略时读取工作目录下config.yaml。根.env只是统一入口加载的环境，不要求模块依赖根脚本。`make build`按模块产出Go二进制及Next.js的`.next/`服务端与客户端产物。停止优先读取启动器写入的`.spx/run.json`进程登记并终止进程树；无登记时按工作区监听器识别（Windows 使用 Next 开发锁）回退，不依赖长期运行的标记服务。
 
 Go配置按app、实际依赖、业务策略与logging分组，YAML 内声明环境参数及默认值，通过成熟组件逐值展开，再由 Viper/mapstructure 严格解码和校验。密码和凭证直接通过进程环境或部署Secret注入；只有TLS等实际文件材料保留文件形式。Web使用Next.js原生环境配置，NEXT_PUBLIC_*仅用于公开值。
 
 ## Compose
 
-`pnpm compose:up`显式部署PG、Redis、一次性迁移、IAM、Console、Web；`pnpm compose:up postgres redis`仅启动基础组件。两者使用同一项目名和数据卷；可通过Docker原生COMPOSE_PROJECT_NAME管理部署命名，不引入应用instance_id。
+`make compose-up`显式部署PG、Redis、一次性迁移、IAM、Console、Web；`make compose-up SERVICES="postgres redis"`仅启动基础组件。两者使用同一项目名和数据卷；可通过Docker原生COMPOSE_PROJECT_NAME管理部署命名，不引入应用instance_id。
 
 PG/Redis仅绑定本机端口并持久化卷；内部IAM/Console不映射宿主端口，浏览器通过Web同源入口访问。服务按真实健康检查和迁移成功依赖启动；没有“连接为空则改用捆绑组件”的隐式行为。
 

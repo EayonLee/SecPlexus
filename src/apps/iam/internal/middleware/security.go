@@ -73,7 +73,7 @@ func NewSecurity(cfg config.Config) (*Security, error) {
 		csrf.CookieName("spx_csrf"),
 		csrf.RequestHeader("X-CSRF-Token"),
 		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logging.From(r.Context()).Warn("CSRF 校验拒绝请求", "event", "security.csrf_rejected")
+			logging.From(r.Context()).Warn("CSRF check rejected the request", "event", "security.csrf_rejected")
 			result.Fail(w, result.CodeCSRFInvalid)
 		})),
 	)
@@ -98,7 +98,7 @@ func (s *Security) Protect(next http.Handler) http.Handler {
 		if !safeMethod(r.Method) {
 			allowedHost, ok := s.origins[r.Header.Get("Origin")]
 			if !ok {
-				logging.From(r.Context()).Warn("请求来源不符合配置", "event", "security.origin_rejected")
+				logging.From(r.Context()).Warn("Request origin is not allowed", "event", "security.origin_rejected")
 				result.Fail(w, result.CodeOriginInvalid)
 				return
 			}
@@ -124,7 +124,7 @@ func (s *Security) ServiceClient(r *http.Request, action string) bool {
 
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || len(token) < 32 || len(token) > 512 {
-		logging.From(r.Context()).Warn("服务调用凭证格式不符合要求", "event", "security.client_rejected", "reason", "credential_invalid")
+		logging.From(r.Context()).Warn("Service credential format is invalid", "event", "security.client_rejected", "reason", "credential_invalid")
 		return false
 	}
 
@@ -134,13 +134,13 @@ func (s *Security) ServiceClient(r *http.Request, action string) bool {
 		if err == nil && subtle.ConstantTimeCompare(digest[:], expected) == 1 {
 			allowed := slices.Contains(client.Actions, action)
 			if !allowed {
-				logging.From(r.Context()).Warn("服务调用方无权执行目标能力", "event", "security.client_action_rejected", "client_id", client.ID, "action", action)
+				logging.From(r.Context()).Warn("Service client is not allowed to run this action", "event", "security.client_action_rejected", "client_id", client.ID, "action", action)
 			}
 			return allowed
 		}
 	}
 
-	logging.From(r.Context()).Warn("服务调用凭证未匹配", "event", "security.client_rejected", "reason", "credential_unknown")
+	logging.From(r.Context()).Warn("Service credential did not match", "event", "security.client_rejected", "reason", "credential_unknown")
 	return false
 }
 

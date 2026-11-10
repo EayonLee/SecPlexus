@@ -1,10 +1,8 @@
 # SecPlexus IAM
 
-平台的身份与授权服务。管账号、组织、角色、权限、登录会话和身份审计。
+平台的账号与授权服务。管账号、角色、权限、登录会话和操作审计。
 
-所有其他模块都向它要授权结论，自己不做身份判断。
-
-![架构](../../../docs/assets/iam/architecture.svg)
+所有其他模块都向它要授权结论，自己不做账号判断。
 
 ## 它是什么
 
@@ -12,17 +10,17 @@ IAM 是整个平台里唯一知道「你是谁、你能干什么」的地方。
 
 用户登录拿到 HttpOnly Cookie。此后每个请求，业务模块把 Cookie 转给 IAM，IAM 回答两件事，这个人是谁，这个动作允不允许。业务模块不存用户表，不校验密码，不判断角色。
 
-用 Go + Gin 实现，不部署 Keycloak、Zitadel 这类独立身份产品。认证、用户目录、授权在同一个进程里。大厂拆成独立用户中心是被几十个系统几万员工的规模逼出来的部署拆分，不是领域本该拆。我们是一家公司内部的部门级隔离，拆开只剩同步和一致性成本。Grafana、GitLab、Django、TheHive 都是内置合并的。
+用 Go + Gin 实现，不部署 Keycloak、Zitadel 这类独立账号产品。认证、用户目录、授权在同一个进程里。大厂拆成独立用户中心是被几十个系统几万员工的规模逼出来的部署拆分，不是领域本该拆。我们就一套安全运营团队，拆开只剩同步和一致性成本。Grafana、GitLab、Django、TheHive 都是内置合并的。
 
 ## 它管什么，不管什么
 
 | 管 | 不管 |
 |---|---|
 | 账号、密码、登录会话 | 业务资源的属主和可见性 |
-| 组织树、用户关系 | 审批状态机 |
-| 自定义角色和权限分配 | 菜单和按钮长什么样 |
-| 登录、改密、身份审计 | 具体某条 Case 该不该给你看 |
-| 回答「这个 action 在哪个组织允不允许」 | 业务模块内部的状态检查 |
+| 用户与角色、角色与权限的绑定 | 审批状态机 |
+| 角色与权限的增删改 | 菜单和按钮长什么样 |
+| 登录、改密、审计 | 具体某条 Case 该不该给你看 |
+| 回答「这个用户有没有这个 action 的权限」 | 业务模块内部的状态检查 |
 
 IAM 回答的是「你有没有这个能力」，不是「这条数据归不归你」。后者必须由资源所属模块自己查真实归属，因为只有它知道那张表长什么样。
 
@@ -32,90 +30,88 @@ IAM 回答的是「你有没有这个能力」，不是「这条数据归不归�
 
 **用户**是自然人，全局唯一。一个人的账号在整个平台只有一个。
 
-**组织**是数据隔离的边界。一个用户可以属于多个组织，在每个组织里是独立的用户关系，持有独立的角色。
+**角色**是权限的容器。角色只有名称、说明和权限三项，没有业务代码、没有类型；除内置的超级管理员外不预设任何角色，需要什么角色由使用者按需创建并勾选权限。
 
-用「组织」不用「租户」，因为我们做的是公司内部分层级的数据控制，不是 SaaS 多客户。TheHive 用 organisation，Grafana 用 organization，GitHub 用 organization，同一个意思。
+**权限**是扁平的能力键，共 7 项。没有分级作用域，也没有作用域参数。
 
-**角色**是权限的容器。角色只有名称、说明和权限三项，没有业务代码、没有内置与自定义之分，也不预设任何角色；组织需要什么角色，由使用者按需创建并勾选权限。
+授权只有一条路径：
 
-![身份模型](../../../docs/assets/iam/identity-model.svg)
+```
+用户 --user_roles--> 角色 --role_permissions--> 权限
+```
 
-### 组织是树，不限深度
+用户直接持有角色，没有中间关系对象；角色全局存在，不属于任何范围。没有继承、没有作用域、没有按范围裁剪的判定分支。
 
-组织支持父子层级，不设业务深度上限。全局只有一个根，标识固定为 `master`。新建组织不指定父节点时默认挂到根下面。
-
-约束由数据库触发器强制，不是应用层记得检查
-
-- **深度计算**：子节点的 depth 由父节点推导，不能手写
-- **禁止成环**：把自己的后代设成自己的父节点会被拦下
-- **溢出兜底**：`CHECK(depth BETWEEN 0 AND 1000)` 只防 smallint 溢出，不是业务上限
-
-改挂父组织后，整棵子树的 depth 在同一事务内由服务层重算。
-
-标识（slug）创建后不可修改，它是 URL 和审计里的稳定引用。名称和父子关系可以改。
-
-删除组织有两个前置条件，不满足就拒绝：不能是根组织、不能有子组织。组织内的用户关系、角色与授权随组织一并删除，因此不要求先清空用户。
-
-权限沿祖先链向下继承：在任一祖先组织获得的权限对其全部后代生效，反向不成立。
+产品是一台设备、一个安全运营团队、一套权限：没有外部租户，没有多客户隔离。因此模型里没有租户、范围或关系中间层，也就不存在「先解析范围再合并授权」的递归判定。
 
 ### 多角色，权限取并集
 
-一个人在一个组织里可以同时是「管理员」和「审计员」。有效权限是所有角色的并集。
+一个人可以同时是「管理员」和「审计员」。有效权限是所有角色的并集。
 
 刻意这么设计。现实中同一个人经常身兼多职，强制单角色会逼出「为每种组合建一个角色」的组合爆炸，最后角色表里躺着「管理员+审计员」「管理员+只读」这类垃圾。
 
-首版没有 deny 优先级，没有角色继承，没有用户直授。要收回权限就把他从角色里移除。
+首版没有 deny 优先级，没有角色继承，没有用户直授。要收回权限就把用户从角色里移除，或把权限从角色里去掉。
 
 ### 权限目录在代码里
 
-13 个权限，5 个平台级、8 个组织级。
+7 个扁平权限键：
 
 ```
-平台级（仅超级管理员）
-  iam.platform.users.read              查看平台用户
-  iam.platform.users.manage            管理平台用户与重置密码
-  iam.platform.organizations.read      查看平台组织
-  iam.platform.organizations.manage    管理组织与组织管理员
-  iam.platform.audit.read              查看全部审计
-
-组织级（组织内授权）
-  iam.organizations.read               查看组织信息
-  iam.organizations.manage             修改组织信息（经平台组织管理入口）
-  iam.users.read                       查看组织用户
-  iam.users.manage                     管理组织用户
-  iam.roles.read                       查看角色及权限
-  iam.roles.manage                     编辑自定义角色
-  iam.roles.assign                     为用户分配自定义角色
-  iam.audit.read                       查看所属组织审计
+iam.users.read       查看用户与角色归属        normal   无需近期认证
+iam.users.manage     创建、修改、删除用户      high     需近期认证
+iam.users.roles      分配用户角色              high     需近期认证
+iam.users.reset      重置用户密码              high     需近期认证
+iam.roles.read       查看角色与权限目录        normal   无需近期认证
+iam.roles.manage     创建、修改、删除角色      high     需近期认证
+iam.audit.read       查看审计事件              normal   无需近期认证
 ```
+
+高风险键标记 `requires_recent_auth`：操作者必须在近期认证窗口（默认 30 分钟）内确认过密码，
+否则返回 `iam.recent_auth_required`。个人资料页与每个管理表单共用同一个确认框，确认后自动重放该次提交。
 
 清单在 `internal/authorization/permissions.json`，版本化管理。数据库里有一份运行时投影，启动时同步。
 
-同步带校验，如果某个权限的 module、resource_type、action 或 scope 变了但没有配套迁移，启动直接失败 `permission meaning changed without a reviewed migration`。不允许悄悄改变语义。
+权限键固定为 `module.resource.action`，这三段不单独存列而是由键解析得到：少一份可以漂移的副本。
+目录里删掉的键不会消失，而是在下次启动时标记为 `retired`——历史授权保留，但立即不再生效，
+因此「删权限」不会留下一个仍然可用的幽灵键。
 
-模块开发者定义「能做什么」，组织管理员决定「谁能做」。组织管理员没法凭空造出一个后端不存在的权限。
+同步只按 `permission_key` upsert 元数据；键本身是唯一稳定标识，键变化等同新增权限，旧键在下次启动时标记为 `retired`。已执行的 SQL 迁移不得修改；表结构变化必须新增前向迁移，不能要求部署侧删除 schema 或 Goose 版本表。
 
-委派有上限。操作者只能把「自己当前持有 且 目录标记 delegable」的组织权限授予别人。持有 `iam.roles.assign` 不等于拥有全部业务权限。
+模块开发者定义「能做什么」，应用使用者决定「谁能做」。使用者没法凭空造出一个后端不存在的权限。
+
+委派有上限。操作者只能把「自己当前持有 且 目录标记 delegable」的权限授予别人。持有 `iam.roles.manage` 不等于拥有全部业务权限。
 
 ### 一次授权判定怎么走的
 
-![授权流程](../../../docs/assets/iam/authorization-flow.svg)
-
 五个步骤，全在同一个数据库事务里。
 
-只做请求内合并，不跨请求缓存。这是刻意的。一旦缓存「允许」结果，撤权就不是即时的，用户被移出组织后还能继续访问一段时间。不存在 Redis 故障后继续用旧权限的降级路径。
+1. 校验服务凭证与 action 白名单（服务调用场景）。
+2. 加载用户会话，校验状态、token 摘要与 `auth_epoch`。
+3. 取该用户经 `user_roles` 持有的全部角色，合并 `role_permissions` 得到有效权限。
+4. 判断目标 action 是否在有效权限内，并检查 `requires_recent_auth` 的近期认证窗口。
+5. 写审计并返回决定。
+
+只做请求内合并，不跨请求缓存。这是刻意的。一旦缓存「允许」结果，撤权就不是即时的，用户被移出角色后还能继续访问一段时间。不存在 Redis 故障后继续用旧权限的降级路径。
 
 依赖不可用时返回 503，绝不放行。
 
-### 超级管理员由配置指定
+判定结果只有 `{allowed, decision_id, principal}`：扁平模型没有范围字段，调用方也不需要再比对作用域。
 
-唯一超级管理员来自 `config.yaml` 的 `bootstrap.username/password`。
+### 内置数据来自数据库
 
-应用里没有接口能创建、删除、改密码或授予这个身份。本人也不能自助改密。换人只能改配置然后重启所有副本。
+三类内置数据在启动时按配置幂等写入，前端只读接口，不在前端写死任何内置行：
 
-它是最后的兜底。如果能被页面修改，一个被盗的普通管理员账号就能把自己提权成超管，整个权限体系归零。
+1. **权限目录**：以代码中的 `permissions.json` 为准，补充缺失键，更新描述、风险级别与可委派等元数据。
+2. **超级管理员角色**：`name='超级管理员'`、`builtin=true`，权限是权限目录全部有效键；只补不删。该角色不可改名称、不可改说明、不可改权限、不可删除。
+3. **配置管理员**：`bootstrap.username/password` 写入 `users.configured=true`，并授予超级管理员角色；改配置后下次启动更新用户名/密码并撤销旧会话。
 
-改配置会递增身份版本、撤销旧身份的所有会话、写审计。明文不进响应和日志。
+标记写在数据里：`roles.builtin` 标记内置角色，`users.configured` 标记配置托管账号。数据库对两列各有一个部分唯一索引（`roles_single_builtin`、`users_single_configured`），保证各只有一行；服务层据标记拒绝改名、改权限、删除、停用与页面改密。
+
+超级管理员就是「持有内置超级管理员角色」这一条数据，不再有 `users.is_super_admin`。
+
+它是最后的兜底。配置管理员不能在页面被删除、停用或改密码：如果能被页面修改，一个被盗的普通管理员账号就能把自己提权成超管，整个权限体系归零。
+
+明文不进响应和日志。
 
 ## 认证与会话
 
@@ -138,7 +134,7 @@ IAM 回答的是「你有没有这个能力」，不是「这条数据归不归�
 | MFA | ❌ 未实现 |
 | API Token / SCIM | ❌ 未实现 |
 
-**没有公开注册是刻意的。** 账号由管理员创建，平台超管建全局账号，组织管理员建组织用户。谁能进系统必须有人负责。如果开放注册，任何知道域名的人都能建账号。
+**没有公开注册是刻意的。** 账号由持有 `iam.users.manage` 的管理员创建，超级管理员来自启动配置。谁能进系统必须有人负责。如果开放注册，任何知道域名的人都能建账号。
 
 ### 会话机制
 
@@ -153,7 +149,7 @@ IAM 回答的是「你有没有这个能力」，不是「这条数据归不归�
 
 每个后续请求
   → 加载 Cookie
-  → 查逻辑会话：状态 / token 摘要 / 身份版本 / 双超时
+  → 查逻辑会话：状态 / token 摘要 / 账号版本 / 双超时
   → 续期 idle_expires_at（不超过 absolute）
 ```
 
@@ -163,7 +159,7 @@ IAM 回答的是「你有没有这个能力」，不是「这条数据归不归�
 |---|---|
 | **滚动续期** | 每次请求把空闲超时往后推，默认 30 分钟 |
 | **令牌轮换** | 登录和二次认证时换新 token，旧逻辑会话标记撤销 |
-| **身份版本** | 改密、停用、撤超管时递增 `auth_epoch`，所有旧会话立即失效 |
+| **账号版本** | 改密、停用、改配置时递增 `auth_epoch`，所有旧会话立即失效 |
 
 `absolute_expires_at` 是硬上限，默认 8 小时，滚动续期不能突破它。
 
@@ -236,7 +232,7 @@ CSRF token 放在独立 Cookie `spx_csrf`，写请求必须带 `X-CSRF-Token` he
 
 **Console 不是网关，不是权限中转站。** 它只是安全运营业务模块，按自身业务需要调用其他模块。其他模块要验权限，直接调 IAM。
 
-这一点在架构文档里写死了（`docs/design/architecture/02-technical-architecture.md` 第 153 行），也是代码事实，Web 的代理白名单里 `iam` 和 `console` 是并列的两个模块前缀，没有谁包着谁。
+这一点在架构文档里写死了（`docs/design/architecture/02-technical-architecture.md`），也是代码事实，Web 的代理白名单里 `iam` 和 `console` 是并列的两个模块前缀，没有谁包着谁。
 
 ### IAM 的请求链路
 
@@ -252,7 +248,7 @@ IAM（Go + Gin，:8081）
    └─▶ Redis（限流计数）
 ```
 
-Web 只做转发，不解析身份，不合并权限。Cookie 原样传。
+Web 只做转发，不解析账号，不合并权限。Cookie 原样传。
 
 单端口，用户接口和服务接口共用 `/api/v1/iam` 前缀，按路由分别认证。应用内明文 HTTP，HTTPS 由外层反向代理终止。
 
@@ -261,7 +257,7 @@ Web 只做转发，不解析身份，不合并权限。Cookie 原样传。
 | 用途 | 选择 | 为什么 |
 |---|---|---|
 | HTTP | Gin | 原生路由、中间件、错误链、SSE |
-| ORM | GORM | 授权判定要在事务里同时读会话、组织、用户、权限四张表，手写有大量重复字段映射 |
+| ORM | GORM | 授权判定要在事务里同时读会话、用户、角色与权限几类表，手写有大量重复字段映射 |
 | 驱动 | pgx v5 | GORM 的 postgres driver 走它，SCS 和原生 SQL 共用同一个池 |
 | 会话 | SCS | Cookie 编码、续期、store 接口现成 |
 | 密码 | Argon2id | 内存硬，抗 GPU 爆破 |
@@ -270,35 +266,33 @@ Web 只做转发，不解析身份，不合并权限。Cookie 原样传。
 | 命令 | Cobra | 七个子命令 |
 | 配置 | Viper + mapstructure | YAML 声明环境占位，严格类型解码 |
 
-### 十一张表
+### 九张表
 
 ```
-iam.users                 用户主表（含 timezone、email_normalized）
-iam.password_credentials   密码哈希、失败计数、锁定
-iam.organizations          组织（含 parent_id、depth 树结构）
-iam.organization_users      用户 ↔ 组织
-iam.roles                  角色（系统 + 自定义）
-iam.permissions            权限目录（运行时投影）
-iam.role_permissions       角色 ↔ 权限
-iam.organization_user_roles 用户 ↔ 角色
-iam.user_sessions          逻辑会话（可枚举、可撤销）
-iam.scs_sessions           SCS 的 Cookie 存储
-iam.audit_events           审计
+iam.users                 用户主表（含 timezone、configured、auth_epoch、email_normalized）
+iam.password_credentials  密码哈希、失败计数、锁定
+iam.roles                 角色（全局；内置标记 builtin）
+iam.permissions           权限目录（运行时投影；键即标识）
+iam.role_permissions      角色 ↔ 权限
+iam.user_roles            用户 ↔ 角色
+iam.user_sessions         逻辑会话（可枚举、可撤销）
+iam.scs_sessions          SCS 的 Cookie 存储
+iam.audit_events          审计
 ```
 
 三条值得知道的设计
 
 **密码单独一张表**：登录失败计数要用 `FOR UPDATE` 锁行。合进 `users` 的话，每次登录都会锁用户行，挡住所有读操作。
 
-**两张会话表不是重复**：`scs_sessions` 只存 Cookie 指向的会话 ID，`user_sessions` 存完整状态（token 摘要、身份版本、双超时）。Cookie 带指针，状态在库里。
+**两张会话表不是重复**：`scs_sessions` 只存 Cookie 指向的会话 ID，`user_sessions` 存完整状态（token 摘要、账号版本、双超时）。Cookie 带指针，状态在库里。
 
-**外键都带 org_id 复合约束**：`role_permissions(org_id, role_id)` 指向 `roles(org_id, id)`。从存储层杜绝跨组织串用，比应用层校验可靠。
+**绑定直接指向全局对象**：`user_roles(user_id, role_id)` 的主键就是唯一绑定，`role_permissions(role_id, permission_key)` 指向角色与权限目录。没有作用域列，从存储层杜绝重复授予与悬空权限。
 
-### 角色和组织没有启用/停用状态
+### 角色和用户的状态语义
 
-未删除即可用。只有用户和用户关系有 active/disabled。
+角色没有 status（存在即可用，内置角色只读）。用户有 `active` / `disabled`。
 
-这个简化是有意的。多一个 status 就多一套状态机，每个查询都要带 `status='active'` 条件，而这些条件经常被忘记。删掉之后「存在即有效」是唯一需要记住的规则。
+这个简化是有意的。多一个状态就多一套状态机，每个查询都要带 `status='active'` 条件，而这些条件经常被忘记。删掉之后「存在即有效」是唯一需要记住的规则；用户状态只用于停用账号并撤销其会话。
 
 ## 别的服务怎么用
 
@@ -315,9 +309,7 @@ defer client.Close()
 
 decision, err := client.Authorize(
     ctx, r,
-    iamclient.PermissionIAMOrganizationsRead,
-    orgID,
-    nil,
+    iamclient.PermissionIAMUsersRead,
 )
 ```
 
@@ -329,14 +321,14 @@ decision, err := client.Authorize(
 decision.Allowed       // 允不允许
 decision.DecisionID    // 排障和审计关联
 decision.Principal     // 用户是谁
-decision.Scope         // platform 或 organization + org_id
+decision.Scope         // {kind:"platform"}，扁平模型只有这一个范围
 ```
 
 `iamclient` 包里除 `Authorize` 外只有 `Close`。类型定义在 `types.go`，权限常量是生成代码。
 
 ### 两条铁律
 
-**服务凭证不能替代用户身份。** 每个调用方有自己的 token，在 IAM 的 `service_clients` 里配置，同时限定能问哪些 action。token 只证明「我是 Console」，不证明「我是张三」。IAM 验完服务凭证后，还要再验用户 Cookie。
+**服务凭证不能替代登录用户。** 每个调用方有自己的 token，在 IAM 的 `service_clients` 里配置，同时限定能问哪些 action。token 只证明「我是 Console」，不证明「我是张三」。IAM 验完服务凭证后，还要再验用户 Cookie。
 
 **用户 Cookie 不能替代服务凭证。** 反过来也不行。两条通道独立，缺一不可。
 
@@ -346,14 +338,14 @@ decision.Scope         // platform 或 organization + org_id
 service_clients:
   console:
     token: "${SPX_CONSOLE_IAM_TOKEN-}"
-    actions: [iam.organizations.read]
+    actions: [iam.users.read]
 ```
 
 `actions` 是白名单，不在列表里的 action 一律拒绝。token 用 SHA-256 摘要比对，常数时间比较，防时序攻击。
 
 ### 当前接入情况
 
-**已接入，Console。** 它调 IAM 验证组织访问和 SSE 授权，是唯一配了 `service_clients` 的模块。
+**已接入，Console。** 它调 IAM 验证会话与 SSE 授权，是唯一配了 `service_clients` 的模块。
 
 **规划中，其余模块。** 按架构设计，`llm-gateway`、`collector`、`correlator`、`agent-runtime`、`soar`、`scheduler` 等后续模块都会各自接入 IAM，方式完全一样，在自己的 `config.yaml` 里配一个 `service_clients` 条目，拿一个独立 token，声明自己需要问哪些 action。
 
@@ -368,26 +360,26 @@ service_clients:
 service_clients:
   your-module:
     token: "${SPX_YOUR_MODULE_IAM_TOKEN-}"
-    actions: [iam.organizations.read]
+    actions: [iam.users.read]
 ```
 
 ```go
 // 2. 调用方用 iamclient
 client, _ := iamclient.New(iamURL, yourToken)
-decision, err := client.Authorize(ctx, r, action, orgID, nil)
+decision, err := client.Authorize(ctx, r, iamclient.PermissionIAMUsersRead)
 ```
 
 不用改 IAM 代码，不用重启其他模块。
 
 ### 调用方必须做和不该做
 
-必须做，把返回的 `Scope` 和路由里的 `org_id` 比对，不一致就拒绝。这是防中间人篡改组织范围的最后一道闸。
+必须做，需要哪个权限就在自己的路由声明里写死权限键，不从请求参数或浏览器提交的值取 action。IAM 只回答「这个已声明的动作允不允许」。
 
-必须做，真实资源的归属自己查。IAM 说「你在组织 A 有读权限」，不代表「组织 A 里这条 Case 你能看」。
+必须做，真实资源的归属自己查。IAM 说「这个用户有 `iam.users.read`」，不代表「这条业务记录他能看」。
 
 不该做，读 IAM 的表。不该做，导入 IAM 的 `internal` 包。不该做，自己实现一套角色判断。
 
-Console 就是这么接的，`src/apps/console/internal/handler/server.go` 里只有一次 `s.IAM.Authorize` 调用，其余全是业务逻辑。
+Console 就是这么接的，`src/apps/console/internal/handler/server.go` 里只有 `s.IAM.Authorize` 调用，其余全是业务逻辑。
 
 ## 怎么跑起来
 
@@ -426,27 +418,25 @@ go run ./src/apps/iam/cmd reset-password --user-id <uuid> --config src/apps/iam/
 
 `revoke-after-restore` 必须在数据库恢复后、开放流量前跑。否则备份里的旧会话会复活。
 
-`reset-password` 是运维兜底，交互式无回显输入，走和普通改密一样的用例，撤销会话、写审计，不会顺便提权。
+`reset-password` 是运维兜底，交互式无回显输入，走和普通改密一样的用例，撤销会话、写审计，不会顺便提权。配置托管的账号不走这条路径。
 
 ### 首次启动做了什么
 
 ```
 迁移建表
       ↓
-同步权限目录和系统角色
+同步权限目录 + 内置超级管理员角色（builtin=true）
       ↓
-账号表为空？
-   ├─ 是 → 建超管 + 根组织（slug=master）
-   └─ 否 → 同步配置里的超管，身份变了就撤会话
+写入/更新配置管理员（configured=true）并授予超级管理员角色
       ↓
-校验 schema 版本和唯一超管存在
+校验 schema 版本与唯一超管存在
       ↓
 serve 就绪
 ```
 
 没有安装页面。管理员是配置给的，直接去登录页登。
 
-迁移、种子、首账号初始化都可重试，并发取 advisory 锁。初始管理员和根组织在同一事务创建。
+迁移、种子、首账号初始化都可重试，并发取 advisory 锁。配置管理员与内置角色在初始化阶段落定；改配置时更新凭据、递增账号版本并撤销旧会话。
 
 ### 配置
 
@@ -477,7 +467,7 @@ SPX_POSTGRES_PASSWORD       数据库密码
 
 ## API 一览
 
-35 个业务路由加 1 个服务路由，全部在 `/api/v1/iam` 下。另有 `/health/ready` 就绪检查。
+25 个业务路由加 1 个服务路由，全部在 `/api/v1/iam` 下。另有 `/health/ready` 就绪检查。
 
 **认证**
 
@@ -491,54 +481,43 @@ POST /auth/reauthenticate    二次认证
 **本人**
 
 ```
-GET   /me                    本人摘要 + 组织列表 + 能力投影
+GET   /me                    账号、角色与有效权限
 PATCH /me                    更新时区偏好
 POST  /me/password           本人改密
 ```
 
-**平台账号（超管）**
+**用户**
 
 ```
-GET   /users                 列表
-POST  /users                 创建
-GET   /users/:id             详情
-PATCH /users/:id             更新
-POST  /users/:id/reset-password   重置密码
+GET    /users                      列表（含角色）
+POST   /users                      创建
+GET    /users/:id                  详情
+PATCH  /users/:id                  修改
+DELETE /users/:id                  删除
+PUT    /users/:id/roles            设置角色 {role_ids}
+POST   /users/:id/reset-password   重置密码
 ```
 
-**平台组织（超管）**
+**角色**
 
 ```
-GET    /organizations        列表
-GET    /organizations/tree   组织树
-POST   /organizations        创建
-PATCH  /organizations/:id    更新
-DELETE /organizations/:id    删除（需无子组织）
+GET    /roles                      列表（含内置行、用户数）
+POST   /roles                      创建
+GET    /roles/:id                  详情（含权限键）
+PATCH  /roles/:id                  修改名称与说明
+DELETE /roles/:id                  删除（有用户持有或内置角色则拒绝）
+PUT    /roles/:id/permissions      全量替换角色权限
 ```
 
-**组织内（组织权限）**
+角色详情已经返回权限键，所以没有单独的权限读取端点；持有某角色的用户由用户列表的 `roles` 字段表达，
+所以没有 `/roles/:id/users`。授权影响预览（`/permission-preview`）没有前端调用方，已删除——
+少一个端点就少一处需要鉴权与维护的契约。
+
+**目录与审计**
 
 ```
-GET    /orgs/:org_id/users                        用户列表
-POST   /orgs/:org_id/users                        添加用户
-PATCH  /orgs/:org_id/users/:id                    更新用户
-DELETE /orgs/:org_id/users/:id                    移除用户
-GET    /orgs/:org_id/roles                        角色列表
-POST   /orgs/:org_id/roles                        创建角色
-GET    /orgs/:org_id/roles/:id                    角色详情
-PATCH  /orgs/:org_id/roles/:id                    更新角色
-DELETE /orgs/:org_id/roles/:id                    删除角色
-GET    /orgs/:org_id/roles/:id/users              角色下的用户
-PUT    /orgs/:org_id/roles/:id/permissions        全量替换角色权限
-PUT    /orgs/:org_id/users/:id/roles              全量替换用户角色
-POST   /orgs/:org_id/permission-preview           权限变更预览
-```
-
-**平台 / 目录**
-
-```
-GET  /permissions            权限目录
-GET  /audit-events           审计日志（服务端按权限裁剪可见范围）
+GET  /permissions            权限目录（含 can_delegate）
+GET  /audit-events           审计日志（单一列表，无范围裁剪）
 ```
 
 **服务接口**
@@ -547,7 +526,9 @@ GET  /audit-events           审计日志（服务端按权限裁剪可见范围
 POST /authorize              服务凭证 + action 白名单 + 原用户上下文
 ```
 
-统一响应 `{code, message, data, request_id}`。401 身份失效、403 授权拒绝、409 冲突、429 限流、503 依赖故障。
+`/me` 返回 `principal`（含 `user_id`、`session_id`、`username`、`display_name`、`configured`、`auth_epoch`）、`roles`、`permissions` 与时区偏好。
+
+统一响应 `{code, message, data, request_id}`。401 会话失效、403 授权拒绝、409 冲突、429 限流、503 依赖故障。
 
 ## 数据
 
@@ -556,12 +537,11 @@ POST /authorize              服务凭证 + action 白名单 + 原用户上下�
 `iam.audit_events` 记录谁、什么时候、对什么、做了什么、结果如何。
 
 ```sql
-org_id          -- 组织范围，平台操作为 NULL
 actor_type      -- user / system / deployment_operator
 actor_id        -- 操作者
 actor_name      -- 快照，防止用户改名后追溯困难
 action          -- 如 iam.roles.manage
-target_type     -- user / role / membership / organization / platform
+target_type     -- user / role / session / platform
 target_id       -- 目标 ID
 outcome         -- success / denied / failure
 reason_code     -- 受控原因码
@@ -570,7 +550,7 @@ decision_id     -- 授权判定关联
 metadata        -- 白名单字段，8KiB 以内
 ```
 
-审计和业务变更在同一事务，要么都成要么都不成。审计写入失败会导致安全变更回滚。
+审计不带范围维度，也不按范围裁剪：单一列表按 `action`、`actor_id`、`outcome` 与时间过滤。审计和业务变更在同一事务，要么都成要么都不成。审计写入失败会导致安全变更回滚。授权变更只记录差异（`permissions_added` / `permissions_removed`、`roles_added` / `roles_removed`），避免整份集合撑破 metadata 上限。
 
 不记录密码、Cookie、原始请求体。
 
@@ -584,14 +564,6 @@ metadata        -- 白名单字段，8KiB 以内
 
 都可配置。清理是物理删除，删掉之后追溯不了。
 
-### 组织命名
-
-名称 1–30 个 Unicode 码点，允许中文和正常展示字符，拒绝控制字符。
-
-标识 3–30 位，小写字母、数字、下划线、连字符，字母开头字母或数字结尾，唯一，创建后不可改。
-
-Go 请求模型、Web 的 Zod、数据库 CHECK 三处保持一致。
-
 ## 实现结构
 
 ```
@@ -604,18 +576,24 @@ src/apps/iam/
     config/                类型化加载和校验，不建连接
     router/                路由注册
     handler/               请求绑定、统一错误映射
-      management/          用户、组织、角色、审计管理
-    middleware/            Session 提交屏障、CSRF、服务身份、契约校验
-    service/               用例、最终授权、组织范围、事务、审计顺序
+      management/          用户、角色、审计管理
+    middleware/            Session 提交屏障、CSRF、服务凭证、契约校验
+    service/               用例、最终授权、事务、审计顺序
     repository/            GORM 查询、锁、SQL、初始化、维护
     authentication/        凭证用例、SCS、可撤销逻辑会话、限流
     authorization/         权限求值和委派规则（不依赖 HTTP 和存储）
-    identity/              账号、密码、邮箱、显示名、时区规则
+    account/               账号、密码、邮箱、显示名、时区规则
+    enum/                  数据库中封闭取值的 Go 常量（status、state、actor_type…）
     model/                 HTTP DTO 和请求边界校验
     testutil/              集成测试的隔离数据库
 ```
 
 分层原则，handler 只管 HTTP，service 管事务和业务不变量，repository 管 SQL，authorization 是纯函数不碰 IO。
+目录、依赖方向与命名遵循[后端工程结构规范](../../../docs/development/backend-structure.md)。
+
+表结构、封闭取值、注释与索引遵循[数据库设计规范](../../../docs/development/database-design.md)：
+每个业务表与列都有注释（`migrations/00002_table_comments.sql`），`status`/`state`/`risk_level`/`actor_type`/`outcome`
+的取值在 `internal/enum` 定义一次，Go 代码比较常量而不是字符串字面量。
 
 想换授权求值引擎（比如将来上 Casbin 或 OpenFGA），改 `authorization` 一个包就行。
 
@@ -638,11 +616,9 @@ Console 的 SSE 是流式，不经过这个屏障。
   ↓
 按 UUID 顺序锁涉及的用户
   ↓
-按 UUID 顺序锁涉及的组织
-  ↓
 重新验证操作者会话版本和当前权限
   ↓
-校验目标
+校验目标（内置角色/配置管理员不可变）
   ↓
 执行业务变更 + 写审计
   ↓
@@ -651,11 +627,46 @@ Console 的 SSE 是流式，不经过这个屏障。
 
 串行化低频管理写，比在多个入口分别处理竞态简单。登录和普通业务读不持这把锁。
 
-### 超级管理员保护
+### 登录防护
 
-平台始终至少保留一个 active 的超级管理员。会破坏这条的写操作返回 409，并发场景也覆盖。
+两道独立的闸门，避免把「暴力破解」和「账号锁定」混成一个机制：
 
-组织层不强制保留管理员：管理员能力由「自定义角色 + 相应权限」达成，超级管理员是最终兜底。这样组织不会因为角色被清空而永久卡死。
+| 维度 | 机制 | 配置 |
+| --- | --- | --- |
+| 账号 | 连续失败 5 次锁定 15 分钟，到期自动解锁 | `login_max_failures`、`login_lock_duration` |
+| 来源 | 每 IP 每分钟 60 次认证请求 | `login_ip_rate` |
+| 账号 | 每 15 分钟 20 次认证请求 | `login_account_rate` |
+
+**密码确认的失败不计数。** 操作者已经持有有效会话，把输错的 sudo 密码计入锁定，
+等于让一次手滑把管理员锁在门外——这是可用性缺陷，不是安全收益。
+
+### 会话只存认证状态
+
+`user_sessions` 里没有 IP 和 User-Agent：没有设备管理界面时这两列没有消费者，留着只是"以后可能有用"的
+猜测。登录来源写进登录审计的 `metadata.client_ip`，溯源时按 `request_id` 与接入层日志对齐——
+审计是取证事实的归属地，会话表只回答"这个会话还有效吗"。
+
+审计表另有追加写约束：触发器拒绝 `UPDATE`，`DELETE` 只在保留期清理的事务里通过
+`iam.audit_purge` 变量放行。代码里没有任何路径能改写历史。
+
+### 内置数据保护
+
+平台始终保留内置超级管理员角色与至少一名持有它的 active 账号。会破坏这条的写操作返回 409，并发场景也覆盖：
+
+| 不变量 | 结果码 |
+| --- | --- |
+| 内置角色不可改名、改说明、改权限、删除 | `iam.builtin_role_immutable` |
+| 配置管理员不可删除、停用、改密、摘除内置角色 | `iam.configured_user_immutable` |
+| 必须留下至少一名启用中的超级管理员 | `iam.last_super_admin` |
+| 不能删除或停用当前登录账号 | `iam.self_target_forbidden` |
+| 仍有用户持有的角色不可删除 | `iam.role_in_use` |
+| 角色名全局唯一 | `iam.role_name_taken` |
+
+配置管理员的内置角色由部署配置保证：即便还有别的超级管理员，页面也不能把它摘掉——否则下次启动会补回，
+使用者会看到「改了又变回去」。其他角色按需创建与删除。
+
+删除账号不再被历史归属卡住：`roles.created_by` 与 `user_roles.created_by` 是 `ON DELETE SET NULL`，
+删账号只把创建人置空，角色绑定与审计都保留；凭据、会话与角色绑定随主体级联删除。
 
 ## 几个容易被误解的点
 
@@ -667,9 +678,9 @@ Console 的 SSE 是流式，不经过这个屏障。
 
 **Console 不是必经中转。** 其他模块要验权限直接调 IAM，不用经过 Console。
 
-**组织是树且不限深度。** 全局唯一根，单父、禁止成环由数据库触发器强制，不设业务深度上限。
+**角色是全局的。** 没有作用域列，也没有「同一角色在不同范围表现不同」的语义；一个角色被哪些用户持有由 `user_roles` 决定。
 
-**角色和用户关系的状态语义不同。** 角色没有 status（存在即可用），组织内的用户关系有 active/disabled。
+**用户的角色与用户的停用语义不同。** 角色没有 status（存在即可用，内置角色只读）；用户有 active/disabled，停用即撤销其全部会话，而改显示名称或邮箱不撤销会话。
 
 ## 相关文档
 

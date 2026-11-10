@@ -32,6 +32,7 @@ func Serve(ctx context.Context, servers ...*http.Server) error {
 // serveListeners 只管理已经拥有的监听和请求取消，绑定失败的释放归 Serve。
 func serveListeners(ctx context.Context, servers []*http.Server, listeners []net.Listener) error {
 	group, serving := errgroup.WithContext(ctx)
+
 	for i, server := range servers {
 		baseContext := server.BaseContext
 		server.BaseContext = func(listener net.Listener) context.Context {
@@ -43,6 +44,7 @@ func serveListeners(ctx context.Context, servers []*http.Server, listeners []net
 			context.AfterFunc(serving, cancel)
 			return base
 		}
+
 		listener := listeners[i]
 		group.Go(func() error {
 			err := server.Serve(listener)
@@ -52,12 +54,14 @@ func serveListeners(ctx context.Context, servers []*http.Server, listeners []net
 			return err
 		})
 	}
+
 	group.Go(func() error {
 		<-serving.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		var draining sync.WaitGroup
 		outcomes := make([]error, len(servers))
+
 		// 全部监听同时停止接收请求，共享同一个退出时限。
 		for i, server := range servers {
 			draining.Go(func() {
@@ -66,6 +70,7 @@ func serveListeners(ctx context.Context, servers []*http.Server, listeners []net
 				}
 			})
 		}
+
 		draining.Wait()
 		return errors.Join(outcomes...)
 	})

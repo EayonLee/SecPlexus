@@ -19,9 +19,9 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 	completed := false
 	defer func() {
 		if err != nil || !completed {
-			logging.From(ctx).Error("数据库迁移失败", "event", "migration.failed", "duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
+			logging.From(ctx).Error("Database migration failed", "event", "migration.failed", "duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
 		} else {
-			logging.From(ctx).Info("数据库迁移完成", "event", "migration.completed", "duration_ms", time.Since(started).Milliseconds())
+			logging.From(ctx).Info("Database migration completed", "event", "migration.completed", "duration_ms", time.Since(started).Milliseconds())
 		}
 	}()
 	if dsn == "" {
@@ -37,6 +37,11 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() { err = errors.Join(err, db.Close()) }()
+
+	// 账本放在模块 schema 内，因此迁移前必须先把 schema 建出来。
+	if err = ensureSchema(ctx, db); err != nil {
+		return err
+	}
 
 	provider, err := migrationProvider(db)
 	if err != nil {
@@ -70,7 +75,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 
 	if err = pool.Ping(ctx); err != nil {
 		pool.Close()
-		logging.From(ctx).Error("PostgreSQL 连接检查失败", "event", "dependency.failed", "dependency", "postgres", "error", logging.Error(err))
+		logging.From(ctx).Error("PostgreSQL connection failed", "event", "dependency.failed", "dependency", "postgres", "error", logging.Error(err))
 		return nil, errors.New("IAM database unavailable")
 	}
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -26,16 +27,17 @@ type Service struct {
 	Config   config.Config            // 认证策略与服务配置。
 }
 
-// Authorize 在事务中验证当前会话并计算指定能力的授权范围。
-func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision iamclient.CapabilityDecision, err error) {
-	ctx = logging.With(ctx, "operation", "iam.authorize", "action", action, "org_id", orgID)
+// Authorize 在事务中验证当前会话并判断指定权限。
+// 授权只有一条路径：用户通过角色持有的权限键；没有组织或作用域分支。
+func (s *Service) Authorize(ctx context.Context, action string) (decision iamclient.CapabilityDecision, err error) {
+	ctx = logging.With(ctx, "operation", "iam.authorize", "action", action)
 	started := time.Now()
 	defer func() {
 		if err != nil || !decision.Allowed {
-			logging.From(ctx).Warn("能力校验未通过", "event", "iam.authorization_rejected", "duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
+			logging.From(ctx).Warn("Permission check denied", "event", "iam.authorization_rejected", "duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
 		} else {
 			logging.From(ctx).Debug(
-				"能力校验通过",
+				"Permission check allowed",
 				"event", "iam.authorization_allowed",
 				"decision_id", decision.DecisionID,
 				"user_id", decision.Principal.UserID,
@@ -48,16 +50,18 @@ func (s *Service) Authorize(ctx context.Context, action, orgID string) (decision
 		if err != nil {
 			return err
 		}
-		scope, err := s.authorizeTx(ctx, tx, p, action, orgID)
-		if err != nil {
+
+		if err := s.authorizeTx(ctx, tx, p, action); err != nil {
 			return err
 		}
-		decision = iamclient.CapabilityDecision{Allowed: true, DecisionID: uuid.NewString(), Principal: p, Scope: scope}
+
+		decision = iamclient.CapabilityDecision{Allowed: true, DecisionID: uuid.NewString(), Principal: p}
 		return nil
 	})
 	if err != nil {
 		return iamclient.CapabilityDecision{}, err
 	}
+
 	return decision, nil
 }
 
@@ -71,73 +75,56 @@ func (s *Service) resolve(ctx context.Context, tx *gorm.DB) (iamclient.Principal
 	return s.Sessions.ResolveTx(ctx, tx, id, s.Sessions.Manager.Token(ctx))
 }
 
-// authorizeTx 根据最新组织、用户和权限状态计算动作范围。
-func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Principal, action, orgID string) (iamclient.AuthorizedScope, error) {
+// authorizeTx 按最新账号状态与权限键判断动作。
+func (s *Service) authorizeTx(ctx context.Context, tx *gorm.DB, p iamclient.Principal, action string) error {
 	permission, err := repository.ReadPermission(ctx, tx, action)
 	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
-		return iamclient.AuthorizedScope{}, authorization.ErrDenied
+		return authorization.ErrDenied
 	}
 
 	if err != nil {
-		return iamclient.AuthorizedScope{}, err
+		return err
 	}
 
-	snapshot := authorization.Snapshot{Principal: p}
-	if permission.Scope == "organization" {
-		org, err := uuid.Parse(orgID)
-		if err != nil {
-			return iamclient.AuthorizedScope{}, authorization.ErrDenied
-		}
+	userID, err := uuid.Parse(p.UserID)
+	if err != nil {
+		return repository.ErrUnauthenticated
+	}
 
-		userID, err := uuid.Parse(p.UserID)
-		if err != nil {
-			return iamclient.AuthorizedScope{}, repository.ErrUnauthenticated
-		}
-
-		if err = repository.OrgAuthSnapshot(ctx, tx, org, userID,
-			&snapshot.OrganizationActive, &snapshot.OrganizationUserActive, &snapshot.Permissions); err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) {
-				return iamclient.AuthorizedScope{}, authorization.ErrDenied
-			}
-
-			return iamclient.AuthorizedScope{}, err
-		}
-
-		snapshot.OrganizationID = org.String()
+	permissions, err := repository.EffectivePermissions(ctx, tx, userID)
+	if err != nil {
+		return err
 	}
 
 	var now time.Time
 	if err = repository.DatabaseTime(ctx, tx, &now); err != nil {
-		return iamclient.AuthorizedScope{}, err
+		return err
 	}
 
-	return authorization.Evaluate(snapshot, permission, orgID, now, s.Config.Auth.ReauthWindow)
+	return authorization.Evaluate(authorization.Snapshot{Principal: p, Permissions: permissions}, permission, now, s.Config.Auth.ReauthWindow)
 }
 
 // Manage 串行执行低频管理变更，在同一事务内重新校验操作者并写入审计。
-func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetType string, targetID *uuid.UUID, change func(*gorm.DB, iamclient.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
+func (s *Service) Manage(ctx context.Context, action, requestID, targetType string, targetID *uuid.UUID, change func(*gorm.DB, iamclient.Principal, map[string]any) error, additionalUsers ...uuid.UUID) (err error) {
 	// 诊断只记录稳定动作和资源标识，不记录请求参数或审计扩展值。
-	ctx = logging.With(ctx, "operation", action, "org_id", orgID, "target_type", targetType, "target_id", targetID)
+	ctx = logging.With(ctx, "operation", action, "target_type", targetType, "target_id", targetID)
 	started := time.Now()
 	phase := "begin"
-	committed := false
 	var actorID uuid.UUID
 	defer func() {
 		level, outcome := slog.LevelInfo, "committed"
-		if !committed {
-			level, outcome = slog.LevelError, "aborted"
-		}
 		if err != nil {
-			outcome = "failed"
-			level = slog.LevelWarn
-			if !errors.Is(err, authorization.ErrDenied) && !errors.Is(err, repository.ErrInvalid) && !errors.Is(err, repository.ErrConflict) && !errors.Is(err, repository.ErrNotFound) && !errors.Is(err, repository.ErrUnauthenticated) && !errors.Is(err, gorm.ErrRecordNotFound) {
+			outcome, level = "failed", slog.LevelWarn
+			// 只有基础设施和数据库故障升级为 error；业务拒绝保持 warn，避免审计噪声。
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrConnDone) {
 				level = slog.LevelError
 			}
 		}
 		logging.From(ctx).Log(
 			ctx,
 			level,
-			"管理事务结束",
+			"Management transaction finished",
 			"event", "iam.management.completed",
 			"phase", phase,
 			"outcome", outcome,
@@ -183,16 +170,8 @@ func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetTy
 			return err
 		}
 
-		phase = "lock_organization"
-		if orgID != "" {
-			var lockedID uuid.UUID
-			if err = repository.LockOrganization(ctx, tx, orgID, &lockedID); err != nil {
-				return err
-			}
-		}
-
 		phase = "authorize"
-		if _, err = s.authorizeTx(ctx, tx, p, action, orgID); err != nil {
+		if err = s.authorizeTx(ctx, tx, p, action); err != nil {
 			return err
 		}
 
@@ -207,23 +186,8 @@ func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetTy
 			return err
 		}
 
-		phase = "bump_authorization_version"
-		var org *uuid.UUID
-		if orgID != "" {
-			parsed, err := uuid.Parse(orgID)
-			if err != nil {
-				return repository.ErrInvalid
-			}
-
-			org = &parsed
-			if err = repository.BumpOrganizationAuthzEpoch(ctx, tx, parsed); err != nil {
-				return err
-			}
-		}
-
 		phase = "append_audit"
 		if err = repository.AppendAudit(ctx, tx, repository.Audit{
-			OrgID:      org,
 			ActorID:    &actorID,
 			ActorName:  p.Username,
 			Action:     action,
@@ -238,6 +202,5 @@ func (s *Service) Manage(ctx context.Context, action, orgID, requestID, targetTy
 		phase = "commit"
 		return nil
 	})
-	committed = err == nil
 	return err
 }

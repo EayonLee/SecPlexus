@@ -52,7 +52,7 @@ func Error(err error) slog.Value {
 	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
-		fields = append(fields, slog.String("sqlstate", pg.Code), slog.String("constraint", pg.ConstraintName), slog.String("table", pg.TableName))
+		fields = append(fields, slog.String("sqlstate", pg.Code), slog.String("column", pg.ColumnName), slog.String("constraint", pg.ConstraintName), slog.String("table", pg.TableName))
 	}
 	var network *net.OpError
 	if errors.As(err, &network) {

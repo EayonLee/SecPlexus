@@ -26,12 +26,14 @@ beforeEach(() => {
     {
       ...initialAuth,
       status: "authenticated",
+      permissions: ["iam.users.read"],
+      roles: [{ id: "role", name: "Reader" }],
       principal: {
         user_id: "user",
         session_id: "session",
         username: "member",
         display_name: "Member",
-        is_super_admin: false,
+        configured: false,
         auth_epoch: "1",
         authenticated_at: "2026-10-28T00:00:00Z",
       },

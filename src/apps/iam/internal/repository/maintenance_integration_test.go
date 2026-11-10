@@ -20,7 +20,7 @@ func TestMaintainKeepsRecordsInsideRetentionWindow(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "retain-member", "retain-member", "保留用户", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "retain-member", "retain-member", "保留用户", "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,13 +78,13 @@ func TestRevokeAfterRestoreRevokesEverySession(t *testing.T) {
 	ctx := context.Background()
 
 	userID := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, userID, "restore-member", "restore-member", "恢复用户", ""); err != nil {
+	if err := repository.InsertUser(ctx, store.DB, userID, "restore-member", "restore-member", "恢复用户", "", false); err != nil {
 		t.Fatal(err)
 	}
 
 	sessionID := uuid.New()
 	if err := store.DB.Exec(
-		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,absolute_expires_at,idle_expires_at,last_seen_at,user_agent) VALUES(?,?,?,1,'active',clock_timestamp(),clock_timestamp()+interval '8 hours',clock_timestamp()+interval '30 minutes',clock_timestamp(),'agent')`,
+		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,absolute_expires_at,idle_expires_at,last_seen_at) VALUES(?,?,?,1,'active',clock_timestamp(),clock_timestamp()+interval '8 hours',clock_timestamp()+interval '30 minutes',clock_timestamp())`,
 		sessionID, userID, sessionID.String(),
 	).Error; err != nil {
 		t.Fatal(err)
@@ -101,5 +101,37 @@ func TestRevokeAfterRestoreRevokesEverySession(t *testing.T) {
 
 	if state != "revoked" {
 		t.Fatalf("session state = %q, want revoked", state)
+	}
+}
+
+// 审计是追加写事实：改写被拒绝，保留期清理是唯一允许删除的路径。
+func TestAuditEventsAreAppendOnly(t *testing.T) {
+	store := testutil.Database(t)
+	ctx := context.Background()
+	eventID := uuid.New()
+	if err := repository.AppendAudit(ctx, store.DB, repository.Audit{
+		ActorType:  "system",
+		Action:     "iam.test.append_only",
+		TargetType: "platform",
+		RequestID:  uuid.NewString(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Pool.QueryRow(ctx, `SELECT id FROM iam.audit_events ORDER BY occurred_at DESC LIMIT 1`).Scan(&eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Pool.Exec(ctx, `UPDATE iam.audit_events SET outcome='failure' WHERE id=$1`, eventID); err == nil {
+		t.Fatal("audit event was updated; append-only guard is missing")
+	}
+
+	if _, err := store.Pool.Exec(ctx, `DELETE FROM iam.audit_events WHERE id=$1`, eventID); err == nil {
+		t.Fatal("audit event was deleted without the retention gate")
+	}
+
+	// 保留期清理在自己的事务里开闸，可以删除过期记录。
+	if err := store.Maintain(ctx, 1, 1); err != nil {
+		t.Fatalf("retention cleanup failed: %v", err)
 	}
 }

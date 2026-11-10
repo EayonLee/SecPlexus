@@ -35,12 +35,12 @@
 | 集成测试 | PG事务/FK/迁移、会话持久化、服务间认证及错误契约、真实Redis限流；含核心失败/并发不变量 | 每个分支、一次性排障步骤、工单复现记录、UI逐按钮验证 |
 | E2E | 浏览器通过真实Web/API/数据库完成少量完整核心流程，验证最终用户结果与访问边界 | 重复覆盖所有字段校验、排列组合、模板演示或Mock登录 |
 
-“核心流程”包含有价值的拒绝与恢复路径，不仅成功路径；例如跨组织访问必须拒绝属于长期安全契约。只有实际组件边界才能暴露的问题，不能用Mock替代后仍声称集成已验证。
+“核心流程”包含有价值的拒绝与恢复路径，不仅成功路径；例如越权访问必须拒绝属于长期安全契约。只有实际组件边界才能暴露的问题，不能用Mock替代后仍声称集成已验证。
 
 ## 缺陷修复验证
 
 - 临时排障脚本、浏览器操作记录、某次工单复现不直接加入长期集成/E2E套件。
-- 回归优先放能稳定定位原因的最低层，命名描述长期行为，不以bug编号、修复日期或实现细节组织测试。
+- 回归优先放能稳定定位原因的最低层，命名描述长期行为，不以bug编号、修复日期或实现细节归类测试。
 - 如果缺陷暴露了核心组件契约或用户旅程的缺口，补充/更新该契约或现有流程测试；不要为同一问题在多个层次各复制一套复现步骤。
 - 一次验证通过不代表需要永久保存脚本；长期保留的用例必须说明其保护的核心行为，范围以需求验收为依据。
 
@@ -54,14 +54,16 @@
 ## 可执行入口
 
 ```sh
-pnpm test:unit
-pnpm catalogs:check
-pnpm typecheck
+make test
+make catalogs
+make typecheck
 make build
-pnpm test:integration --docker --race
-pnpm --dir src/apps/web exec playwright install chromium
-pnpm test:e2e --docker
+make integration ARGS="--docker --race"
+make install-browsers
+make test-e2e ARGS="--docker"
 ```
+
+以上入口在macOS、Linux、PowerShell与`cmd.exe`中统一通过GNU Make执行；Makefile配方不依赖POSIX shell，平台差异由Node脚本承担。`make test`先由[scripts/test-scripts.mjs](../../scripts/test-scripts.mjs)枚举脚本测试，再运行Go与Web单测，不依赖shell通配符展开。
 
 集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。
 外部Redis优先专用测试库；当前用户明确允许远程 DB0，测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
@@ -69,7 +71,7 @@ pnpm test:e2e --docker
 
 `--docker`明确授权测试脚本创建独立的临时PG/Redis容器、随机端口和临时凭据，结束后清理自有资源。
 浏览器套件构建真实服务，启动两个IAM及两个Console实例，并通过根启动脚本启动第一个实例及Web。
-浏览器环境先本地构建 Next.js，再通过 preview 入口启动并等待页面与 API 就绪；不连接正常开发库、不部署服务。它验证默认管理员初始化登录、新用户直接登录、主动改密、管理中心角色编辑、五种权限组合、跨标签退出、SSE撤权及组织上下文隔离。
+浏览器环境先本地构建 Next.js，再通过 preview 入口启动并等待页面与 API 就绪；不连接正常开发库、不部署服务。它验证默认管理员初始化登录、新用户直接登录、主动改密、管理中心角色编辑、五种权限组合、跨标签退出、SSE撤权及越权访问拒绝。
 不读取或改写开发数据库，也不使用开发登录凭据。
 
 Playwright使用单worker、有界条件等待和零重试。禁用trace与视频，避免收集密码、Cookie；
@@ -101,28 +103,28 @@ E2E优先语义定位（role/label等）和用户可见结果，避免内部CSS�
 
 前端测试和工具配置由 `src/apps/web/` 维护：`vitest.config.mts`、`playwright.config.ts`、`tests/unit/`、`tests/e2e/`。根命令只编排 Go/脚本检查并转发 Web 命令，不持有前端测试依赖。
 
-构建与类型检查覆盖全部 Next.js 路由。E2E 使用真实 Cookie、CSRF、主动改密、角色权限、组织隔离及 SSE 撤权。通过 `pnpm test:e2e --docker --grep <名称>` 可定向运行。安装浏览器使用 `pnpm --dir src/apps/web exec playwright install chromium`。原作者站点统计、仓库星数和托管配置已移除；测试不依赖这些外部服务。
+构建与类型检查覆盖全部 Next.js 路由。E2E 使用真实 Cookie、CSRF、主动改密、角色权限、越权拒绝及 SSE 撤权。通过 `make test-e2e ARGS="--docker --grep <名称>"` 可定向运行。安装浏览器使用 `make install-browsers`。原作者站点统计、仓库星数和托管配置已移除；测试不依赖这些外部服务。
 
 国际化回归还覆盖中英文词典键、ICU变量和复数、Dashboard真实组件的双语渲染。既有IAM浏览器用例在登录前显式选择中文，独立于默认语言；语言切换浏览器检查覆盖 Cookie 持久化、html lang、元信息和桌面菜单不换行。
 
 ## 本地框架检查与人工浏览器验收
 
 ```sh
-pnpm catalogs:generate
-pnpm catalogs:check
-pnpm test:unit
-pnpm typecheck
-pnpm lint
-go vet ./src/...
+make catalogs-generate
+make catalogs
+make test
+make typecheck
+make lint
+make vet
 make lint-go
 make vuln-go
 make build
-pnpm test:integration --docker --race
-pnpm test:e2e --docker
-pnpm test:e2e --docker --manual
+make integration ARGS="--docker --race"
+make test-e2e ARGS="--docker"
+make test-e2e ARGS="--docker --manual"
 ```
 
-`catalogs:check` 同时执行迁移边界检查（`scripts/migrations-check.mjs`）：每个模块的迁移只能引用自己 schema 内的对象，跨 schema `REFERENCES` 直接失败；其表驱动测试随 `node --test scripts/*.test.mjs` 运行。
+`catalogs:check` 同时执行迁移边界检查（`scripts/migrations-check.mjs`）：每个模块的迁移只能引用自己 schema 内的对象，跨 schema `REFERENCES` 直接失败；其表驱动测试随 `make test`（`scripts/test-scripts.mjs`） 运行。
 
 `lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.3工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。
 
@@ -138,13 +140,13 @@ manual模式创建相同的独立双副本栈，在权限0600的临时文件中�
 
 ## 配置托管超级管理员
 
-管理员 fixture 的用户名与密码由测试 IAM 配置注入，各副本一致。不得通过自助改密预热管理员会话：配置账号的改密、资料编辑、重置与成员关系写入必须被拒绝。普通账号继续验证改密成功及原会话失效。数据库集成覆盖管理员配置重复应用的幂等、凭据轮换/身份版本、账号切换和唯一索引；迁移到配置托管模式后必须应用管理员配置再验证服务可运行，不能把“版本已更新”当作初始化成功。
+管理员 fixture 的用户名与密码由测试 IAM 配置注入，各副本一致。不得通过自助改密预热管理员会话：配置账号的改密、资料编辑、重置与角色分配必须被拒绝。普通账号继续验证改密成功及原会话失效。数据库集成覆盖管理员配置重复应用的幂等、凭据轮换/身份版本、账号切换和唯一索引；迁移到配置托管模式后必须应用管理员配置再验证服务可运行，不能把“版本已更新”当作初始化成功。
 
 本轮人工设计验收只覆盖桌面浅色/深色与中英文，不开展移动端适配或新一轮窄屏验收。
 
 设置页 E2E 验证 `/settings/profile`、`/settings/account` 为独立页面，头像 Settings/System 单行标签，设备管理入口移除，配置管理员凭据只读。数据表用真实接口验证默认 10 条、翻页偏移和修改每页数量后返回第一页。
 
-组织流程回归覆盖真实服务端搜索、10 条候选及滚动续页、禁用候选、当前组织与全平台范围、Unicode 名称和标识约束，以及同一弹框内错误密码/返回/确认后的草稿保留。测试辅助命令仅允许对 `spx_e2e_<随机值>` 所有者库中的指定测试账号缩短认证时间，不在生产加入过期开关，也不等待真实 30 分钟。确认成功后业务仍未写入，必须由用户再次提交；不读取浏览器原始 Network 事件、请求体、Cookie 或登录凭据。
+用户与角色流程回归覆盖真实服务端搜索、10 条候选及滚动续页、禁用候选、Unicode 名称约束，以及同一弹框内错误密码/返回/确认后的草稿保留。测试辅助命令仅允许对 `spx_e2e_<随机值>` 所有者库中的指定测试账号缩短认证时间，不在生产加入过期开关，也不等待真实 30 分钟。确认成功后业务仍未写入，必须由用户再次提交；不读取浏览器原始 Network 事件、请求体、Cookie 或登录凭据。
 
 
 ## IAM 统一入口
@@ -158,4 +160,4 @@ IAM 真实 HTTP 用例在同一监听验证用户路由和 `POST /api/v1/iam/aut
 
 ## 启动预检回归
 
-`node --test scripts/preflight.test.mjs` 在临时工作副本运行真实 Go CLI：后续模块配置无效时，断言迁移尚未执行且没有业务日志。原生命令测试把依赖指向不可达本机端口，验证 `check-config` 不发起运行连接；字段诊断断言不包含输入秘密。`pnpm config:check [模块]` 本身是离线校验，不等同于集成测试或网络就绪验收。
+`node --test scripts/preflight.test.mjs` 在临时工作副本运行真实 Go CLI：后续模块配置无效时，断言迁移尚未执行且没有业务日志。原生命令测试把依赖指向不可达本机端口，验证 `check-config` 不发起运行连接；字段诊断断言不包含输入秘密。`make config [MODULES="模块"]` 本身是离线校验，不等同于集成测试或网络就绪验收。

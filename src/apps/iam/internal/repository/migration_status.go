@@ -15,13 +15,23 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/migrations"
 )
 
+// migrationTable 是 goose 的版本账本，放在模块自己的 schema 里。
+// 这样 "DROP SCHEMA iam CASCADE" 就是一次完整重置：账本不会比表结构活得更久。
+const migrationTable = "iam.goose_db_version"
+
+// ensureSchema 建出模块 schema：账本要先落在这里，迁移脚本才有地方落表。
+func ensureSchema(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS iam")
+	return err
+}
+
 // migrationProvider 让迁移、状态查询和启动检查使用同一迁移集合与锁策略。
 func migrationProvider(db *sql.DB) (*goose.Provider, error) {
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
 		return nil, err
 	}
-	store, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
+	store, err := database.NewStore(database.DialectPostgres, migrationTable)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +41,7 @@ func migrationProvider(db *sql.DB) (*goose.Provider, error) {
 
 // schemaState 先只读确认版本表已初始化，避免 Provider 查询隐式建表。
 func schemaState(ctx context.Context, db *sql.DB) (int64, int64, bool, error) {
-	store, err := database.NewStore(database.DialectPostgres, "iam_goose_db_version")
+	store, err := database.NewStore(database.DialectPostgres, migrationTable)
 	if err != nil {
 		return 0, 0, false, err
 	}

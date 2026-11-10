@@ -10,23 +10,27 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// Me 返回当前身份和组织能力，具体查询由业务用例负责。
+// Me 返回当前账号、角色与有效权限，具体查询由业务用例负责。
 func (s *Server) Me(c *gin.Context) {
-	var params model.OrganizationQuery
-	if err := c.ShouldBindQuery(&params); err != nil {
-		httpx.Reject(c, repository.ErrInvalid)
-		return
-	}
 	w := c.Writer
 	r := c.Request
-	orgID := params.OrgID
-	response, err := s.Service.Identity(r.Context(), orgID)
+	identity, err := s.Service.Me(r.Context())
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, response)
+	roles := make([]model.APIRoleRef, 0, len(identity.Roles))
+	for _, role := range identity.Roles {
+		roles = append(roles, model.APIRoleRef{ID: role.ID, Name: role.Name})
+	}
+
+	result.Success(w, model.APIMe{
+		Principal:   identity.Principal,
+		Permissions: identity.Permissions,
+		Roles:       roles,
+		TimeZone:    identity.TimeZone,
+	})
 }
 
 // ChangePassword 绑定新旧密码，限流与用例校验后撤销旧会话。
@@ -45,8 +49,8 @@ func (s *Server) ChangePassword(c *gin.Context) {
 	}
 
 	select {
-	case s.hashSlots <- struct{}{}:
-		defer func() { <-s.hashSlots }()
+	case s.HashSlots <- struct{}{}:
+		defer func() { <-s.HashSlots }()
 	default:
 		httpx.Reject(c, authentication.ErrRateLimited)
 		return
@@ -105,11 +109,11 @@ func (s *Server) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	identityView, err := s.Service.Identity(r.Context(), "")
+	me, err := s.Service.Me(r.Context())
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, gin.H{"timezone": identityView["timezone"]})
+	result.Success(w, model.APIProfileUpdateResponse{TimeZone: me.TimeZone})
 }

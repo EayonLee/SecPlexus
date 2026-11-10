@@ -15,6 +15,7 @@ Desktop.ini
 !.env.example
 !.env.*.example
 logs/
+.spx/
 /tmp/
 /secrets/
 certs/
