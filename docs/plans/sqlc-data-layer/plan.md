@@ -178,7 +178,7 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 
 ## 十一、GORM 移除进度（唯一事实源）
 
-截至本轮，**GORM 尚未移除**：sqlc 已覆盖角色、权限、行锁、账号与凭据、配置托管管理员同步（B0–B2）。下表是逐文件的真实状态，B6 完成后本表清零。
+截至本轮，**GORM 尚未移除**：sqlc 已覆盖角色、权限、行锁、账号与凭据、配置托管管理员同步、登录与会话（B0–B3）。下表是逐文件的真实状态，B6 完成后本表清零。
 
 | 文件 | GORM 用法 | 迁移批次 |
 |---|---|---|
@@ -187,8 +187,8 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 | `repository/locks.go` | 已迁 sqlc（事务守卫） | B0 完成 |
 | `repository/accounts.go` | 已迁 sqlc（仅剩 `*gorm.DB` 参数类型） | B2 完成 |
 | `repository/administrator.go` | 已迁 sqlc（同步逻辑仍在 Go，写入全为生成查询） | B2 完成 |
-| `repository/queries.go` | `Queries` 类型：登录、用户/会话锁、会话续期与撤销 | B3 |
-| `repository/session_queries.go` | 登录失败计数、会话查询 | B3 |
+| `repository/queries.go` | 已删除：包装类型不再需要，账号/会话行读取改为 `sessions.go` 的自由函数 | B3 完成 |
+| `repository/session_queries.go` | 已迁 sqlc（登录失败计数、SCS 存在性、凭据复核、数据库时间） | B3 完成 |
 | `repository/lists.go` | 用户/角色/审计列表与详情（含 `jsonb_build_object`、`listJSON`） | B4 |
 | `repository/maintenance.go` | 保留期清理、`set_config`、操作员恢复 | B5 |
 | `repository/store.go` | 启动同步、`gorm.Open`、`Transaction` | B6 |
