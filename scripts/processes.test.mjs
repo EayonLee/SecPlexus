@@ -37,11 +37,11 @@ test('terminating a dev process leaves no descendants', { timeout: 15000 }, asyn
     setInterval(() => {}, 1000);
   `);
 
-  // Mirror the launcher: pnpm needs a cmd.exe wrapper on Windows; Unix spawns node directly,
-  // and detached: true already makes it the process-group leader (no shell string needed).
-  const command = process.platform === 'win32'
-    ? { file: 'cmd.exe', args: ['/d', '/c', process.execPath, wrapperFile] }
-    : { file: process.execPath, args: [wrapperFile] };
+  // The wrapper is started without a shell on both platforms: taskkill /T walks the
+  // Windows process tree, and detached: true makes the POSIX child a process-group
+  // leader. Passing environment paths through cmd.exe or /bin/sh would only add a
+  // command interpreter to the tree (and an injection sink) without testing anything.
+  const command = { file: process.execPath, args: [wrapperFile] };
   const wrapper = spawn(command.file, command.args, {
     detached: process.platform !== 'win32',
     stdio: 'ignore',
