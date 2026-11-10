@@ -26,10 +26,11 @@ func TestMaintainKeepsRecordsInsideRetentionWindow(t *testing.T) {
 
 	insertAudit := func(id uuid.UUID, age time.Duration) {
 		t.Helper()
-		if err := store.DB.Exec(
+		if _, err := store.DB.ExecContext(
+			ctx,
 			`INSERT INTO iam.audit_events(id,occurred_at,actor_type,action,target_type,outcome,request_id) VALUES($1,clock_timestamp()-$2::interval,'user','iam.auth.login','user','success',$3)`,
 			id, pgtype.Interval{Microseconds: age.Microseconds(), Valid: true}, id.String(),
-		).Error; err != nil {
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,11 +44,11 @@ func TestMaintainKeepsRecordsInsideRetentionWindow(t *testing.T) {
 	}
 
 	var freshRemaining, staleRemaining int64
-	if err := store.DB.Raw(`SELECT count(*) FROM iam.audit_events WHERE id=?`, freshAudit).Scan(&freshRemaining).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT count(*) FROM iam.audit_events WHERE id=$1`, freshAudit).Scan(&freshRemaining); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.DB.Raw(`SELECT count(*) FROM iam.audit_events WHERE id=?`, staleAudit).Scan(&staleRemaining).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT count(*) FROM iam.audit_events WHERE id=$1`, staleAudit).Scan(&staleRemaining); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,10 +84,11 @@ func TestRevokeAfterRestoreRevokesEverySession(t *testing.T) {
 	}
 
 	sessionID := uuid.New()
-	if err := store.DB.Exec(
-		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,absolute_expires_at,idle_expires_at,last_seen_at) VALUES(?,?,?,1,'active',clock_timestamp(),clock_timestamp()+interval '8 hours',clock_timestamp()+interval '30 minutes',clock_timestamp())`,
+	if _, err := store.DB.ExecContext(
+		ctx,
+		`INSERT INTO iam.user_sessions(id,user_id,token_hash,auth_epoch,state,authenticated_at,absolute_expires_at,idle_expires_at,last_seen_at) VALUES($1,$2,$3,1,'active',clock_timestamp(),clock_timestamp()+interval '8 hours',clock_timestamp()+interval '30 minutes',clock_timestamp())`,
 		sessionID, userID, sessionID.String(),
-	).Error; err != nil {
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,7 +97,7 @@ func TestRevokeAfterRestoreRevokesEverySession(t *testing.T) {
 	}
 
 	var state string
-	if err := store.DB.Raw(`SELECT state FROM iam.user_sessions WHERE id=?`, sessionID).Scan(&state).Error; err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT state FROM iam.user_sessions WHERE id=$1`, sessionID).Scan(&state); err != nil {
 		t.Fatal(err)
 	}
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
@@ -22,7 +21,7 @@ type Role struct {
 }
 
 // CreateRole 在调用方事务中创建全局角色。
-func CreateRole(ctx context.Context, tx *gorm.DB, id uuid.UUID, name, description, actorID string) error {
+func CreateRole(ctx context.Context, tx DB, id uuid.UUID, name, description, actorID string) error {
 	err := queries(tx).CreateRole(ctx, sqlcgen.CreateRoleParams{
 		ID:          id,
 		Name:        name,
@@ -34,7 +33,7 @@ func CreateRole(ctx context.Context, tx *gorm.DB, id uuid.UUID, name, descriptio
 }
 
 // GrantRolePermissions 为新建角色一次性写入初始权限。
-func GrantRolePermissions(ctx context.Context, tx *gorm.DB, roleID string, permissions []string) error {
+func GrantRolePermissions(ctx context.Context, tx DB, roleID string, permissions []string) error {
 	if len(permissions) == 0 {
 		return nil
 	}
@@ -43,7 +42,7 @@ func GrantRolePermissions(ctx context.Context, tx *gorm.DB, roleID string, permi
 }
 
 // RoleGrants 锁定目标角色并读取权限，供相同事务内的委派校验使用。
-func RoleGrants(ctx context.Context, tx *gorm.DB, roleID string) (Role, error) {
+func RoleGrants(ctx context.Context, tx DB, roleID string) (Role, error) {
 	role := Role{Permissions: []string{}}
 	id, err := uuid.Parse(roleID)
 	if err != nil {
@@ -74,7 +73,7 @@ func RoleGrants(ctx context.Context, tx *gorm.DB, roleID string) (Role, error) {
 }
 
 // UpdateRole 更新角色信息，零值描述仍会写入。
-func UpdateRole(ctx context.Context, tx *gorm.DB, roleID, name, description string) error {
+func UpdateRole(ctx context.Context, tx DB, roleID, name, description string) error {
 	id, err := uuid.Parse(roleID)
 	if err != nil {
 		return err
@@ -86,7 +85,7 @@ func UpdateRole(ctx context.Context, tx *gorm.DB, roleID, name, description stri
 }
 
 // DeleteRole 删除角色；角色权限由外键级联删除，用户绑定会阻止删除。
-func DeleteRole(ctx context.Context, tx *gorm.DB, roleID string) error {
+func DeleteRole(ctx context.Context, tx DB, roleID string) error {
 	id, err := uuid.Parse(roleID)
 	if err != nil {
 		return err
@@ -98,7 +97,7 @@ func DeleteRole(ctx context.Context, tx *gorm.DB, roleID string) error {
 }
 
 // ReplaceGrants 保留未变化的授权，只删除本次撤销的键，避免整批重写。
-func ReplaceGrants(ctx context.Context, tx *gorm.DB, roleID string, permissions []string) error {
+func ReplaceGrants(ctx context.Context, tx DB, roleID string, permissions []string) error {
 	id, err := uuid.Parse(roleID)
 	if err != nil {
 		return err
@@ -123,7 +122,7 @@ func ReplaceGrants(ctx context.Context, tx *gorm.DB, roleID string, permissions 
 }
 
 // UserRoleIDs 读取目标用户当前持有的角色标识。
-func UserRoleIDs(ctx context.Context, tx *gorm.DB, userID string) ([]string, error) {
+func UserRoleIDs(ctx context.Context, tx DB, userID string) ([]string, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, err
@@ -143,7 +142,7 @@ func UserRoleIDs(ctx context.Context, tx *gorm.DB, userID string) ([]string, err
 }
 
 // ReplaceUserRoles 在已完成委派校验的事务内替换用户角色绑定。
-func ReplaceUserRoles(ctx context.Context, tx *gorm.DB, userID string, ids []string, actorID string) error {
+func ReplaceUserRoles(ctx context.Context, tx DB, userID string, ids []string, actorID string) error {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return err
@@ -166,7 +165,7 @@ func ReplaceUserRoles(ctx context.Context, tx *gorm.DB, userID string, ids []str
 }
 
 // grantRolePermissions 把权限集合写入角色；集合以 jsonb 传入，SQL 侧展开。
-func grantRolePermissions(ctx context.Context, tx *gorm.DB, roleID string, permissions []string) error {
+func grantRolePermissions(ctx context.Context, tx DB, roleID string, permissions []string) error {
 	id, err := uuid.Parse(roleID)
 	if err != nil {
 		return err

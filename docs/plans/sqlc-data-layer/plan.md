@@ -15,7 +15,7 @@ src/apps/iam/internal/repository/
 │   └── maintenance.sql
 ├── sqlcgen/                 # 新增：生成代码，禁止手改
 │   └── db.go models.go users.sql.go roles.sql.go ...
-├── store.go                 # 事务/连接/启动同步（迁移期保留 GORM，最终降为 pgx 池）
+├── store.go                 # 事务/连接/启动同步（database/sql 适配 + Store.Transaction）
 ├── users.go roles.go ...    # 包装层：类型转换、枚举、错误归一、审计写入
 └── lists.go                 # 删除（被 queries/*.sql + 包装层替代）
 ```
@@ -70,7 +70,7 @@ ClickHouse（事件）本阶段**不实施**：规则先登记在 `docs/developm
 | B3 | 会话 | `session_queries.go`(9) | 双超时、令牌轮换、`state` 状态机 | 集成：会话创建/校验/撤销 |
 | B4 | 列表与审计（含 JSON 出 SQL） | `lists.go`(9)：用户列表、角色列表、审计列表、用户详情、角色详情 | 动态 where→静态 narg；`jsonb_build_object` 4 处清零；`listJSON` 删除 | 集成：分页/筛选/游标 + 一次性契约等价对比 |
 | B5 | 维护与审计清理 | `maintenance.go`(10) | 事务内 `set_config('iam.audit_purge','on')` 保持 | 集成：保留期清理 + 追加写触发器仍拒绝 UPDATE |
-| B6 | 清理与接口化 | 删除 GORM 使用、`listJSON`、旧 SQL 常量；把 `repository` 收敛为 `Store` 接口 | 依赖注入从 `*gorm.DB` 改为 pgx 池；service 只依赖接口（换库的结构前提） | 全量：`make test` + 集成 + E2E |
+| B6 | 清理 | 删除 GORM 使用、`listJSON`、旧 SQL 常量 | 依赖注入从 `*gorm.DB` 改为 `repository.DB`；**未**接口化（见第十节） | 全量：`make test` + 集成 + E2E |
 
 集成测试里的 SQL（`migrations_integration_test.go` 10、`maintenance_integration_test.go` 8、
 `administrator_integration_test.go` 7、`timezone_integration_test.go` 4）随对应批次改为调用生成查询，
@@ -159,14 +159,21 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 
 ## 九、实施记录（as-built）
 
+第二节至第八节保留计划原文，其中涉及“目标形态”的表述以本章与第十一节的实际结果为准。
+
 | 批次 | 结果 | 与计划的差异 |
 |---|---|---|
 | B0 | PR #41 已合并 | 采用 `database/sql` 风味以便与 GORM 事务共用连接；`LockUsers` 改为单 id 查询由 Go 排序逐条加锁（数组形式会引入 `lib/pq`） |
 | B1 | PR #42 已合并 | 实际拆成 14 条具名查询（原计划记 13 条：新增 `RolePermissionKeys`/`TouchRole`/`DeleteUserRoles`/`InsertUserRoles` 以便数组解耦）；数组参数统一用 jsonb 展开；封闭取值列（`iam.permissions.status`/`risk_level`）用 column override 映射到 `internal/enum` |
+| B2 | PR #50 已合并 | 账号与凭据 12 条、配置管理员同步 6 条查询；`iam.users.status` 增加 column override；仓库函数签名不变 |
+| B3 | PR #51 已合并 | `Queries` 包装类型删除，读账号/会话改自由函数；出参（`*bool`/`*time.Time`/`*uuid.UUID`）改为返回值；interval 参数改为微秒 bigint；`Session.ReauthenticatedAt` 改 `*time.Time` |
+| B4 | PR #52 已合并 | 4 处 `jsonb_build_object` 与 `listJSON` 删除；列表改类型化行 + `model.API*` 投影；页内角色/权限用第二条查询批量读取；审计筛选改静态 SQL（空串即不筛选） |
+| B5 | PR #53 已合并 | 保留期清理与恢复前后 8 条查询；advisory 锁统一走 `LockManagement` |
+| B6 | PR #54 已合并 | 移除 `gorm.io/gorm`/`gorm.io/driver/postgres`；`repository.DB`（生成的 `DBTX`）统一连接与事务；`Store.Transaction` 取代 `db.Transaction`；日志从 GORM logger 换成 pgx `QueryTracer`；`gorm.ErrRecordNotFound` 全部并入 `sql.ErrNoRows`；未引入 42 方法的 `Store` 接口（见下） |
 
 落地时补充的两条硬约束（已进 `data-access.md`）：
 
-1. 生成查询与 GORM 调用**必须共用同一事务**；新增集成测试 `TestGeneratedQueriesShareTheCallerTransaction` 用回滚可见性守住这一点。
+1. 生成查询与调用方的写入**必须共用同一事务**；新增集成测试 `TestGeneratedQueriesShareTheCallerTransaction` 用回滚可见性守住这一点。
 2. 依赖事务范围的锁操作（`LockUsers`、`LockManagement`）在自动提交会话上会静默失效，因此加了 `requireTransaction` 守卫与对应测试。
 
 顺带修掉的存量红灯：`migrations_integration_test.go`（按单基线断言）、`server_integration_test.go`（用 `offset` 断言游标分页接口）。
@@ -175,28 +182,32 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 
 - `sqlc vet` 的 `db-prepare`/`query-plan` 规则需要可连接的数据库；CI 目前没有 PostgreSQL 服务，故只在本地可用时手工跑，未进门禁。需要时再加 `services: postgres`。
 - `emit_interface`、`:copyfrom`、`sqlc.embed` 暂未使用：当前不需要 mock 查询层、没有大批量插入场景、也没有需要嵌入的关联结构；为避免过度设计而保留。
+- **未引入 42 方法的 `Store` 接口**：`service` 依赖 `*repository.Store` 与 `repository.DB`，两者都不含驱动类型；当前只有 PostgreSQL 一个实现，集成测试也直连真实库，接口没有第二个实现或替换需求。真需要换库时再抽接口，代价只是机械替换。
+- **保留 `database/sql` 风味而非切 pgx/v5 风味**：切风味后生成的参数类型变成 pgx 专属，把驱动耦合进仓库签名；唯一收益（数组绑定）已被 jsonb 展开覆盖。
+- **集成测试仍不在 CI**：需要 `services: postgres/redis` 与 pg_dump；本地用真实 PostgreSQL 16 + Redis 8 跑全套 13 个包。
 
 ## 十一、GORM 移除进度（唯一事实源）
 
-截至本轮，**GORM 尚未移除**：sqlc 已覆盖角色、权限、行锁、账号与凭据、配置托管管理员同步、登录与会话、列表与审计、保留期清理与操作员恢复（B0–B5）。下表是逐文件的真实状态，B6 完成后本表清零。
+**GORM 已移除**（B6，PR #54）：`go.mod` 不再依赖 `gorm.io/gorm` 与 `gorm.io/driver/postgres`，
+仓库层只由 sqlc 生成查询、`database/sql` 适配与显式事务组成。下表保留逐文件的迁移轨迹。
 
-| 文件 | GORM 用法 | 迁移批次 |
+| 文件 | 迁移前 | 批次 |
 |---|---|---|
-| `repository/authorization_queries.go` | 已迁 sqlc（仅剩 `*gorm.DB` 参数类型） | B1 完成 |
-| `repository/roles.go` | 已迁 sqlc（仅剩参数类型与约束映射） | B1 完成 |
-| `repository/locks.go` | 已迁 sqlc（事务守卫） | B0 完成 |
-| `repository/accounts.go` | 已迁 sqlc（仅剩 `*gorm.DB` 参数类型） | B2 完成 |
-| `repository/administrator.go` | 已迁 sqlc（同步逻辑仍在 Go，写入全为生成查询） | B2 完成 |
-| `repository/queries.go` | 已删除：包装类型不再需要，账号/会话行读取改为 `sessions.go` 的自由函数 | B3 完成 |
-| `repository/session_queries.go` | 已迁 sqlc（登录失败计数、SCS 存在性、凭据复核、数据库时间） | B3 完成 |
-| `repository/lists.go` | 已迁 sqlc：`jsonb_build_object` 与 `listJSON` 已删除，列表返回类型化行 | B4 完成 |
-| `repository/maintenance.go` | 已迁 sqlc（保留期清理、`set_config` 开闸、恢复后撤销会话） | B5 完成 |
-| `repository/store.go` | 启动同步、`gorm.Open`、`Transaction` | B6 |
-| `repository/database.go`、`migration_status.go`、`logging.go` | 迁移与连接池、查询日志适配 | B6 |
-| `repository/sqlc.go` | **迁移期桥接**：`queries(db)` 读取 `db.Statement.ConnPool` | B6 改成 pgx 池 |
-| `service/{service,roles,accounts,password}.go` | 事务入口与 `*gorm.DB` 参数 | B6（Store 接口） |
-| `authentication/{session,credentials}.go`、`handler/server.go`、`authorization/catalog.go` | `*gorm.DB` 参数与错误哨兵 | B3/B6 |
-| `go.mod` | `gorm.io/gorm`、`gorm.io/driver/postgres` | B6 删除 |
+| `repository/authorization_queries.go` | `Table/Where` 权限读取 | B1 完成 |
+| `repository/roles.go` | 角色 CRUD 与授权集合替换 | B1 完成 |
+| `repository/locks.go` | 用户行锁 | B0 完成 |
+| `repository/accounts.go` | `Table/Where/Updates` 账号读写 | B2 完成 |
+| `repository/administrator.go` | 配置托管管理员同步（事务 + 行锁） | B2 完成 |
+| `repository/queries.go` | `Queries` 包装类型：登录、用户/会话锁、续期与撤销 | B3 完成（文件已删除） |
+| `repository/session_queries.go` | 登录失败计数、会话查询 | B3 完成 |
+| `repository/lists.go` | 用户/角色/审计列表（含 `jsonb_build_object`、`listJSON`） | B4 完成 |
+| `repository/maintenance.go` | 保留期清理、`set_config`、操作员恢复 | B5 完成 |
+| `repository/store.go` | `gorm.Open`、`Transaction`、启动同步 | B6 完成（`stdlib.OpenDBFromPool` + `Store.Transaction`） |
+| `repository/permissions.go` | `Table/Order/Find` 权限目录 | B6 完成（`ListPermissions` 查询） |
+| `repository/logging.go` | GORM `logger.Interface` 适配 | B6 完成（pgx `QueryTracer`） |
+| `repository/sqlc.go` | `queries(gorm)` 读取 `Statement.ConnPool` | B6 完成（`repository.DB` 接口） |
+| `service/{service,roles,accounts,password,timezone}.go` | 事务入口与 `*gorm.DB` 参数 | B6 完成（`*sql.Tx` + `Store.Transaction`） |
+| `authentication/{session,credentials}.go`、`handler/server.go`、`authorization/catalog.go` | `*gorm.DB` 参数、GORM 标签与错误哨兵 | B6 完成 |
+| `go.mod` | `gorm.io/gorm`、`gorm.io/driver/postgres` | B6 完成（已删除） |
 
-文档与图标已同步到"迁移中"状态：架构文档的数据访问说明、后端结构规范、角色管理文档、IAM README、README 双语致谢（新增 sqlc 图标、GORM 标注移除中）、`docs/assets/README.md`。
-
+文档与图标已同步到最终状态：架构文档、后端结构规范、数据访问规范、角色管理文档、IAM README、README 双语致谢（删除 GORM 图标与单元格）、`docs/assets/README.md`。

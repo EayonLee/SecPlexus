@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 
@@ -28,31 +29,29 @@ func (s *Service) UpdateTimeZone(ctx context.Context, timeZone string, requestID
 		return repository.ErrUnauthenticated
 	}
 
-	tx := s.Store.DB.WithContext(ctx).Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-	defer func() { _ = tx.Rollback() }()
+	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
+		if err = repository.UpdateTimeZone(ctx, tx, userID, timeZone); err != nil {
+			return err
+		}
 
-	if err = repository.UpdateTimeZone(ctx, tx, userID, timeZone); err != nil {
-		return err
-	}
+		if err = repository.AppendAudit(ctx, tx, repository.Audit{
+			ActorID:    &userID,
+			ActorName:  p.Username,
+			Action:     "iam.profile.timezone",
+			TargetType: "user",
+			TargetID:   &userID,
+			RequestID:  requestID,
+		}); err != nil {
+			return err
+		}
 
-	if err = repository.AppendAudit(ctx, tx, repository.Audit{
-		ActorID:    &userID,
-		ActorName:  p.Username,
-		Action:     "iam.profile.timezone",
-		TargetType: "user",
-		TargetID:   &userID,
-		RequestID:  requestID,
-	}); err != nil {
-		return err
-	}
-
-	if err = tx.Commit().Error; err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	logging.From(ctx).Info("Display time zone updated", "event", "iam.timezone_updated")
+
 	return nil
 }

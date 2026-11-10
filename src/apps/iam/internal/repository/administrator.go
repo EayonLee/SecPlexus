@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -26,7 +25,7 @@ type administrator struct {
 // syncAdministrator 在管理锁内同步配置的托管账号。
 // 用户名为配置权威来源：改名会收回旧账号的内置标记并创建或接管目标账号，
 // 配置不变时不轮换哈希或会话版本。
-func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password string, builtinRoleID uuid.UUID) (uuid.UUID, error) {
+func syncAdministrator(ctx context.Context, tx *sql.Tx, username, password string, builtinRoleID uuid.UUID) (uuid.UUID, error) {
 	username = strings.TrimSpace(username)
 	normalized, err := account.NormalizeUsername(username)
 	if err != nil {
@@ -144,7 +143,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 }
 
 // configuredAdministrator 读取当前配置托管账号及其密码哈希。
-func configuredAdministrator(ctx context.Context, tx *gorm.DB) (administrator, error) {
+func configuredAdministrator(ctx context.Context, tx DB) (administrator, error) {
 	row, err := queries(tx).ConfiguredAdministrator(ctx)
 	if err != nil {
 		return administrator{}, err
@@ -160,7 +159,7 @@ func configuredAdministrator(ctx context.Context, tx *gorm.DB) (administrator, e
 }
 
 // administratorByUsername 按规范化用户名读取账号；不存在时返回 sql.ErrNoRows。
-func administratorByUsername(ctx context.Context, tx *gorm.DB, normalized string) (administrator, error) {
+func administratorByUsername(ctx context.Context, tx DB, normalized string) (administrator, error) {
 	row, err := queries(tx).AdministratorByUsername(ctx, normalized)
 	if err != nil {
 		return administrator{}, err

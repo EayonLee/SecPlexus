@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
@@ -31,7 +30,7 @@ type LoginUser struct {
 }
 
 // GetLoginUser 读取账号和密码状态，不对外序列化凭据。
-func GetLoginUser(ctx context.Context, db *gorm.DB, username string) (LoginUser, error) {
+func GetLoginUser(ctx context.Context, db DB, username string) (LoginUser, error) {
 	row, err := queries(db).GetLoginUser(ctx, username)
 	if err != nil {
 		return LoginUser{}, err
@@ -59,7 +58,7 @@ func GetLoginUser(ctx context.Context, db *gorm.DB, username string) (LoginUser,
 
 // LockedAccount 锁定用户行，所有账号写入均先取得用户锁。
 // 只读取账号与访问状态：凭据属于 password_credentials，不在这张表里。
-func LockedAccount(ctx context.Context, db *gorm.DB, id uuid.UUID) (UserRow, error) {
+func LockedAccount(ctx context.Context, db DB, id uuid.UUID) (UserRow, error) {
 	row, err := queries(db).LockedAccount(ctx, id)
 	if err != nil {
 		return UserRow{}, err
@@ -89,7 +88,7 @@ type Session struct {
 }
 
 // LockedSession 在用户锁之后取得会话行锁。
-func LockedSession(ctx context.Context, db *gorm.DB, id uuid.UUID) (Session, error) {
+func LockedSession(ctx context.Context, db DB, id uuid.UUID) (Session, error) {
 	row, err := queries(db).LockedSession(ctx, id)
 	if err != nil {
 		return Session{}, err
@@ -123,7 +122,7 @@ type TouchSessionParams struct {
 
 // TouchSession 使用取得锁后的数据库时间续期；已过期状态不能被重新激活。
 // 没有任何一行被更新说明会话已过期、已撤销或令牌与版本不匹配，返回 sql.ErrNoRows。
-func TouchSession(ctx context.Context, db *gorm.DB, input TouchSessionParams) (Session, error) {
+func TouchSession(ctx context.Context, db DB, input TouchSessionParams) (Session, error) {
 	row, err := queries(db).TouchSession(ctx, sqlcgen.TouchSessionParams{
 		ID:         input.ID,
 		TokenHash:  input.TokenHash,
@@ -159,7 +158,7 @@ type RevokeUserSessionsParams struct {
 }
 
 // RevokeUserSessions 在当前事务内撤销该用户的全部有效会话。
-func RevokeUserSessions(ctx context.Context, db *gorm.DB, input RevokeUserSessionsParams) error {
+func RevokeUserSessions(ctx context.Context, db DB, input RevokeUserSessionsParams) error {
 	return queries(db).RevokeUserSessions(ctx, sqlcgen.RevokeUserSessionsParams{
 		UserID:       input.UserID,
 		RevokeReason: input.RevokeReason,
@@ -180,7 +179,7 @@ type InsertSessionParams struct {
 }
 
 // InsertSession 写入绑定令牌摘要的逻辑会话。
-func InsertSession(ctx context.Context, db *gorm.DB, session InsertSessionParams) error {
+func InsertSession(ctx context.Context, db DB, session InsertSessionParams) error {
 	params := sqlcgen.InsertSessionParams{
 		ID:                session.ID,
 		UserID:            session.UserID,
@@ -197,4 +196,22 @@ func InsertSession(ctx context.Context, db *gorm.DB, session InsertSessionParams
 	}
 
 	return queries(db).InsertSession(ctx, params)
+}
+
+// RevokeOwnSession 撤销指定用户的单个有效会话；没有命中说明会话已经失效或被转让。
+func RevokeOwnSession(ctx context.Context, db DB, sessionID uuid.UUID, userID uuid.UUID, reason string) error {
+	affected, err := queries(db).RevokeOwnSession(ctx, sqlcgen.RevokeOwnSessionParams{
+		ID:           sessionID,
+		UserID:       userID,
+		RevokeReason: reason,
+	})
+	if err != nil {
+		return err
+	}
+
+	if affected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }

@@ -247,7 +247,7 @@ PR 描述说明问题、变更后的行为、审查所需的设计决策和实�
 ### 框架接入
 
 使用 Gin 原生 Handler/中间件与模块自有 DTO。IAM 凭证用例接收类型化值；
-Argon2id、SCS、CSRF 和 Redis limiter 分别负责机制；数据使用 GORM 投影/事务与
+Argon2id、SCS、CSRF 和 Redis limiter 分别负责机制；数据使用 sqlc 查询与显式事务，并配合
 Goose 迁移，配置/命令使用 Viper、mapstructure 和 Cobra。参照
 [实际角色管理链路](docs/development/role-management.md)，已有框架能力不要再套一层
 通用工具或影子路由。

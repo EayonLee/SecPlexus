@@ -72,6 +72,51 @@ func (q *Queries) EffectivePermissions(ctx context.Context, userID uuid.UUID) ([
 	return items, nil
 }
 
+const listPermissions = `-- name: ListPermissions :many
+SELECT permission_key, description, risk_level, delegable, requires_recent_auth, status
+FROM iam.permissions
+ORDER BY permission_key
+`
+
+type ListPermissionsRow struct {
+	PermissionKey      string
+	Description        string
+	RiskLevel          enum.RiskLevel
+	Delegable          bool
+	RequiresRecentAuth bool
+	Status             enum.PermissionStatus
+}
+
+func (q *Queries) ListPermissions(ctx context.Context) ([]ListPermissionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPermissions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPermissionsRow{}
+	for rows.Next() {
+		var i ListPermissionsRow
+		if err := rows.Scan(
+			&i.PermissionKey,
+			&i.Description,
+			&i.RiskLevel,
+			&i.Delegable,
+			&i.RequiresRecentAuth,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockManagement = `-- name: LockManagement :exec
 
 SELECT pg_advisory_xact_lock($1)

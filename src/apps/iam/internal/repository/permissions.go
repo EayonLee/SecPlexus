@@ -3,26 +3,34 @@ package repository
 import (
 	"context"
 
-	"gorm.io/gorm"
-
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 )
 
 // Permissions 读取权限目录；module/resource_type/action 由权限键派生，不来自数据库。
-func Permissions(ctx context.Context, db *gorm.DB) ([]authorization.Permission, error) {
-	items := []authorization.Permission{}
-	err := db.WithContext(ctx).Table("iam.permissions").Order("permission_key").Find(&items).Error
+func Permissions(ctx context.Context, db DB) ([]authorization.Permission, error) {
+	rows, err := queries(db).ListPermissions(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	for i := range items {
-		module, resource, action, ok := authorization.ParsePermissionKey(items[i].Key)
+	items := make([]authorization.Permission, 0, len(rows))
+	for _, row := range rows {
+		item := authorization.Permission{
+			Key:                row.PermissionKey,
+			Description:        row.Description,
+			RiskLevel:          row.RiskLevel,
+			Delegable:          row.Delegable,
+			RequiresRecentAuth: row.RequiresRecentAuth,
+			Status:             row.Status,
+		}
+
+		module, resource, action, ok := authorization.ParsePermissionKey(item.Key)
 		if !ok {
 			continue
 		}
 
-		items[i].Module, items[i].ResourceType, items[i].Action = module, resource, action
+		item.Module, item.ResourceType, item.Action = module, resource, action
+		items = append(items, item)
 	}
 
 	return items, nil

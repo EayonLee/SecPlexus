@@ -90,7 +90,7 @@ authorization / enum / model 是被依赖的叶子包，不反向依赖任何上
 - 边界解析一次：HTTP 绑定在 `middleware`/`httpx` 完成，内部只接收 typed 值。
 - 哨兵错误跨层传递，映射集中在一处（`handler.writeError`），不层层重复 `if err != nil { log } `。
 - 不吞错：要么返回，要么记录并转换；不允许"记录后继续成功"。
-- 事务边界在 service；repository 方法接收调用方传入的连接/事务，不自行开事务。迁移期这个参数仍是 `*gorm.DB`，目标形态是 pgx 池 + `sqlcgen`（见 [数据访问规范](data-access.md)）。
+- 事务边界在 service；repository 方法接收调用方传入的连接/事务（`repository.DB`，可传 `*sql.DB` 或 `*sql.Tx`），不自行开事务。查询由 sqlc 生成（见 [数据访问规范](data-access.md)）。
 - 幂等：启动同步、迁移、维护命令重复执行后状态一致。
 
 ## 5. 日志与审计

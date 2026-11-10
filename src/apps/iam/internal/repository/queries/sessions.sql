@@ -41,6 +41,16 @@ WHERE id = sqlc.arg('id')::uuid
 RETURNING id, user_id, token_hash, auth_epoch, state, authenticated_at, reauthenticated_at,
           absolute_expires_at, idle_expires_at;
 
+-- RevokeOwnSession 只撤销属于该用户且仍然有效的会话；没有命中说明会话已失效。
+-- name: RevokeOwnSession :execrows
+UPDATE iam.user_sessions
+SET state = 'revoked',
+    revoked_at = clock_timestamp(),
+    revoke_reason = sqlc.arg('revoke_reason')::text
+WHERE id = sqlc.arg('id')::uuid
+  AND user_id = sqlc.arg('user_id')::uuid
+  AND state = 'active';
+
 -- name: RevokeUserSessions :exec
 UPDATE iam.user_sessions
 SET state = 'revoked',

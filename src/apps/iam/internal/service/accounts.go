@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	"github.com/aarondl/opt/omit"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -48,7 +48,7 @@ func (s *Service) CreateUser(ctx context.Context, input UserCreate, requestID st
 		requestID,
 		"user",
 		&id,
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			metadata["username"] = input.Username
 			if err := insertUser(ctx, tx, id, input, normalized, hash); err != nil {
 				return err
@@ -65,7 +65,7 @@ func (s *Service) CreateUser(ctx context.Context, input UserCreate, requestID st
 }
 
 // insertUser 在当前管理事务内创建资料与密码。
-func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserCreate, normalized, hash string) error {
+func insertUser(ctx context.Context, tx *sql.Tx, id uuid.UUID, input UserCreate, normalized, hash string) error {
 	if err := repository.InsertUser(ctx, tx, id, strings.TrimSpace(input.Username), normalized, input.DisplayName, input.Email, false); err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func insertUser(ctx context.Context, tx *gorm.DB, id uuid.UUID, input UserCreate
 }
 
 // assignRoles 复用委派上限校验并写入用户角色绑定。
-func (s *Service) assignRoles(ctx context.Context, tx *gorm.DB, p iamclient.Principal, userID uuid.UUID, roleIDs []string) error {
+func (s *Service) assignRoles(ctx context.Context, tx *sql.Tx, p iamclient.Principal, userID uuid.UUID, roleIDs []string) error {
 	granted, err := grantsFor(ctx, tx, roleIDs)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID string, input UserUpdat
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid
@@ -159,7 +159,7 @@ func (s *Service) DeleteUser(ctx context.Context, userID, requestID string) erro
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid
@@ -201,7 +201,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID, password, requestID
 		requestID,
 		"user",
 		uuidPointer(userID),
-		func(tx *gorm.DB, p iamclient.Principal, metadata map[string]any) error {
+		func(tx *sql.Tx, p iamclient.Principal, metadata map[string]any) error {
 			id, err := uuid.Parse(userID)
 			if err != nil {
 				return repository.ErrInvalid

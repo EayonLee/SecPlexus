@@ -285,7 +285,7 @@ reported results.
 
 Use native Gin handlers and middleware with module-owned DTOs. IAM credential use
 cases take typed values; Argon2id, SCS, CSRF and the Redis limiter own their
-mechanisms. Use GORM projections/transactions and Goose migrations; use
+mechanisms. Use sqlc queries and explicit transactions and Goose migrations; use
 Viper/mapstructure with Cobra for configuration and commands. See the
 [role management walkthrough](docs/development/role-management.md); do not build a
 second generic utility or shadow router for an existing framework capability.
