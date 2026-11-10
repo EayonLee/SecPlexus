@@ -9,9 +9,10 @@
 GOTOOLCHAIN := go1.27.3
 GOLANGCI_LINT_VERSION := v2.15.0
 GOVULNCHECK_VERSION := v1.9.0
+SQLC_VERSION := v1.31.1
 
 
-.PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security
+.PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security sqlc sqlc-check
 
 dev:
 	@node scripts/start.mjs $(MODULES)
@@ -69,3 +70,10 @@ catalogs-generate:
 security:
 	@go run github.com/zricethezav/gitleaks/v8@v8.28.0 dir . --config .gitleaks.toml --redact --no-banner
 	@go run github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.1 scan source --lockfile=go.mod --lockfile=pnpm-lock.yaml --config osv-scanner.toml
+
+# sqlc 从 goose 迁移生成类型化查询；生成物必须与 SQL 同步（CI 用 sqlc-check 拦截漂移）。
+sqlc:
+	@GOTOOLCHAIN=$(GOTOOLCHAIN) go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
+
+sqlc-check:
+	@GOTOOLCHAIN=$(GOTOOLCHAIN) go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) diff
