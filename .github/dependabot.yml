@@ -40,6 +40,12 @@ updates:
       # Major upgrades need a manual compatibility review with Next.js.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # minimatch 只作为 shadcn 主题包的传递依赖出现，而 @ts-morph/common 声明的是
+      # ^10，Dependabot 无法在不越主版本的前提下修复（security_update_not_possible，
+      # 见失败的 dynamic update job）。改用 pnpm.overrides 固定到 ^11.0.1 后，
+      # 这里关闭自动更新以避免反复失败；新漏洞仍由 CI 的 osv-scanner 拦截。
+      # 例外登记见 docs/development/security-exceptions.md。
+      - dependency-name: "minimatch"
 
   # 工作流里的 action 固定到 commit SHA，由这里跟进新版本：SHA 与 `# vX.Y.Z` 注释一起更新。
   - package-ecosystem: github-actions
