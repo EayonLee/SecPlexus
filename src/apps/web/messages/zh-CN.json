@@ -298,7 +298,7 @@
     "selfTargetForbidden": "不能对当前登录账号执行该操作。"
   },
   "Metadata": {
-    "description": "AI 原生安全运营平台。",
+    "description": "一体化 AI 安全平台：防护、运营、响应。",
     "loginTitle": "登录 · SecPlexus",
     "dashboardTitle": "安全智驾工作台 · SecPlexus"
   }

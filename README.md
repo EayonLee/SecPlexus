@@ -1,14 +1,19 @@
 # SecPlexus
 
-**An AI-native security operations platform, built around identity.**
+**One AI Security Platform: Protect, Operate, Respond.**
 
-SecPlexus is an open-source security operations platform. It brings identity,
-authorization, audit, and the operational console into one system so security
-teams can answer "who did what, with which permission, and why" from one place.
+SecPlexus is an open-source, identity-first security operations platform for
+teams whose defenses already span SIEM, EDR, WAF and cloud security. It does not
+replace those systems. It is the neutral brain above them: it turns alerts from
+different vendors into one attack story, investigates event groups with an
+auditable AI analyst, and closes the loop through governed response that runs in
+the tools you already own.
 
-The project is in **early development (pre-1.0)**. The IAM service and the IAM
-pages of the Web application are usable today; operations workflows, ingestion,
-correlation and model integration are being built in public.
+Most "AI SOC" products are a chat panel bolted onto an existing console: a human
+starts the conversation, the model sees one alert at a time, and the reasoning
+lives in a prompt. SecPlexus is designed the other way round. Alerts arrive as
+data, correlation decides what belongs together, and a graph of deterministic
+steps plus bounded model calls produces evidence, a verdict and an audit trail.
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> · <a href="docs/design/architecture/README.md">Documentation</a> · <a href="CONTRIBUTING.md">Contributing</a>
@@ -24,68 +29,146 @@ correlation and model integration are being built in public.
   <a href="https://github.com/EayonLee/SecPlexus/stargazers"><img src="https://img.shields.io/github/stars/EayonLee/SecPlexus?style=flat&amp;logo=github" alt="GitHub stars" /></a>
 </div>
 
+## Protect. Operate. Respond.
+
+The platform direction is one product with three outcomes:
+
+- **Protect** the new attack surface: LLM applications, agents, MCP tool calls
+  and model keys. Identity and runtime policy live in the same platform, so a
+  blocked prompt injection is not another product's alert; it enters the same
+  case pipeline as an EDR detection.
+- **Operate** the alert flood as one problem. SecPlexus normalizes vendor alerts
+  into OCSF, collapses duplicates and related activity, and gives the AI an
+  incident view rather than a single alert. Analysts work three queues: ready for
+  approval, needs human context, and closed for spot-checking.
+- **Respond** through a governed loop. The agent proposes; the SOAR executes
+  after approval, checks the asset's blast radius, runs idempotent actions and
+  writes back using each vendor's native ID. AI never holds the power to isolate
+  a host or disable an account by itself.
+
+The delivered foundation today is the identity and control plane. Ingestion,
+correlation, investigation and response services are being built in public; the
+status below is explicit about what exists.
+
 ## Why SecPlexus
 
-Security tools usually grow as separate products: one for identity, one for
-detection, one for case work, each with its own permission model and audit log.
-SecPlexus starts from the opposite direction:
-
-- **Identity is the foundation.** Users, roles, permissions and sessions are
-  owned by one IAM service. Every other module asks IAM instead of inventing a
-  second answer.
-- **One authorization path.** A user holds roles, roles hold permissions, and a
-  permission is a stable key such as `iam.users.read`. There is no organization
-  scope, super-admin bypass, or hidden second path in the current model.
-- **Auditable by default.** Security-relevant changes write append-only audit
-  events in the same transaction as the change. Audit rows cannot be updated;
-  deletion is limited to retention maintenance.
-- **Module boundaries are enforced.** Each application owns its configuration,
-  startup and tables. Cross-module access goes through HTTP contracts, not
-  private imports or shared tables.
-- **One development entry on every OS.** `make dev`, `make test` and
-  `make stop` work on macOS, Linux, Windows PowerShell and `cmd.exe`.
+- **Replace the brain, not the limbs.** Your SIEM, EDR, WAF and cloud security
+  stay in place. SecPlexus sits above them, correlates what no single vendor can
+  see, and sends actions back to the native tools.
+- **Work on alerts, not a second log lake.** The unit is the normalized
+  alert, not another archive of raw logs. Your SIEM remains the system of record;
+  SecPlexus adds the cross-vendor correlation, case context and response that a
+  vendor-siloed stack cannot provide.
+- **AI-native is an architecture, not a prompt.** The unit of investigation is an
+  event group. The workflow is a graph of deterministic steps with bounded model
+  nodes, groundedness gates, evidence-level verdicts and a three-valued
+  conclusion: true positive, false positive or `insufficient_info`. An empty
+  tool result is never proof that an alert is benign.
+- **Every correction becomes institutional memory.** When an analyst changes a
+  conclusion, the reason is required. That reason, the evidence and the outcome
+  become searchable context for the next investigation. Shadow mode records what
+  the AI would have done before any alert category earns the right to auto-close.
+- **Alerts are facts; cases are the product.** Alerts remain a complete,
+  queryable fact layer. An incident view is the AI's working set. A case is the
+  only persistent operational object: timeline, evidence, approval, response and
+  post-incident review.
+- **Identity is the foundation, not a bolt-on.** One IAM owns users, sessions,
+  roles, permissions and audit. There is one authorization path — user → role →
+  permission — with append-only audit and immediate session revocation through
+  `auth_epoch`.
+- **Failure is explicit.** Correlation degradation keeps the raw alerts and says
+  so. Tool failures are distinguished from empty results. The uncertain queue is
+  a first-class part of the workflow, not a hidden backlog.
 
 ## Status
 
-| Area | State | Notes |
-| --- | --- | --- |
-| IAM | Usable | Login, revocable sessions, password change/reset, users, global roles, flat permissions, authorization, append-only audit. Schema comments and versioned migrations included. |
-| Web | Usable for IAM pages | Real `/login`, `/settings`, `/settings/users`, `/settings/roles` and `/settings/audit` pages; English and Simplified Chinese. The dashboard is still sample data. |
-| Console | Early | Identity context and authorized SSE connections. Business workflows are not implemented. |
-| Ingestion and normalization | Planned | See [ingest-and-normalization](docs/plans/ingest-and-normalization/spec.md). |
-| Correlation and response | Planned | Not started. |
-| `llm-gateway` | Planned | All outbound model calls will go through one module; no provider key will live in IAM, Console or Web. |
+SecPlexus is pre-1.0. Planned services are design commitments, not shipped
+capabilities.
 
-APIs, database schema and UI may change before 1.0. Anything marked planned is
-not a delivered capability.
+| Capability | State | Notes |
+| --- | --- | --- |
+| Identity and access (IAM) | Delivered | Login, revocable sessions, password change/reset, users, global roles, flat permissions, authorization, append-only audit, versioned migrations and schema comments. |
+| Web and Console control plane | Delivered foundation | Web ships real IAM pages in English and Simplified Chinese. Console provides identity context and authorized SSE; case and workbench workflows are not implemented. |
+| Alert ingestion and normalization | Planned | Go `ingestor`, Kafka buffering, OCSF 2004 normalization, vendor connector registry. |
+| Correlation and incident views | Planned | Python `correlator`: exact dedupe, window suppression, cross-source entity correlation and rolling attack-chain views. |
+| AI investigation and memory | Planned | Python `agent-runtime`, graph-orchestrated investigation, evidence ledger, institutional memory and rule proposals; all model calls through `llm-gateway`. |
+| Response orchestration | Planned | Python `soar`: approvals, asset blast-radius gating, idempotent playbooks and native-ID write-back. |
+| AI runtime protection | Planned | `ai-gateway` (agentgateway) and `ai-policy` for prompt injection, DLP, model-key abuse, MCP tool governance and agent audit. |
+
+APIs, schema and UI may change before 1.0.
 
 ## Architecture
 
+The target is a data-driven operations pipeline with a separate control plane:
+alerts and AI traffic enter from the left, while people authorize work through
+Web, Console and IAM.
+
 ```mermaid
 flowchart LR
-  B["Browser"] -->|"HTTPS"| P["Reverse proxy<br/>(optional)"]
-  P --> W["Web<br/>Next.js / React"]
-  W -->|"same-origin<br/>/api/v1/iam"| I["IAM<br/>Go / Gin"]
-  W -->|"same-origin<br/>/api/v1/console"| C["Console<br/>Go / Gin"]
-  C -->|"service credential<br/>+ user session"| I
-  I --> PG["PostgreSQL<br/>identity, sessions, audit"]
-  I --> R["Redis<br/>login rate limits"]
+  subgraph SRC["Telemetry and AI traffic"]
+    A["EDR · WAF · SIEM<br/>cloud security"]
+    U["LLM apps · agents<br/>MCP tool calls"]
+  end
+
+  subgraph CTRL["Control plane — delivered foundation"]
+    W["Web<br/>Next.js"]
+    C["Console<br/>Go / Gin"]
+    I["IAM<br/>Go / Gin"]
+  end
+
+  subgraph PIPE["AI operations pipeline — planned"]
+    ING["ingestor<br/>Go"]
+    K["Kafka"]
+    COR["correlator<br/>Python"]
+    AR["agent-runtime<br/>Python"]
+    LG["llm-gateway<br/>Go"]
+    SOAR["soar<br/>Python"]
+    AG["ai-gateway<br/>agentgateway"]
+    AIP["ai-policy<br/>Python"]
+  end
+
+  subgraph STORE["Data"]
+    PG["PostgreSQL"]
+    CH["ClickHouse"]
+  end
+
+  P["LLM providers"]
+
+  A -->|"alerts"| ING --> K --> COR
+  COR -->|"alerts + views"| PG
+  COR -->|"telemetry"| CH
+  COR -->|"case event"| AR
+  AR -->|"case state"| C
+  AR -->|"model calls"| LG --> P
+  U -->|"LLM / MCP"| AG -->|"decision"| AIP
+  AG -->|"allowed"| P
+  AIP -->|"blocked = case"| ING
+  AR -->|"proposal"| SOAR
+  SOAR -->|"native-ID write-back"| A
+  W -->|"same-origin"| C
+  W -->|"same-origin"| I
+  C -->|"service credential"| I
+
+  classDef delivered fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+  classDef planned fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray: 5 5
+  class W,C,I delivered
+  class ING,K,COR,AR,LG,SOAR,AG,AIP,PG,CH planned
 ```
 
-| Component | Technology | Responsibility |
+Green modules are delivered today; dashed modules are planned. The only path
+implemented today is Web → IAM/Console with PostgreSQL and Redis serving IAM. The pipeline is the next build, not a claim about current behavior.
+
+| Layer | Components | State |
 | --- | --- | --- |
-| **Web** | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui | Browser entry, same-origin API proxy, product pages, EN/zh-CN UI. |
-| **IAM** | Go, Gin, GORM, Goose | Accounts, Argon2id credentials, SCS-backed logical sessions, users, roles, flat permissions, authorization, audit. |
-| **Console** | Go, Gin | Security-operations entry point. Verifies identity through IAM and authorizes SSE streams; business workflows are in progress. |
-| **PostgreSQL** | PostgreSQL 16 | IAM tables and sessions. Every module owns its own schema and migrations. |
-| **Redis** | Redis 7 | Login rate limiting and shared cache keys. |
+| Identity and access | IAM, PostgreSQL, Redis | Delivered |
+| Control plane | Web, Console | Foundation delivered |
+| Ingestion | `ingestor`, Kafka, connector registry | Planned |
+| Correlation | `correlator`, PostgreSQL alerts, ClickHouse telemetry | Planned |
+| Investigation | `agent-runtime`, `llm-gateway`, evidence ledger, memory | Planned |
+| Response | `soar`, approvals, native-ID write-back | Planned |
+| AI runtime protection | `ai-gateway`, `ai-policy` | Planned |
 
-Requests reach the Web same-origin entry; the Web server forwards `/api/v1/iam`
-and `/api/v1/console` to the owning service. The optional reverse proxy
-terminates HTTPS in deployments. Only IAM talks to PostgreSQL and Redis in the
-current implementation.
-
-### Authorization model
+### Identity and authorization (delivered)
 
 ```mermaid
 flowchart LR
@@ -111,9 +194,10 @@ flowchart LR
 
 | Layer | Choices |
 | --- | --- |
-| Backend | Go 1.27.3, Gin, GORM, Goose, Cobra, Viper, SCS, Argon2id, Gorilla CSRF |
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, TanStack Query/Table, Zod, React Hook Form, next-intl |
-| Data | PostgreSQL 16, Redis 7 |
+| Delivered services | Go 1.27, Gin, GORM, Goose, pgx, SCS, Argon2id, Gorilla CSRF; Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, TanStack Query/Table, Zod, React Hook Form, next-intl |
+| Delivered data | PostgreSQL 16, Redis 7 |
+| Planned services | `ingestor` (Go); `correlator`, `agent-runtime`, `soar`, `ai-policy` (Python); `llm-gateway` (Go); `ai-gateway` (agentgateway, Rust) |
+| Planned data plane | Kafka, ClickHouse, S3-compatible object storage |
 | Tooling | pnpm, GNU Make, Biome, Vitest, Playwright, Go test |
 
 ## Quick start

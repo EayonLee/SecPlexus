@@ -1,12 +1,16 @@
 # SecPlexus
 
-**以身份为中心的 AI 原生安全运营平台。**
+**One AI Security Platform: Protect, Operate, Respond.**
 
-SecPlexus 是一个开源安全运营平台。它把身份、授权、审计与运营控制台放在同一套
-系统里，让安全团队在一个地方回答“谁、用什么权限、做了什么、为什么”。
+**一体化 AI 安全平台：防护、运营、响应。**
 
-项目处于**早期开发阶段（pre-1.0）**。IAM 服务与 Web 的 IAM 页面已经可用；
-运营工作流、数据接入、关联分析和模型接入仍在公开开发中。
+SecPlexus 是开源的、以身份为底座的安全运营平台，面向已经部署 SIEM、EDR、WAF 与云安全的企业。
+它不替换这些系统，而是做它们之上的中立大脑：把不同厂商的告警还原成同一次攻击，
+用可审计的 AI 分析师研判事件组，并通过受治理的响应在企业原有工具中完成闭环。
+
+行业不缺“在旧控制台上外挂一个聊天框”的产品：人发起会话，模型一次只看一条告警，
+研判方法论活在提示词里。SecPlexus 反过来设计：告警作为数据流入，关联决定哪些告警
+属于同一起事件，确定性图编排加上受限模型调用，产出证据、结论和完整审计链。
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> · <a href="docs/design/architecture/README.md">架构文档</a> · <a href="CONTRIBUTING.zh-CN.md">参与贡献</a>
@@ -22,60 +26,131 @@ SecPlexus 是一个开源安全运营平台。它把身份、授权、审计与�
   <a href="https://github.com/EayonLee/SecPlexus/stargazers"><img src="https://img.shields.io/github/stars/EayonLee/SecPlexus?style=flat&amp;logo=github" alt="GitHub 星标数" /></a>
 </div>
 
+## 防护 · 运营 · 响应
+
+产品方向是用一个平台覆盖三类结果：
+
+- **防护新的攻击面**：LLM 应用、Agent、MCP 工具调用与模型 Key。身份与运行时策略在
+  同一平台内，护栏拦下的 Prompt 注入不是另一个产品的告警，而是与 EDR 检测进入同一条
+  案件流水线。
+- **把告警洪水当成一个整体来运营**：把厂商告警归一化为 OCSF，折叠重复与同源噪音，
+  交给 AI 的不是单条告警，而是一个带攻击链的事件视图。分析师只在三个队列里工作：
+  待授权、需要人的判断、已闭环待抽查。
+- **用受治理的闭环完成响应**：Agent 提议，SOAR 在人审批后执行；执行前检查资产爆炸
+  半径，动作幂等，并按上游厂商的原生 ID 回写。AI 不拥有直接隔离主机或禁用账号的权力。
+
+今天已交付的是身份与控制面底座。接入、关联、研判与响应服务正在公开开发中；下面的
+状态表明确区分“已交付”与“规划中”。
+
 ## 为什么是 SecPlexus
 
-安全产品通常各自生长：身份一套、检测一套、处置一套，每套都有自己的权限模型和
-审计日志。SecPlexus 从相反的方向开始：
-
-- **身份是地基。** 用户、角色、权限和会话由唯一的 IAM 服务拥有；其他模块向 IAM
-  询问，而不是各自发明第二套答案。
-- **只有一条授权路径。** 用户持有角色，角色持有权限，权限是 `iam.users.read` 这样的
-  稳定键。当前模型没有组织作用域、超级管理员旁路或隐藏的第二条路径。
-- **默认可审计。** 安全相关变更在同一事务里写入追加型审计事件；审计行不能被更新，
-  删除只允许保留期清理执行。
-- **模块边界是强制的。** 每个应用拥有自己的配置、启动和表；跨模块访问走 HTTP
-  契约，不导入私有包，也不读别人的表。
-- **三个平台一个开发入口。** `make dev`、`make test`、`make stop` 在 macOS、Linux、
-  Windows PowerShell 与 `cmd.exe` 中一致可用。
+- **替换大脑，不替换手脚。** 企业已有的 SIEM、EDR、WAF 与云安全继续工作。
+  SecPlexus 站在它们之上，关联任何单一厂商看不到的部分，再把处置动作写回原生工具。
+- **运营告警，不做第二个日志湖。** 处理单元是归一化后的告警，而不是再建一套原始
+  日志仓库。用户的 SIEM 仍是日志的事实源，SecPlexus 补上跨厂商关联、案件上下文与
+  响应闭环——这是厂商各自为战的栈给不了的。
+- **AI-native 是架构，不是提示词。** 研判单元是事件组；流程是确定性图编排加边界清晰的
+  模型节点，带 groundedness 门禁、证据级判定和三值结论：真阳性、假阳性或
+  `insufficient_info`。工具返回空结果，永远不能当作“告警是良性的”证据。
+- **每一次纠正都沉淀为机构记忆。** 分析师改结论时必须填写原因；原因、证据与结果成为
+  下一次研判可检索的上下文。影子模式先记录 AI 会怎么做，某一类告警靠长期正确率
+  “挣得”自动关闭的授权，而不是靠一个全局置信度阈值。
+- **告警是事实，案件是产品。** 告警保持完整、可查询的事实层；事件视图是 AI 的工作集；
+  案件是唯一持久的运营对象，承载时间线、证据、审批、处置与复盘。
+- **身份是底座，不是补丁。** 唯一的 IAM 拥有用户、会话、角色、权限与审计；只有一条
+  授权路径：用户 → 角色 → 权限。审计只追加，改密或状态变化通过 `auth_epoch` 立即
+  失效所有旧会话。
+- **失败必须可见。** 关联能力降级时保留原始告警并显式标记；工具失败与“查无结果”分开；
+  不确定队列是一等公民，而不是隐藏的积压。
 
 ## 当前状态
 
-| 区域 | 状态 | 说明 |
-| --- | --- | --- |
-| IAM | 可用 | 登录、可撤销会话、改密/重置密码、用户、全局角色、扁平权限、授权、追加型审计；包含表注释和版本化迁移。 |
-| Web | IAM 页面可用 | 真实的 `/login`、`/settings`、`/settings/users`、`/settings/roles`、`/settings/audit`；中英文双语。工作台仍是示例数据。 |
-| Console | 早期 | 身份上下文与带授权的 SSE 连接；业务工作流尚未实现。 |
-| 接入与归一化 | 计划中 | 见[接入与归一化](docs/plans/ingest-and-normalization/spec.md)。 |
-| 关联分析与响应 | 计划中 | 尚未开始。 |
-| `llm-gateway` | 计划中 | 所有出站模型调用统一经过该模块；IAM、Console、Web 不持有供应商密钥。 |
+SecPlexus 处于 pre-1.0。规划中的服务是设计承诺，不是已交付能力。
 
-1.0 之前 API、数据库结构和界面都可能变化。标记为计划中的部分不是已交付能力。
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 身份与访问（IAM） | 已交付 | 登录、可撤销会话、改密/重置密码、用户、全局角色、扁平权限、授权、追加型审计、版本化迁移与表注释。 |
+| Web 与 Console 控制面 | 底座已交付 | Web 提供中英文 IAM 页面；Console 提供身份上下文与带授权的 SSE。案件与工作台尚未实现。 |
+| 告警接入与归一化 | 规划中 | Go `ingestor`、Kafka 缓冲、OCSF 2004 归一化、厂商连接器注册表。 |
+| 关联与事件视图 | 规划中 | Python `correlator`：精确去重、窗口抑制、跨源实体关联与攻击链滚动聚合。 |
+| AI 研判与记忆 | 规划中 | Python `agent-runtime`、图编排研判、证据 Ledger、机构记忆与规则建议；所有模型调用经 `llm-gateway`。 |
+| 响应编排 | 规划中 | Python `soar`：审批、资产爆炸半径门控、幂等 playbook 与原生 ID 回写。 |
+| AI 运行时防护 | 规划中 | `ai-gateway`（agentgateway）与 `ai-policy`：Prompt 注入、DLP、模型 Key 滥用、MCP 工具治理与 Agent 行为审计。 |
+
+1.0 之前 API、数据库结构与界面都可能变化。
 
 ## 架构
 
+目标是数据驱动的运营流水线，控制面独立：告警与 AI 流量从左侧进入，人通过 Web、
+Console 与 IAM 授权工作，数据不穿过人。
+
 ```mermaid
 flowchart LR
-  B["浏览器"] -->|"HTTPS"| P["反向代理<br/>（可选）"]
-  P --> W["Web<br/>Next.js / React"]
-  W -->|"同源<br/>/api/v1/iam"| I["IAM<br/>Go / Gin"]
-  W -->|"同源<br/>/api/v1/console"| C["Console<br/>Go / Gin"]
-  C -->|"服务凭证<br/>+ 用户会话"| I
-  I --> PG["PostgreSQL<br/>身份、会话、审计"]
-  I --> R["Redis<br/>登录限流"]
+  subgraph SRC["遥测与 AI 流量"]
+    A["EDR · WAF · SIEM<br/>云安全"]
+    U["LLM 应用 · Agent<br/>MCP 工具调用"]
+  end
+
+  subgraph CTRL["控制面 — 已交付底座"]
+    W["Web<br/>Next.js"]
+    C["Console<br/>Go / Gin"]
+    I["IAM<br/>Go / Gin"]
+  end
+
+  subgraph PIPE["AI 运营流水线 — 规划中"]
+    ING["ingestor<br/>Go"]
+    K["Kafka"]
+    COR["correlator<br/>Python"]
+    AR["agent-runtime<br/>Python"]
+    LG["llm-gateway<br/>Go"]
+    SOAR["soar<br/>Python"]
+    AG["ai-gateway<br/>agentgateway"]
+    AIP["ai-policy<br/>Python"]
+  end
+
+  subgraph STORE["数据"]
+    PG["PostgreSQL"]
+    CH["ClickHouse"]
+  end
+
+  P["模型供应商"]
+
+  A -->|"告警"| ING --> K --> COR
+  COR -->|"告警 + 事件视图"| PG
+  COR -->|"遥测"| CH
+  COR -->|"案件事件"| AR
+  AR -->|"案件状态"| C
+  AR -->|"模型调用"| LG --> P
+  U -->|"LLM / MCP"| AG -->|"决策"| AIP
+  AG -->|"放行"| P
+  AIP -->|"拦截 = 案件"| ING
+  AR -->|"处置提议"| SOAR
+  SOAR -->|"原生 ID 回写"| A
+  W -->|"同源"| C
+  W -->|"同源"| I
+  C -->|"服务凭证"| I
+
+  classDef delivered fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+  classDef planned fill:#f5f5f5,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray: 5 5
+  class W,C,I delivered
+  class ING,K,COR,AR,LG,SOAR,AG,AIP,PG,CH planned
 ```
 
-| 组件 | 技术 | 职责 |
+绿色为今天已交付的模块，虚线为规划中模块。当前已实现的路径只有
+Web → IAM/Console，PostgreSQL 与 Redis 目前服务于 IAM；流水线是下一步建设，
+不是对现状的宣称。
+
+| 层次 | 组件 | 状态 |
 | --- | --- | --- |
-| **Web** | Next.js、React、TypeScript、Tailwind CSS、shadcn/ui | 浏览器入口、同源 API 代理、产品页面、中英文界面。 |
-| **IAM** | Go、Gin、GORM、Goose | 账号、Argon2id 凭据、SCS 逻辑会话、用户、角色、扁平权限、授权、审计。 |
-| **Console** | Go、Gin | 安全运营入口；通过 IAM 校验身份并授权 SSE 流；业务工作流开发中。 |
-| **PostgreSQL** | PostgreSQL 16 | IAM 表与会话；每个模块拥有自己的 schema 和迁移。 |
-| **Redis** | Redis 7 | 登录限流与共享缓存键。 |
+| 身份与访问 | IAM、PostgreSQL、Redis | 已交付 |
+| 控制面 | Web、Console | 底座已交付 |
+| 接入 | `ingestor`、Kafka、连接器注册表 | 规划中 |
+| 关联 | `correlator`、PostgreSQL 告警、ClickHouse 遥测 | 规划中 |
+| 研判 | `agent-runtime`、`llm-gateway`、证据 Ledger、机构记忆 | 规划中 |
+| 响应 | `soar`、审批、原生 ID 回写 | 规划中 |
+| AI 运行时防护 | `ai-gateway`、`ai-policy` | 规划中 |
 
-请求先到 Web 同源入口，由 Web 服务端把 `/api/v1/iam` 和 `/api/v1/console` 转发给
-所属服务；部署时可选反向代理终止 HTTPS。当前只有 IAM 直接访问 PostgreSQL 和 Redis。
-
-### 授权模型
+### 身份与授权（已交付）
 
 ```mermaid
 flowchart LR
@@ -98,9 +173,10 @@ flowchart LR
 
 | 层次 | 选择 |
 | --- | --- |
-| 后端 | Go 1.27.3、Gin、GORM、Goose、Cobra、Viper、SCS、Argon2id、Gorilla CSRF |
-| 前端 | Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn/ui、TanStack Query/Table、Zod、React Hook Form、next-intl |
-| 数据 | PostgreSQL 16、Redis 7 |
+| 已交付服务 | Go 1.27、Gin、GORM、Goose、pgx、SCS、Argon2id、Gorilla CSRF；Next.js 16、React 19、TypeScript、Tailwind CSS 4、shadcn/ui、TanStack Query/Table、Zod、React Hook Form、next-intl |
+| 已交付数据 | PostgreSQL 16、Redis 7 |
+| 规划中服务 | `ingestor`（Go）；`correlator`、`agent-runtime`、`soar`、`ai-policy`（Python）；`llm-gateway`（Go）；`ai-gateway`（agentgateway，Rust） |
+| 规划中数据面 | Kafka、ClickHouse、S3 兼容对象存储 |
 | 工具 | pnpm、GNU Make、Biome、Vitest、Playwright、Go test |
 
 ## 快速开始
