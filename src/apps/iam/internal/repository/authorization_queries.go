@@ -8,11 +8,14 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 )
 
 // LockManagement 取得低频管理写入的事务锁，避免管理员和授权竞态。
 func LockManagement(ctx context.Context, db *gorm.DB, managementLock int64) error {
+	if err := requireTransaction(db, "LockManagement"); err != nil {
+		return err
+	}
+
 	return queries(db).LockManagement(ctx, managementLock)
 }
 
@@ -26,10 +29,10 @@ func ReadPermission(ctx context.Context, db *gorm.DB, action string) (authorizat
 	permission := authorization.Permission{
 		Key:                row.PermissionKey,
 		Description:        row.Description,
-		RiskLevel:          enum.RiskLevel(row.RiskLevel),
+		RiskLevel:          row.RiskLevel,
 		Delegable:          row.Delegable,
 		RequiresRecentAuth: row.RequiresRecentAuth,
-		Status:             enum.PermissionStatus(row.Status),
+		Status:             row.Status,
 	}
 	module, resource, act, ok := authorization.ParsePermissionKey(row.PermissionKey)
 	if !ok {

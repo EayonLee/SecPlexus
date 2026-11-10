@@ -156,3 +156,23 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 | 文档与规范 | 0.5 天 | data-access.md + AGENTS |
 
 合计约 **5–6 个工作日**（含自测与回归），分 6–7 个 PR 交付。
+
+## 九、实施记录（as-built）
+
+| 批次 | 结果 | 与计划的差异 |
+|---|---|---|
+| B0 | PR #41 已合并 | 采用 `database/sql` 风味以便与 GORM 事务共用连接；`LockUsers` 改为单 id 查询由 Go 排序逐条加锁（数组形式会引入 `lib/pq`） |
+| B1 | PR #42 已合并 | 实际拆成 14 条具名查询（原计划记 13 条：新增 `RolePermissionKeys`/`TouchRole`/`DeleteUserRoles`/`InsertUserRoles` 以便数组解耦）；数组参数统一用 jsonb 展开；封闭取值列（`iam.permissions.status`/`risk_level`）用 column override 映射到 `internal/enum` |
+
+落地时补充的两条硬约束（已进 `data-access.md`）：
+
+1. 生成查询与 GORM 调用**必须共用同一事务**；新增集成测试 `TestGeneratedQueriesShareTheCallerTransaction` 用回滚可见性守住这一点。
+2. 依赖事务范围的锁操作（`LockUsers`、`LockManagement`）在自动提交会话上会静默失效，因此加了 `requireTransaction` 守卫与对应测试。
+
+顺带修掉的存量红灯：`migrations_integration_test.go`（按单基线断言）、`server_integration_test.go`（用 `offset` 断言游标分页接口）。
+
+## 十、刻意保留的 gap（不视为遗漏）
+
+- `sqlc vet` 的 `db-prepare`/`query-plan` 规则需要可连接的数据库；CI 目前没有 PostgreSQL 服务，故只在本地可用时手工跑，未进门禁。需要时再加 `services: postgres`。
+- `emit_interface`、`:copyfrom`、`sqlc.embed` 暂未使用：当前不需要 mock 查询层、没有大批量插入场景、也没有需要嵌入的关联结构；为避免过度设计而保留。
+

@@ -8,6 +8,7 @@ package sqlcgen
 import (
 	"context"
 
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/google/uuid"
 )
 
@@ -91,10 +92,10 @@ WHERE permission_key = $1
 type ReadPermissionRow struct {
 	PermissionKey      string
 	Description        string
-	RiskLevel          string
+	RiskLevel          enum.RiskLevel
 	Delegable          bool
 	RequiresRecentAuth bool
-	Status             string
+	Status             enum.PermissionStatus
 }
 
 func (q *Queries) ReadPermission(ctx context.Context, permissionKey string) (ReadPermissionRow, error) {
