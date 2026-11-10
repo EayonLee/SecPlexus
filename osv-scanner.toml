@@ -6,9 +6,4 @@
 [[IgnoredVulns]]
 id = "GHSA-gcqx-w48m-w2h4"
 effectiveUntil = 2027-03-31
-reason = "dev-only: shadcn CLI 的传递依赖，运行时不加载，当前无修复版本"
-
-[[IgnoredVulns]]
-id = "GHSA-g3hv-75wg-m249"
-effectiveUntil = 2027-03-31
-reason = "dev-only: ts-morph 的传递依赖，修复需 major 升级，随工具链升级处理"
+reason = "dev-only: shadcn 主题包的传递依赖，运行时不加载，当前无修复版本"
