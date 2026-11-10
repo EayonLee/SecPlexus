@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 
 import { useTranslations } from "next-intl";
 
+import { CloudOff } from "lucide-react";
+
 import type { PermissionKey } from "@/auth/permissions.gen";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 
 import { initializeSession, refreshMe, useIdentity } from "../iam/session";
+import { ErrorState } from "./error-state";
 import { LanguageSwitcher } from "./language-switcher";
 
 export function useCan(action: PermissionKey) {
@@ -55,16 +57,20 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
     );
   if (auth.status === "unavailable")
     return (
-      <div className="flex flex-col gap-4 p-6">
-        <div className="flex justify-end">
+      <div className="relative">
+        <div className="absolute top-4 right-4">
           <LanguageSwitcher />
         </div>
-        <Alert variant="destructive">
-          <AlertTitle>{t("unavailable")}</AlertTitle>
-          <AlertDescription>{t("paused")}</AlertDescription>
-        </Alert>
-        <Button onClick={() => void refreshMe()}>{t("reconnect")}</Button>
-        {auth.principal && <div inert>{children}</div>}
+        <ErrorState
+          icon={CloudOff}
+          title={t("unavailable")}
+          description={t("paused")}
+          actions={
+            <Button size="sm" variant="outline" onClick={() => void refreshMe()}>
+              {t("reconnect")}
+            </Button>
+          }
+        />
       </div>
     );
   return children;

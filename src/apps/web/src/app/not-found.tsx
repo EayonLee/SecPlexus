@@ -1,24 +1,34 @@
 "use client";
 import Link from "next/link";
 
+import { FileQuestion } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+
+import { ErrorState } from "@/spx/components/error-state";
 import { LanguageSwitcher } from "@/spx/components/language-switcher";
 
 export default function NotFound() {
   const t = useTranslations("Common");
 
   return (
-    <div className="relative flex h-dvh flex-col items-center justify-center space-y-2 text-center">
+    <div className="relative">
       <div className="absolute top-4 right-4">
         <LanguageSwitcher />
       </div>
-      <h1 className="text-2xl font-semibold">{t("notFoundTitle")}</h1>
-      <p className="text-muted-foreground">{t("notFoundDescription")}</p>
-      <Link prefetch={false} replace href="/dashboard">
-        <Button variant="outline">{t("backToDashboard")}</Button>
-      </Link>
+      <ErrorState
+        icon={FileQuestion}
+        title={t("notFoundTitle")}
+        description={t("notFoundDescription")}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link prefetch={false} replace href="/dashboard">
+              {t("backToDashboard")}
+            </Link>
+          </Button>
+        }
+      />
     </div>
   );
 }

@@ -40,7 +40,10 @@
     "rowsPerPage": "每页条数",
     "pageInfo": "第 {page, number} / {total, number} 页",
     "firstPage": "首页",
-    "lastPage": "末页"
+    "lastPage": "末页",
+    "errorTitle": "页面出错",
+    "errorDescription": "这个页面没能加载完成，可以重试；如果一直失败，请返回工作台。",
+    "retry": "重试"
   },
   "Navigation": {
     "dashboards": "工作台",
