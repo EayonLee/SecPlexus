@@ -37,7 +37,7 @@ jobs:
           go-version: '1.27.3'
           cache: true
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
         with:
           version: 10.32.1
 
@@ -67,7 +67,7 @@ jobs:
           go-version: '1.27.3'
           cache: true
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
         with:
           version: 10.32.1
 
@@ -104,7 +104,7 @@ jobs:
           persist-credentials: false
 
       - name: Audit workflows and action pinning (zizmor)
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           # 只要高危项阻断，避免低价值噪声把 CI 变成摆设。
           min-severity: high
