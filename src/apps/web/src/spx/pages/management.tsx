@@ -1,6 +1,14 @@
 "use client";
 
-import { AccessDenied, RequireAccess } from "../components/access";
+import Link from "next/link";
+
+import { FileQuestion } from "lucide-react";
+import { useTranslations } from "next-intl";
+
+import { Button } from "@/components/ui/button";
+
+import { RequireAccess } from "../components/access";
+import { ErrorState } from "../components/error-state";
 import { settingsPageFor } from "../iam/navigation";
 import { AuditPage } from "./audit";
 import { RolesPage } from "./roles";
@@ -10,7 +18,8 @@ import { UsersPage } from "./users";
 // 页面之间用左侧菜单切换，不再有分组标签栏。
 export function ManagementPage({ pathname }: { pathname: string }) {
   const page = settingsPageFor(pathname);
-  if (!page) return <AccessDenied />;
+  // 路径不存在是 404 语义，不是权限问题：告诉用户地址不对，而不是“无权访问”。
+  if (!page) return <UnknownSettingsPath pathname={pathname} />;
 
   return (
     <RequireAccess action={page.action}>
@@ -20,5 +29,24 @@ export function ManagementPage({ pathname }: { pathname: string }) {
         {page.id === "audit" && <AuditPage />}
       </div>
     </RequireAccess>
+  );
+}
+
+function UnknownSettingsPath({ pathname }: { pathname: string }) {
+  const t = useTranslations("Common");
+
+  return (
+    <ErrorState
+      icon={FileQuestion}
+      title={t("notFoundTitle")}
+      description={pathname}
+      actions={
+        <Button asChild variant="outline" size="sm">
+          <Link prefetch={false} replace href="/dashboard">
+            {t("backToDashboard")}
+          </Link>
+        </Button>
+      }
+    />
   );
 }

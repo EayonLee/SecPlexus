@@ -40,7 +40,10 @@
     "rowsPerPage": "Rows per page",
     "pageInfo": "Page {page, number} of {total, number}",
     "firstPage": "First page",
-    "lastPage": "Last page"
+    "lastPage": "Last page",
+    "errorTitle": "Something went wrong",
+    "errorDescription": "This page did not finish loading. Retry, or go back to the dashboard if it keeps failing.",
+    "retry": "Retry"
   },
   "Navigation": {
     "dashboards": "Dashboards",
