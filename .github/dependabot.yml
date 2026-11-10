@@ -22,7 +22,10 @@ updates:
       - dependency-name: "github.com/alexedwards/scs/pgxstore"
 
   - package-ecosystem: npm
-    directory: "/src/apps/web"
+    # The pnpm workspace lockfile lives at the repository root. Pointing
+    # Dependabot at src/apps/web updated package.json without the lockfile and
+    # produced an invalid pull request.
+    directory: "/"
     schedule:
       interval: weekly
       day: monday
