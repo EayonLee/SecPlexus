@@ -1,6 +1,6 @@
 # Logo sources
 
-[ACKNOWLEDGEMENTS.md](../ACKNOWLEDGEMENTS.md) includes projects currently used by the application, its retained template components, or development tools. Use verified upstream logos without redrawing them. Defer projects without a confirmed, suitable logo; do not substitute text badges or unrelated avatars. Update both language versions together.
+The README acknowledgements include projects currently used by the application, its retained template components, or development tools. Use verified upstream logos without redrawing them. Defer projects without a confirmed, suitable logo; do not substitute text badges or unrelated avatars. Update both language versions together.
 
 | Logo | Source / attribution |
 | --- | --- |
