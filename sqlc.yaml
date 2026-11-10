@@ -1,0 +1,26 @@
+version: "2"
+# IAM 的 PostgreSQL 数据访问由 sqlc 生成；schema 直接取 goose 迁移，不维护第二份 DDL。
+# 迁移期使用 database/sql 风味：生成的查询可以绑定 GORM 事务底层的 ConnPool，
+# 从而与现有 GORM 事务共用同一个连接（不会出现两套事务）。移除 GORM 后再评估切到 pgx/v5 原生风味。
+sql:
+  - engine: postgresql
+    schema: src/apps/iam/migrations
+    queries: src/apps/iam/internal/repository/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: src/apps/iam/internal/repository/sqlcgen
+        sql_package: database/sql
+        emit_json_tags: false
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        # 只生成被查询引用到的表模型，未迁移的表不会产生无用结构体。
+        omit_unused_structs: true
+        overrides:
+          - db_type: "uuid"
+            go_type: { import: "github.com/google/uuid", type: "UUID" }
+          - db_type: "uuid"
+            nullable: true
+            go_type: { import: "github.com/google/uuid", type: "UUID", pointer: true }
+          - db_type: "jsonb"
+            go_type: { import: "encoding/json", type: "RawMessage" }

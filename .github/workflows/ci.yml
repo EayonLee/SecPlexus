@@ -104,6 +104,10 @@ jobs:
       - name: Catalogs and migration boundaries
         run: pnpm catalogs:check
 
+      # 生成代码入库，必须与 queries/*.sql 同步；漂移即失败。
+      - name: Generated query code is up to date
+        run: make sqlc-check
+
   # 供应链与密钥闸门：与 test/quality 并行，不影响关键路径。
   # 三项检查都以退出码阻断，不上传 SARIF，因此不需要 security-events 权限。
   security:
