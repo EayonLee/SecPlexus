@@ -169,7 +169,7 @@ investigation, response and guardrail services are under active development.
 
 | Layer | Choices |
 | --- | --- |
-| Services | Go 1.27, Gin, GORM, Goose, pgx; Python for the planned correlator, agent-runtime, SOAR and ai-policy; Next.js 16 and React 19 for Web |
+| Services | Go 1.27, Gin, sqlc, Goose, pgx (GORM is being removed); Python for the planned correlator, agent-runtime, SOAR and ai-policy; Next.js 16 and React 19 for Web |
 | Data | PostgreSQL 16, Redis 7, Kafka, ClickHouse, S3-compatible object storage |
 | AI | Graph-orchestrated agent runtime, `llm-gateway` (Bifrost core), NeMo Guardrails, `ai-gateway` (agentgateway) |
 | Tooling | pnpm, GNU Make, Biome, Vitest, Playwright, Go test |
@@ -351,8 +351,13 @@ for the source and license of each mark.
       <sub>Gin</sub>
     </td>
     <td align="center" valign="middle" width="20%">
-      <a href="https://github.com/go-gorm/gorm" title="GORM"><img src="docs/assets/gorm.svg" alt="GORM" height="32" /></a><br />
-      <sub>GORM</sub>
+      <a href="https://github.com/go-gorm/gorm" title="GORM（移除中）"><img src="docs/assets/gorm.svg" alt="GORM" height="32" /></a><br />
+      <sub>GORM（移除中）</sub>
+
+    <td align="center" valign="middle" width="20%">
+      <a href="https://github.com/sqlc-dev/sqlc" title="sqlc"><img src="docs/assets/sqlc.png" alt="sqlc" height="32" /></a><br />
+      <sub>sqlc</sub>
+    </td>
     </td>
     <td align="center" valign="middle" width="20%">
       <a href="https://github.com/pressly/goose" title="Goose"><img src="docs/assets/goose.png" alt="Goose" height="32" /></a><br />
