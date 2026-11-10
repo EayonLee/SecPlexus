@@ -2,6 +2,7 @@ package bootstrap_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,11 @@ func TestServeReturnsWhenContextCancelled(t *testing.T) {
 	go func() { done <- bootstrap.Serve(ctx, cfg) }()
 
 	select {
-	case <-done:
+	case err := <-done:
+		// 取消后允许返回 nil 或 ctx 错误；其他错误必须暴露出来。
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve returned %v", err)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Serve did not return after context cancellation")
 	}

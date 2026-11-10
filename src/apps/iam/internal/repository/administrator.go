@@ -100,7 +100,7 @@ func syncAdministrator(ctx context.Context, tx *gorm.DB, username, password stri
 		target.Status = enum.UserStatusActive
 	} else {
 		passwordChanged := target.PasswordHash == "" || hasher.CompareHashAndPassword(target.PasswordHash, password) != nil
-		changed = passwordChanged || target.Username != username || target.Status != enum.UserStatusActive || !(hasCurrent && current.ID == target.ID)
+		changed = passwordChanged || target.Username != username || target.Status != enum.UserStatusActive || !hasCurrent || current.ID != target.ID
 		if changed {
 			if err = tx.WithContext(ctx).Table("iam.users").Where("id = ?", target.ID).Updates(map[string]any{
 				"username":     username,

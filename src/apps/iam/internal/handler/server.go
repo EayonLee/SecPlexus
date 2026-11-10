@@ -43,13 +43,13 @@ type Server struct {
 }
 
 // New 在启动时装配有界认证资源和显式 HTTP 依赖。
-func New(svc *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, ReadyCheck func(context.Context) error) (*Server, error) {
+func New(svc *service.Service, security *iammiddleware.Security, limiter *authentication.Limiter, readyCheck func(context.Context) error) (*Server, error) {
 	slots := make(chan struct{}, 4)
 	auth, err := authentication.NewAuthenticator(svc.Sessions, limiter, slots)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, ReadyCheck: ReadyCheck}, nil
+	return &Server{Handler: &management.Handler{Service: svc, HashSlots: slots}, Service: svc, Auth: auth, Security: security, Limiter: limiter, ReadyCheck: readyCheck}, nil
 }
 
 // Errors 将 Gin 收集的业务错误在响应及会话提交前统一映射。

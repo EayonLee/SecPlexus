@@ -19,8 +19,9 @@ func Serve(ctx context.Context, servers ...*http.Server) error {
 			_ = listener.Close()
 		}
 	}()
+	var listenConfig net.ListenConfig
 	for _, server := range servers {
-		listener, err := net.Listen("tcp", server.Addr)
+		listener, err := listenConfig.Listen(ctx, "tcp", server.Addr)
 		if err != nil {
 			return err
 		}

@@ -37,7 +37,7 @@ func Read(filename string) (*viper.Viper, error) {
 		return nil, errors.New("invalid YAML configuration")
 	}
 	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("configuration must contain one YAML document")
 	}
 	if _, err := expandValues(values, "", &expand.Config{Env: expand.ListEnviron(os.Environ()...)}); err != nil {

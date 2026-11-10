@@ -53,7 +53,7 @@ func (strictJSON) Bind(request *http.Request, target any) error {
 		return errors.New("request must be a JSON object")
 	}
 	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err != nil {
 			return err
 		}
