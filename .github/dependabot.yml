@@ -12,6 +12,11 @@ updates:
       go-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Dependabot resolves the parent github.com/alexedwards/scs module and
+      # reports dependency_file_not_resolvable even though Go resolves this
+      # submodule correctly. Review the pseudo-version manually with go get.
+      - dependency-name: "github.com/alexedwards/scs/pgxstore"
 
   - package-ecosystem: npm
     directory: "/"
