@@ -6,6 +6,18 @@ Dependabot、Code scanning 与 Secret scanning 的告警原则上必须修复。
 登记要求：来源告警编号、判定依据（可复现的事实，不是"看起来没问题"）、补偿措施、复审日期。
 复审日期到期前必须重新判断；依赖没有新版本就继续延期，有版本就升级并删除本条。
 
+### GHSA-g3hv-75wg-m249 · minimatch ReDoS（已修复，附依赖更新例外）
+
+- **状态**：fixed（`pnpm.overrides` 把 `@ts-morph/common` 的 minimatch 固定到 `^11.0.1`，锁文件为 11.0.5）
+- **为什么 Dependabot 里另加 ignore**：`@ts-morph/common` 声明 `minimatch ^10`，而修复版本是 11.0.1，
+  属于跨主版本；Dependabot 的动态安全更新因此在每次推送到 main 时失败并报
+  `security_update_not_possible`（`latest-resolvable-version: 10.2.6`），在 Security 页留下无法消除的错误。
+  它也无法表达 pnpm override，所以对 `minimatch` 关闭自动更新是唯一能让该生态更新任务恢复成功的做法。
+- **补偿措施**：override 使用 `^11.0.1`，重新安装即取最新 11.x；CI 的 `security` job（osv-scanner）
+  对任何重新出现的漏洞版本直接失败。
+- **后续**：`shadcn` 或 `@ts-morph/common` 升级到原生使用 minimatch 11 后，删除 override 与 dependabot ignore。
+- **复审日期**：2027-03-31
+
 ## 已登记
 
 ### GHSA-82ff-hg59-8x73 · gorilla/csrf TrustedOrigins 校验不足
