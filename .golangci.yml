@@ -1,0 +1,41 @@
+version: "2"
+
+# 显式清单而不是默认集：启用哪些、为什么启用写在 docs/plans/go-quality-gates/plan.md。
+# 参照 GitHub CLI（cli/cli）的 .golangci.yml 写法。
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errcheck
+    - errorlint
+    - gocheckcompilerdirectives
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unused
+  settings:
+    govet:
+      enable: [httpresponse]
+  exclusions:
+    rules:
+      # 测试里构造请求不需要 ctx 传播与 body 关闭断言。
+      - path: _test\.go$
+        linters: [bodyclose, noctx]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

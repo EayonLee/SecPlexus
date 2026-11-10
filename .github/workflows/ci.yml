@@ -83,6 +83,18 @@ jobs:
       - name: Go vet
         run: go vet ./src/...
 
+      # goinstall 让 action 用 CI 自己的 Go 1.27.3 从源码构建：
+      # 预编译二进制可能由更旧的 Go 构建，会拒绝分析 go.mod 声明的更高语言版本。
+      - name: Go lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+          install-mode: goinstall
+          args: --config .golangci.yml ./src/...
+
+      - name: Go reachable vulnerabilities
+        run: make vuln-go
+
       - name: Web lint
         run: pnpm lint
 

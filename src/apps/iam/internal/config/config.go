@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )

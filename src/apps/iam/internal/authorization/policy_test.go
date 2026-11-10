@@ -1,6 +1,7 @@
 package authorization
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestEvaluateOnlyChecksStatusAndPermissionKey(t *testing.T) {
 
 	// deprecated 已不属于当前权限目录；任何非 active 状态都必须拒绝。
 	deprecated := Permission{Key: "iam.roles.read", Status: enum.PermissionStatus("deprecated")}
-	if err := Evaluate(base, deprecated, now, 5*time.Minute); err != ErrDenied {
+	if err := Evaluate(base, deprecated, now, 5*time.Minute); !errors.Is(err, ErrDenied) {
 		t.Fatalf("deprecated status returned %v", err)
 	}
 
@@ -53,7 +54,7 @@ func TestRecentAuthenticationWindowIsEnforced(t *testing.T) {
 
 	stale := now.Add(-6 * time.Minute)
 	snapshot.Principal.AuthenticatedAt = stale
-	if err := Evaluate(snapshot, permission, now, 5*time.Minute); err != ErrRecentAuthRequired {
+	if err := Evaluate(snapshot, permission, now, 5*time.Minute); !errors.Is(err, ErrRecentAuthRequired) {
 		t.Fatalf("stale password confirmation returned %v", err)
 	}
 
@@ -66,13 +67,13 @@ func TestRecentAuthenticationWindowIsEnforced(t *testing.T) {
 	// 未来时间戳说明时钟或数据异常，不能放宽要求。
 	future := now.Add(time.Hour)
 	snapshot.Principal.ReauthenticatedAt = &future
-	if err := Evaluate(snapshot, permission, now, 5*time.Minute); err != ErrRecentAuthRequired {
+	if err := Evaluate(snapshot, permission, now, 5*time.Minute); !errors.Is(err, ErrRecentAuthRequired) {
 		t.Fatalf("future confirmation returned %v", err)
 	}
 
 	// 没有认证时间的账号也拿不到敏感动作。
 	snapshot.Principal = iamclient.Principal{UserID: "user"}
-	if err := Evaluate(snapshot, permission, now, 5*time.Minute); err != ErrRecentAuthRequired {
+	if err := Evaluate(snapshot, permission, now, 5*time.Minute); !errors.Is(err, ErrRecentAuthRequired) {
 		t.Fatalf("anonymous timestamp returned %v", err)
 	}
 }
