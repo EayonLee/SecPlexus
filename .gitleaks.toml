@@ -1,0 +1,16 @@
+# gitleaks 配置：默认规则集 + 本地专属产物排除。
+#
+# CI 里是干净检出，本来就没有 .env 与 .next；这份白名单只为本地运行 make security 时不误报。
+# 版本库内文件（含 .env.example）仍然全量扫描，禁止在这里加业务代码路径。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "本地开发文件与构建产物，不进入版本库"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/).next/''',
+  '''(^|/)logs/''',
+  '''(^|/).spx/''',
+  '''^.env$''',
+]
