@@ -60,7 +60,7 @@ func get(t *testing.T, server *handler.Server, path string) *httptest.ResponseRe
 	return recorder
 }
 
-func TestContextReturnsVerifiedIdentity(t *testing.T) {
+func TestContextReturnsVerifiedPrincipal(t *testing.T) {
 	client := fakeIAM(t, func(w http.ResponseWriter) {
 		_, _ = w.Write(decisionBody(t, iamclient.CapabilityDecision{Allowed: true, DecisionID: "decision-1",
 			Principal: iamclient.Principal{UserID: "user-1", SessionID: "session-1"}}))

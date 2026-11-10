@@ -14,22 +14,22 @@ import (
 func (s *Server) Me(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
-	identity, err := s.Service.Me(r.Context())
+	me, err := s.Service.Me(r.Context())
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	roles := make([]model.APIRoleRef, 0, len(identity.Roles))
-	for _, role := range identity.Roles {
+	roles := make([]model.APIRoleRef, 0, len(me.Roles))
+	for _, role := range me.Roles {
 		roles = append(roles, model.APIRoleRef{ID: role.ID, Name: role.Name})
 	}
 
 	result.Success(w, model.APIMe{
-		Principal:   identity.Principal,
-		Permissions: identity.Permissions,
+		Principal:   me.Principal,
+		Permissions: me.Permissions,
 		Roles:       roles,
-		TimeZone:    identity.TimeZone,
+		TimeZone:    me.TimeZone,
 	})
 }
 
