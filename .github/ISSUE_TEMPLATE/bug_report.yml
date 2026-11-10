@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible defect in SecPlexus.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include passwords, session tokens, CSRF values, API keys or private data.
+        Suspected vulnerabilities must use the private channel in SECURITY.md, not this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The observed behavior and why it is wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Exact commands, page actions or API calls. Remove secrets.
+      placeholder: |
+        1. make config
+        2. make dev
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Revision
+      description: Commit SHA, branch or release tag.
+      placeholder: a4f5904
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Go, Node.js and pnpm versions, database and Redis versions.
+      placeholder: Windows 11, Go 1.27.3, Node 24, pnpm 10.32.1, PostgreSQL 16, Redis 7
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Relevant log lines with secrets removed. Use a code block.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed secrets and private data from commands, logs and screenshots.
+          required: true

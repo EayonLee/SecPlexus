@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a capability, behavior or design change.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Significant features and contract changes need an approved plan under docs/plans/.
+        Explain the user problem first; implementation details come later.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is affected, in what situation, and what is currently impossible or painful?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the expected outcome and boundaries, not only a UI mock.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, smaller changes, or reasons they are insufficient.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - IAM
+        - Console
+        - Web
+        - Database or migrations
+        - Development tooling
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and data impact
+      description: API, schema, migration, security or upgrade implications, if known.
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and plans for this topic.
+          required: true

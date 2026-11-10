@@ -1,0 +1,3 @@
+# Default owner for every path. Add narrower rules when modules gain
+# dedicated maintainers.
+* @EayonLee
