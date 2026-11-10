@@ -176,3 +176,27 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 - `sqlc vet` 的 `db-prepare`/`query-plan` 规则需要可连接的数据库；CI 目前没有 PostgreSQL 服务，故只在本地可用时手工跑，未进门禁。需要时再加 `services: postgres`。
 - `emit_interface`、`:copyfrom`、`sqlc.embed` 暂未使用：当前不需要 mock 查询层、没有大批量插入场景、也没有需要嵌入的关联结构；为避免过度设计而保留。
 
+## 十一、GORM 移除进度（唯一事实源）
+
+截至本轮，**GORM 尚未移除**：sqlc 只覆盖角色、权限与行锁（B0/B1）。下表是逐文件的真实状态，B6 完成后本表清零。
+
+| 文件 | GORM 用法 | 迁移批次 |
+|---|---|---|
+| `repository/authorization_queries.go` | 已迁 sqlc（仅剩 `*gorm.DB` 参数类型） | B1 完成 |
+| `repository/roles.go` | 已迁 sqlc（仅剩参数类型与约束映射） | B1 完成 |
+| `repository/locks.go` | 已迁 sqlc（事务守卫） | B0 完成 |
+| `repository/accounts.go` | `Table/Where/Updates/Pluck` 账号读写 | B2 |
+| `repository/administrator.go` | 配置托管管理员同步（事务 + 行锁） | B2 |
+| `repository/queries.go` | `Queries` 类型：登录、用户/会话锁、会话续期与撤销 | B3 |
+| `repository/session_queries.go` | 登录失败计数、会话查询 | B3 |
+| `repository/lists.go` | 用户/角色/审计列表与详情（含 `jsonb_build_object`、`listJSON`） | B4 |
+| `repository/maintenance.go` | 保留期清理、`set_config`、操作员恢复 | B5 |
+| `repository/store.go` | 启动同步、`gorm.Open`、`Transaction` | B6 |
+| `repository/database.go`、`migration_status.go`、`logging.go` | 迁移与连接池、查询日志适配 | B6 |
+| `repository/sqlc.go` | **迁移期桥接**：`queries(db)` 读取 `db.Statement.ConnPool` | B6 改成 pgx 池 |
+| `service/{service,roles,accounts,password}.go` | 事务入口与 `*gorm.DB` 参数 | B6（Store 接口） |
+| `authentication/{session,credentials}.go`、`handler/server.go`、`authorization/catalog.go` | `*gorm.DB` 参数与错误哨兵 | B3/B6 |
+| `go.mod` | `gorm.io/gorm`、`gorm.io/driver/postgres` | B6 删除 |
+
+文档与图标已同步到"迁移中"状态：架构文档的数据访问说明、后端结构规范、角色管理文档、IAM README、README 双语致谢（新增 sqlc 图标、GORM 标注移除中）、`docs/assets/README.md`。
+

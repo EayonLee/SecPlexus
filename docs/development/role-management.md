@@ -9,7 +9,7 @@
 | 安全与身份 | [入口装配](../../src/apps/iam/internal/router/routes.go)：公开会话/CSRF/限流/协议与内部服务认证隔离；HTTP context只携带请求状态 |
 | 应用用例 | [角色用例](../../src/apps/iam/internal/service/roles.go)、[管理事务](../../src/apps/iam/internal/service/service.go)：Transaction回调内重验身份、用户锁、权限和版本，变更及审计一起提交 |
 | 仓储 | [角色关联](../../src/apps/iam/internal/repository/roles.go)：读取旧授权一次、批量插入新增关系；保留未变更的弃用授权，避免重新触发新增约束；用户角色批量写入仍受全局角色外键约束 |
-| 数据类型 | [普通列表](../../src/apps/iam/internal/repository/lists.go)、[查询](../../src/apps/iam/internal/repository/queries.go)：GORM泛型和具名公开字段投影；特殊锁/数组查询保留必要参数化SQL，不建设BaseRepository |
+| 数据类型 | 查询在 `internal/repository/queries/*.sql`（sqlc 生成类型化代码）；用户列表、审计列表仍在迁移中（[计划](../plans/sqlc-data-layer/plan.md)）。不建设 BaseRepository |
 | 客户端 | [Axios边界](../../src/apps/web/src/spx/api/client.ts)、[会话](../../src/apps/web/src/spx/iam/session.ts)、[模块API](../../src/apps/web/src/spx/api/iam/management.ts)：实际Zod模型校验、CSRF/同源/取消与安全错误分类；内部authorize不进入浏览器 |
 | Query/RHF | [角色页面](../../src/apps/web/src/spx/pages/roles.tsx)、[表单组合](../../src/apps/web/src/spx/components/forms.tsx)、[Table](../../src/apps/web/src/spx/components/data.tsx)：原生Query调用和身份/授权版本缓存键，RHF + 模块Zod，受控服务端分页；密码走模块 API和短期表单状态，不进入MutationCache |
 | 国际化 | [英文](../../src/apps/web/messages/en.json)、[中文](../../src/apps/web/messages/zh-CN.json)：复用next-intl，不在业务组件判断语言 |

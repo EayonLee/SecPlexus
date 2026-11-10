@@ -257,7 +257,7 @@ Web 只做转发，不解析账号，不合并权限。Cookie 原样传。
 | 用途 | 选择 | 为什么 |
 |---|---|---|
 | HTTP | Gin | 原生路由、中间件、错误链、SSE |
-| ORM | GORM | 授权判定要在事务里同时读会话、用户、角色与权限几类表，手写有大量重复字段映射 |
+| 数据访问 | sqlc（生成类型化查询）+ pgx v5 | SQL 是唯一事实源，列名/类型/参数在编译期受检查；schema 取 goose 迁移，不维护第二份 DDL。GORM 仍在迁移期，见 [数据访问层计划](../../../docs/plans/sqlc-data-layer/plan.md) |
 | 驱动 | pgx v5 | GORM 的 postgres driver 走它，SCS 和原生 SQL 共用同一个池 |
 | 会话 | SCS | Cookie 编码、续期、store 接口现成 |
 | 密码 | Argon2id | 内存硬，抗 GPU 爆破 |

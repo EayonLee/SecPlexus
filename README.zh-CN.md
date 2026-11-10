@@ -148,7 +148,7 @@ flowchart LR
 
 | 层次 | 选择 |
 | --- | --- |
-| 服务 | Go 1.27、Gin、GORM、Goose、pgx；规划中的 correlator、agent-runtime、SOAR、ai-policy 使用 Python；Web 使用 Next.js 16 + React 19 |
+| 服务 | Go 1.27、Gin、sqlc、Goose、pgx（GORM 正在移除）；规划中的 correlator、agent-runtime、SOAR、ai-policy 使用 Python；Web 使用 Next.js 16 + React 19 |
 | 数据 | PostgreSQL 16、Redis 7、Kafka、ClickHouse、S3 兼容对象存储 |
 | AI | 图编排 agent runtime、`llm-gateway`（Bifrost core）、NeMo Guardrails、`ai-gateway`（agentgateway） |
 | 工具 | pnpm、GNU Make、Biome、Vitest、Playwright、Go test |
@@ -320,8 +320,13 @@ SecPlexus 建立在大量开源工作之上。下面的徽标标明了应用及�
       <sub>Gin</sub>
     </td>
     <td align="center" valign="middle" width="20%">
-      <a href="https://github.com/go-gorm/gorm" title="GORM"><img src="docs/assets/gorm.svg" alt="GORM" height="32" /></a><br />
-      <sub>GORM</sub>
+      <a href="https://github.com/go-gorm/gorm" title="GORM（移除中）"><img src="docs/assets/gorm.svg" alt="GORM" height="32" /></a><br />
+      <sub>GORM（移除中）</sub>
+
+    <td align="center" valign="middle" width="20%">
+      <a href="https://github.com/sqlc-dev/sqlc" title="sqlc"><img src="docs/assets/sqlc.png" alt="sqlc" height="32" /></a><br />
+      <sub>sqlc</sub>
+    </td>
     </td>
     <td align="center" valign="middle" width="20%">
       <a href="https://github.com/pressly/goose" title="Goose"><img src="docs/assets/goose.png" alt="Goose" height="32" /></a><br />

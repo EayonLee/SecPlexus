@@ -5,7 +5,8 @@ The README acknowledgements include projects currently used by the application, 
 | Logo | Source / attribution |
 | --- | --- |
 | Gin | [gin.svg](https://github.com/gin-gonic/logo/blob/master/color.svg) |
-| GORM | [gorm.svg](https://github.com/go-gorm/gorm.io/blob/master/themes/navy/source/gorm.svg) |
+| GORM（移除中，B6 后随图标一起删除） | [gorm.svg](https://github.com/go-gorm/gorm.io/blob/master/themes/navy/source/gorm.svg) |
+| sqlc | [sqlc.png](https://sqlc.dev/logo.png) |
 | Viper | [viper.png](https://github.com/user-attachments/assets/acae9193-2974-41f3-808d-2d433f5ada5e) |
 | Goose | [goose.png](https://github.com/pressly/goose/blob/master/assets/goose_logo.png) |
 | React | [react.svg](https://github.com/facebook/react/blob/main/fixtures/dom/public/react-logo.svg) |
