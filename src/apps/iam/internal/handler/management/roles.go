@@ -1,8 +1,6 @@
 package management
 
 import (
-	"encoding/json"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
@@ -23,13 +21,23 @@ func (s *Handler) ListRoles(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
 
-	response, err := s.Service.Roles(r.Context(), params.Limit, params.Offset)
+	page, err := s.Service.Roles(r.Context(), params.Limit, params.Offset)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, response)
+	items := make([]model.APIRole, 0, len(page.Items))
+	for _, role := range page.Items {
+		items = append(items, apiRole(role))
+	}
+
+	result.Success(w, model.APIPage[model.APIRole]{
+		Items:  items,
+		Total:  page.Total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	})
 }
 
 // CreateRole 创建全局角色。
@@ -60,13 +68,13 @@ func (s *Handler) GetRole(c *gin.Context) {
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	data, err := s.Service.Role(r.Context(), id)
+	role, err := s.Service.Role(r.Context(), id)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, json.RawMessage(data))
+	result.Success(w, apiRole(role))
 }
 
 // UpdateRole 更新角色资料。
@@ -122,4 +130,21 @@ func (s *Handler) DeleteRole(c *gin.Context) {
 	}
 
 	result.NoContent(w)
+}
+
+// apiRole 把角色投影映射为 HTTP DTO；权限键与用户数直接来自数据库。
+func apiRole(role repository.Role) model.APIRole {
+	permissions := role.Permissions
+	if permissions == nil {
+		permissions = []string{}
+	}
+
+	return model.APIRole{
+		ID:          role.ID,
+		Name:        role.Name,
+		Description: role.Description,
+		Builtin:     role.Builtin,
+		Permissions: permissions,
+		UserCount:   role.UserCount,
+	}
 }

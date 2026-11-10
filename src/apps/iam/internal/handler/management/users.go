@@ -1,8 +1,6 @@
 package management
 
 import (
-	"encoding/json"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -26,13 +24,23 @@ func (s *Handler) ListUsers(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
 
-	response, err := s.Service.ListUsers(r.Context(), params.Limit, params.Offset, params.Q)
+	page, err := s.Service.ListUsers(r.Context(), params.Limit, params.Offset, params.Q)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, response)
+	items := make([]model.APIUser, 0, len(page.Items))
+	for _, user := range page.Items {
+		items = append(items, apiUser(user))
+	}
+
+	result.Success(w, model.APIPage[model.APIUser]{
+		Items:  items,
+		Total:  page.Total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	})
 }
 
 // GetUser 读取用户的公开字段与角色。
@@ -40,13 +48,13 @@ func (s *Handler) GetUser(c *gin.Context) {
 	id := c.Param("id")
 	w := c.Writer
 	r := c.Request
-	data, err := s.Service.User(r.Context(), id)
+	user, err := s.Service.User(r.Context(), id)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
 	}
 
-	result.Success(w, json.RawMessage(data))
+	result.Success(w, apiUser(user))
 }
 
 // CreateUser 限制密码计算并创建用户，凭据不会进入结果。
@@ -172,4 +180,23 @@ func (s *Handler) ResetUserPassword(c *gin.Context) {
 	}
 
 	result.NoContent(w)
+}
+
+// apiUser 把账号投影映射为 HTTP DTO；角色引用直接来自数据库。
+func apiUser(user repository.UserSummary) model.APIUser {
+	roles := make([]model.APIRoleRef, 0, len(user.Roles))
+	for _, role := range user.Roles {
+		roles = append(roles, model.APIRoleRef{ID: role.ID, Name: role.Name})
+	}
+
+	return model.APIUser{
+		ID:          user.ID.String(),
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Email:       user.Email,
+		Status:      string(user.Status),
+		Configured:  user.Configured,
+		AuthEpoch:   user.AuthEpoch,
+		Roles:       roles,
+	}
 }

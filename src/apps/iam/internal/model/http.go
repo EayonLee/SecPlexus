@@ -2,10 +2,43 @@
 package model
 
 import (
+	"encoding/json"
+	"time"
+
 	"github.com/aarondl/opt/omit"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
+
+// APIPage 是分页列表的公共外壳：页大小与偏移量回显请求值。
+type APIPage[T any] struct {
+	Items  []T   `json:"items"`  // 当前页。
+	Total  int64 `json:"total"`  // 满足条件的总行数。
+	Limit  int   `json:"limit"`  // 请求的页大小。
+	Offset int   `json:"offset"` // 请求的偏移量。
+}
+
+// APIAuditEvent 是一条审计事实的 HTTP 投影；游标边界由服务端自己维护。
+type APIAuditEvent struct {
+	ID         string          `json:"id"`          // 事件标识。
+	OccurredAt time.Time       `json:"occurred_at"` // 事件时间，数据库时钟。
+	ActorType  string          `json:"actor_type"`  // 触发者类型。
+	ActorName  *string         `json:"actor_name"`  // 触发者名称；系统事件为 null。
+	Action     string          `json:"action"`      // 稳定动作名。
+	TargetType string          `json:"target_type"` // 目标类型。
+	TargetID   *string         `json:"target_id"`   // 目标标识；无具体目标为 null。
+	Outcome    string          `json:"outcome"`     // 结果。
+	ReasonCode *string         `json:"reason_code"` // 拒绝或失败原因；成功为 null。
+	RequestID  string          `json:"request_id"`  // 关联请求标识。
+	Metadata   json.RawMessage `json:"metadata"`    // 结构化扩展值。
+}
+
+// APIAuditPage 是审计的一页；游标只向前，next_cursor 为空表示没有更早的事件。
+type APIAuditPage struct {
+	Items      []APIAuditEvent `json:"items"`       // 当前页，按时间倒序。
+	Limit      int             `json:"limit"`       // 请求的页大小。
+	NextCursor string          `json:"next_cursor"` // 下一页游标。
+}
 
 // APIPermissions 表示一次授权配置中的权限键集合。
 type APIPermissions = []string

@@ -41,12 +41,13 @@ func TestListAuditEventsPagesWithoutGaps(t *testing.T) {
 		}
 
 		pages++
-		for _, raw := range page.Items {
-			if seen[string(raw)] {
-				t.Fatalf("event repeated across pages: %s", raw)
+		for _, event := range page.Items {
+			id := event.ID.String()
+			if seen[id] {
+				t.Fatalf("event repeated across pages: %s", id)
 			}
 
-			seen[string(raw)] = true
+			seen[id] = true
 		}
 
 		if page.NextCursor == "" {
