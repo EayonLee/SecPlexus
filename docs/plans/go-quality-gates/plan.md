@@ -105,7 +105,7 @@ vuln-go:
 # 注意：本机安装的 go 可能是 1.24.x，模块声明 go 1.27.3，平时靠 GOTOOLCHAIN=auto 下载。
 # golangci-lint 要求"构建它的 Go 版本 >= 被分析模块的 Go 版本"，所以必须显式指定同一工具链，
 # 否则会报 "Go language version used to build golangci-lint is lower than the targeted Go version"。
-GOTOOLCHAIN := go1.27.3
+GOTOOLCHAIN := go1.27.4
 GOLANGCI_LINT_VERSION := v2.15.0
 GOVULNCHECK_VERSION := v1.9.0
 
@@ -118,14 +118,14 @@ vuln-go:
 
 ## 四、CI 改造（quality job 增加两步）
 
-在现有 `quality` job（已装 Go 1.27.3、已 checkout）末尾追加：
+在现有 `quality` job（已装 Go 1.27.4、已 checkout）末尾追加：
 
 ```yaml
       - name: Go lint
         uses: golangci/golangci-lint-action@<sha> # v9.3.0
         with:
           version: v2.15.0
-          # 关键：用 CI 自己的 Go 1.27.3 从源码构建，避免预编译二进制 Go 版本落后于 go.mod。
+          # 关键：用 CI 自己的 Go 1.27.4 从源码构建，避免预编译二进制 Go 版本落后于 go.mod。
           install-mode: goinstall
           args: --config .golangci.yml ./src/...
 

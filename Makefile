@@ -6,7 +6,7 @@
 # golangci-lint 要求"构建它的 Go 版本 >= 被分析模块的 Go 版本"，否则报
 # "Go language version used to build golangci-lint is lower than the targeted Go version"。
 # 所以这里显式指定同一工具链，不依赖 auto 选择。
-GOTOOLCHAIN := go1.27.3
+GOTOOLCHAIN := go1.27.4
 GOLANGCI_LINT_VERSION := v2.15.0
 GOVULNCHECK_VERSION := v1.9.0
 SQLC_VERSION := v1.31.1

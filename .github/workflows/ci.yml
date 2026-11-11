@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -114,7 +114,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -133,7 +133,7 @@ jobs:
       - name: Go vet
         run: go vet ./src/...
 
-      # goinstall 让 action 用 CI 自己的 Go 1.27.3 从源码构建：
+      # goinstall 让 action 用 CI 自己的 Go 1.27.4 从源码构建：
       # 预编译二进制可能由更旧的 Go 构建，会拒绝分析 go.mod 声明的更高语言版本。
       - name: Go lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -177,7 +177,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -225,7 +225,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - name: Scan for committed secrets (gitleaks)
