@@ -12,7 +12,7 @@ GOVULNCHECK_VERSION := v1.9.0
 SQLC_VERSION := v1.31.1
 
 
-.PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security sqlc sqlc-check
+.PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security sqlc sqlc-check sqlc-vet
 
 dev:
 	@node scripts/start.mjs $(MODULES)
@@ -77,3 +77,7 @@ sqlc:
 
 sqlc-check:
 	@GOTOOLCHAIN=$(GOTOOLCHAIN) go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) diff
+
+# db-prepare 会把每条查询在真实数据库上 PREPARE 一次；脚本自建库、跑迁移、结束后删库。
+sqlc-vet:
+	@GOTOOLCHAIN=$(GOTOOLCHAIN) SQLC_VERSION=$(SQLC_VERSION) node scripts/sqlc-vet.mjs

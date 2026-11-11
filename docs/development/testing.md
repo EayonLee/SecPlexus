@@ -148,6 +148,8 @@ make test-e2e ARGS="--docker"
 make test-e2e ARGS="--docker --manual"
 ```
 
+`make sqlc-vet` 需要可连接的 PostgreSQL（`SPX_TEST_POSTGRES_URL`，允许建库）：它建一个临时库、应用迁移、把每条生成查询 PREPARE 一次后删库；CI 的 `Static checks` job 带 `postgres:16` 服务跑同一步。
+
 `catalogs:check` 同时执行迁移边界检查（`scripts/migrations-check.mjs`）：每个模块的迁移只能引用自己 schema 内的对象，跨 schema `REFERENCES` 直接失败；其表驱动测试随 `make test`（`scripts/test-scripts.mjs`） 运行。
 
 `lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.3工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。

@@ -37,6 +37,8 @@
    `permissions.risk_level` 生成为 `enum.PermissionStatus`/`enum.RiskLevel`，编译期即受约束，
    包装层不再做字符串转换。新增封闭取值列时照此添加。
 5. **生成物禁止手改**：`sqlcgen/` 只由 `make sqlc` 产生，CI 用 `make sqlc-check`（`sqlc diff`）拦截漂移。
+6. **查询在真实库上 PREPARE 过**：`make sqlc-vet` 跑 `sqlc/db-prepare`——脚本自建临时库、应用全部迁移、
+   把每条生成查询 PREPARE 一次再删库。静态分析看不见的类型与转换问题只有这一步能发现，CI 每次 PR 都跑。
 
 ## ClickHouse 规则（暂缓实施，先登记）
 
