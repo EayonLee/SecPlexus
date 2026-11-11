@@ -200,7 +200,7 @@ jobs:
           set -e
           installed=0
           for attempt in 1 2 3; do
-            if pnpm --dir src/apps/web exec playwright install --with-deps chromium; then
+            if timeout 330 pnpm --dir src/apps/web exec playwright install --with-deps chromium; then
               installed=1
               break
             fi
