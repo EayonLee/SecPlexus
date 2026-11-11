@@ -55,9 +55,11 @@ jobs:
 
   # 集成测试要真实 PostgreSQL 与 Redis，且备份恢复用例需要与服务端同主版本的 pg_dump，
   # 因此单独一个 Linux job：临时容器由 tests/integration/run.mjs 创建并在结束时清理。
+  # 固定 24.04 而不是 ubuntu-latest：恢复用例的 pg_dump 必须与 postgres:16 容器同主版本，
+  # 24.04 提供 postgresql-client-16，而 26.04 只提供更新的主版本。
   integration:
-    name: Integration (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: Integration (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
@@ -74,8 +76,12 @@ jobs:
           version: 10.32.1
 
       # 恢复用例用宿主机的 pg_dump/pg_restore，主版本必须与 postgres:16 容器一致。
+      # 显式把 16 的 bin 放到 PATH 最前，避免 pg_wrapper 选到镜像里预装的其它主版本。
       - name: Install PostgreSQL client
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
 
       # --docker 是脚本的显式授权：创建独立临时 PG/Redis 容器、随机端口与临时凭据，结束后清理自有资源。
       - name: Run integration tests
