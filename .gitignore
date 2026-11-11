@@ -16,6 +16,7 @@ Desktop.ini
 !.env.*.example
 logs/
 .spx/
+.sqlc-vet.yaml
 /tmp/
 /secrets/
 certs/
@@ -112,3 +113,7 @@ htmlcov/
 # Build output (go build 在包目录生成的二进制，不进入版本库)
 *.exe
 bin/*.exe
+
+# 本地代理运行产生的临时输出，不进入仓库。
+.dsh-tmp/
+.tmp-exec-out.txt

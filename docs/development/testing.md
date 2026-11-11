@@ -80,7 +80,7 @@ Playwright使用单worker、有界条件等待和零重试。禁用trace与视�
 依赖漏洞检查：
 
 ```sh
-GOTOOLCHAIN=go1.27.3 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
+GOTOOLCHAIN=go1.27.4 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./src/...
 ```
 
 当前执行本地分层检查和业务目录产物一致性检查；不开展部署或远程 CI，实际验收证据记录在 Plan。
@@ -148,9 +148,11 @@ make test-e2e ARGS="--docker"
 make test-e2e ARGS="--docker --manual"
 ```
 
+`make sqlc-vet` 需要可连接的 PostgreSQL（`SPX_TEST_POSTGRES_URL`，允许建库）：它建一个临时库、应用迁移、把每条生成查询 PREPARE 一次后删库；CI 的 `Static checks` job 带 `postgres:16` 服务跑同一步。
+
 `catalogs:check` 同时执行迁移边界检查（`scripts/migrations-check.mjs`）：每个模块的迁移只能引用自己 schema 内的对象，跨 schema `REFERENCES` 直接失败；其表驱动测试随 `make test`（`scripts/test-scripts.mjs`） 运行。
 
-`lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.3工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。
+`lint-go`固定golangci-lint v2.15.0，`vuln-go`固定govulncheck v1.9.0，均使用项目Go 1.27.4工具链；纯本地命令，不触发部署或远程CI。漏洞扫描的“已调用符号”与仅模块/包引用的结果分别报告，不把工具运行失败当作零漏洞。
 
 manual模式创建相同的独立双副本栈，在权限0600的临时文件中提供仅本次测试的URL/账号，保持运行等待标准输入结束，再精确清理本次资源。不要把此文件、凭据、截图或trace提交到仓库。浏览器操作按AGENTS.md委派到专用代理；桌面/窄屏、双语切换及刷新、主题各选项和CRM V1基准、核心管理流程及console/network都需实际检查，不能以自动化成功代替视觉验收。
 

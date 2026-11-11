@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -91,6 +91,22 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # 生成查询的 PREPARE 校验需要真实 PostgreSQL：db-prepare 会把每条查询送进数据库，
+    # 静态分析看不出的类型与转换问题只有这一步能发现。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vet
+          POSTGRES_PASSWORD: vet
+          POSTGRES_DB: vet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
         with:
@@ -98,7 +114,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -117,7 +133,7 @@ jobs:
       - name: Go vet
         run: go vet ./src/...
 
-      # goinstall 让 action 用 CI 自己的 Go 1.27.3 从源码构建：
+      # goinstall 让 action 用 CI 自己的 Go 1.27.4 从源码构建：
       # 预编译二进制可能由更旧的 Go 构建，会拒绝分析 go.mod 声明的更高语言版本。
       - name: Go lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -142,6 +158,12 @@ jobs:
       - name: Generated query code is up to date
         run: make sqlc-check
 
+      # db-prepare：把每条查询在真实 PostgreSQL 上 PREPARE 一次。
+      - name: Generated queries prepare against PostgreSQL
+        run: make sqlc-vet
+        env:
+          SPX_TEST_POSTGRES_URL: postgres://vet:vet@127.0.0.1:5432/vet?sslmode=disable
+
   # 端到端：真实 Next 构建 + 双 IAM/双 Console 副本 + 浏览器。只有它能覆盖登录、
   # 改密、撤权与 SSE 取消的产品流程，因此也放进 CI；组件由 --docker 临时创建。
   e2e:
@@ -155,7 +177,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.1.0
@@ -171,9 +193,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # --with-deps 同时装浏览器运行所需系统库；CI 无桌面环境，缺库会启动失败。
+      # --with-deps 同时装浏览器运行所需系统库（含中文字体）；CI 无桌面环境，缺库会启动失败。
+      # apt 依赖 azure.archive.ubuntu.com，该镜像偶发 DNS 解析失败，因此有限重试。
       - name: Install Chromium
-        run: pnpm --dir src/apps/web exec playwright install --with-deps chromium
+        run: |
+          set -e
+          installed=0
+          for attempt in 1 2 3; do
+            if timeout 330 pnpm --dir src/apps/web exec playwright install --with-deps chromium; then
+              installed=1
+              break
+            fi
+            echo "Chromium install attempt ${attempt} failed; retrying"
+            sleep 15
+          done
+          test "$installed" = "1"
 
       # 展示时区用例要求浏览器不在 UTC：Windows/本地开发机通常非 UTC，CI 容器默认 UTC。
       - name: Run end-to-end tests
@@ -203,7 +237,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
 
       - name: Scan for committed secrets (gitleaks)

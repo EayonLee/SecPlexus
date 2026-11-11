@@ -53,7 +53,7 @@ Architecture, database and layering rules:
 
 | Tool | Version or requirement |
 | --- | --- |
-| Go | 1.27.3 |
+| Go | 1.27.4 |
 | Node.js | 22.12 or later; 24 recommended |
 | pnpm | 10.32.1 |
 | GNU Make | Required for root commands on all platforms |

@@ -45,7 +45,7 @@ body:
     attributes:
       label: Environment
       description: Operating system, Go, Node.js and pnpm versions, database and Redis versions.
-      placeholder: Windows 11, Go 1.27.3, Node 24, pnpm 10.32.1, PostgreSQL 16, Redis 7
+      placeholder: Windows 11, Go 1.27.4, Node 24, pnpm 10.32.1, PostgreSQL 16, Redis 7
     validations:
       required: true
   - type: textarea

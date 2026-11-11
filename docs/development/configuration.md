@@ -93,7 +93,7 @@ YAML 使用标准参数表达式 `${NAME-default}`（未设置才后备）或 `$
 
 ## 运行
 
-需要Go 1.27.3、Node.js 22.12+（建议24）、pnpm 10.32.1与GNU Make。Make是macOS、Linux和Windows统一的唯一外层入口，配方不依赖POSIX shell；平台差异由Node脚本承担。Windows可用w64devkit、Chocolatey或MSYS2安装GNU Make，并在PowerShell或`cmd.exe`中运行。根`package.json`中的`pnpm`脚本是Make的内部实现，不作为日常公开入口。
+需要Go 1.27.4、Node.js 22.12+（建议24）、pnpm 10.32.1与GNU Make。Make是macOS、Linux和Windows统一的唯一外层入口，配方不依赖POSIX shell；平台差异由Node脚本承担。Windows可用w64devkit、Chocolatey或MSYS2安装GNU Make，并在PowerShell或`cmd.exe`中运行。根`package.json`中的`pnpm`脚本是Make的内部实现，不作为日常公开入口。
 
 ```sh
 make config      # 首次运行生成.env，然后停止以便检查

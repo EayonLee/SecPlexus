@@ -2,7 +2,7 @@ module github.com/EayonLee/SecPlexus
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/aarondl/opt v0.0.0-20250607033636-982744e1bd65
