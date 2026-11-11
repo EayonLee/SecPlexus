@@ -193,9 +193,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # --with-deps 同时装浏览器运行所需系统库；CI 无桌面环境，缺库会启动失败。
+      # --with-deps 同时装浏览器运行所需系统库（含中文字体）；CI 无桌面环境，缺库会启动失败。
+      # apt 依赖 azure.archive.ubuntu.com，该镜像偶发 DNS 解析失败，因此有限重试。
       - name: Install Chromium
-        run: pnpm --dir src/apps/web exec playwright install --with-deps chromium
+        run: |
+          set -e
+          installed=0
+          for attempt in 1 2 3; do
+            if pnpm --dir src/apps/web exec playwright install --with-deps chromium; then
+              installed=1
+              break
+            fi
+            echo "Chromium install attempt ${attempt} failed; retrying"
+            sleep 15
+          done
+          test "$installed" = "1"
 
       # 展示时区用例要求浏览器不在 UTC：Windows/本地开发机通常非 UTC，CI 容器默认 UTC。
       - name: Run end-to-end tests
