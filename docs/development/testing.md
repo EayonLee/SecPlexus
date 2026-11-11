@@ -65,7 +65,7 @@ make test-e2e ARGS="--docker"
 
 以上入口在macOS、Linux、PowerShell与`cmd.exe`中统一通过GNU Make执行；Makefile配方不依赖POSIX shell，平台差异由Node脚本承担。`make test`先由[scripts/test-scripts.mjs](../../scripts/test-scripts.mjs)枚举脚本测试，再运行Go与Web单测，不依赖shell通配符展开。
 
-集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。
+集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。CI 的 `Integration (ubuntu-latest)` job 用 `make integration ARGS="--docker"` 跑同一套用例：临时 `postgres:16-alpine` 与 `redis:7-alpine` 容器、随机端口与临时凭据，结束时按名称清理；宿主机另装 `postgresql-client-16`，让备份恢复用例的 `pg_dump` 与服务端同主版本。
 外部Redis优先专用测试库；当前用户明确允许远程 DB0，测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
 备份恢复用例使用与服务端兼容的 pg_dump/pg_restore；外部PG无需构建应用容器，测试仍创建独立随机数据库。
 

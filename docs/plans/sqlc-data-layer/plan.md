@@ -180,11 +180,10 @@ B0 骨架 ─► B1 权限/角色 ─► B2 用户/凭据 ─► B3 会话 ─�
 
 ## 十、刻意保留的 gap（不视为遗漏）
 
-- `sqlc vet` 的 `db-prepare`/`query-plan` 规则需要可连接的数据库；CI 目前没有 PostgreSQL 服务，故只在本地可用时手工跑，未进门禁。需要时再加 `services: postgres`。
+- `sqlc vet` 的 `db-prepare`/`query-plan` 规则需要可连接的数据库；CI 现在有 PostgreSQL（集成 job），但 `sqlc vet` 需要额外的 `database` 配置与每次生成后的一次连接，暂未加入门禁，仍按需手工跑。
 - `emit_interface`、`:copyfrom`、`sqlc.embed` 暂未使用：当前不需要 mock 查询层、没有大批量插入场景、也没有需要嵌入的关联结构；为避免过度设计而保留。
 - **未引入 42 方法的 `Store` 接口**：`service` 依赖 `*repository.Store` 与 `repository.DB`，两者都不含驱动类型；当前只有 PostgreSQL 一个实现，集成测试也直连真实库，接口没有第二个实现或替换需求。真需要换库时再抽接口，代价只是机械替换。
 - **保留 `database/sql` 风味而非切 pgx/v5 风味**：切风味后生成的参数类型变成 pgx 专属，把驱动耦合进仓库签名；唯一收益（数组绑定）已被 jsonb 展开覆盖。
-- **集成测试仍不在 CI**：需要 `services: postgres/redis` 与 pg_dump；本地用真实 PostgreSQL 16 + Redis 8 跑全套 13 个包。
 
 ## 十一、GORM 移除进度（唯一事实源）
 
