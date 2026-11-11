@@ -379,6 +379,14 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
 	member.request("GET", "/api/v1/iam/users", nil, 403)
 
+	// 抽屉里的「保存」正是这条路径：给已存在用户追加角色，列表行必须立刻反映。
+	admin.request("PUT", "/api/v1/iam/users/"+memberID+"/roles", map[string]any{"role_ids": []string{roleID}}, 204)
+	granted := admin.request("GET", "/api/v1/iam/users?q="+f.member, nil, 200)["items"].([]any)[0].(map[string]any)
+	grantedRoles := granted["roles"].([]any)
+	if len(grantedRoles) != 1 || grantedRoles[0].(map[string]any)["name"] != "审计员" {
+		t.Fatalf("user list roles after assignment = %v", grantedRoles)
+	}
+
 	admin.request("PUT", "/api/v1/iam/users/"+memberID+"/roles", map[string]any{"role_ids": []string{}}, 204)
 	if got := member.request("GET", "/api/v1/iam/me", nil, 200); len(got["permissions"].([]any)) != 0 || len(got["roles"].([]any)) != 0 {
 		t.Fatalf("member grants survived role removal: %v", got)

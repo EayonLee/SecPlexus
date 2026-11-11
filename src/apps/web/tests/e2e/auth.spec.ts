@@ -57,6 +57,10 @@ async function createUser(api: APIRequestContext, username: string, displayName:
 
   return created.id;
 }
+// 抽屉顶部图标按钮与底部文字按钮的可访问名相同，按页脚容器定位底部按钮。
+function drawerButton(drawer: ReturnType<Page["getByRole"]>, name: string) {
+  return drawer.locator('[data-slot="sheet-footer"]').getByRole("button", { name, exact: true });
+}
 async function browserLogin(page: Page, username: string, password: string) {
   await page
     .context()
@@ -129,7 +133,7 @@ test("新用户登录、改密并在退出后使所有标签页失效", async ({
   await admin.dispose();
 
   await browserLogin(page, username, initial);
-  await expect(page.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "安全运营工作台", exact: true })).toBeVisible();
 
   // 没有角色的账号只有个人资料：管理页不出现在设置导航里，直接访问也会被拒绝。
   await page.goto("/settings");
@@ -149,7 +153,7 @@ test("新用户登录、改密并在退出后使所有标签页失效", async ({
 
   const other = await context.newPage();
   await other.goto("/dashboard");
-  await expect(other.getByRole("heading", { name: "安全智驾工作台", exact: true })).toBeVisible();
+  await expect(other.getByRole("heading", { name: "安全运营工作台", exact: true })).toBeVisible();
   const stored = await page.evaluate(() =>
     Object.keys(localStorage).filter((key) => /token|session|userStatus|userRole/i.test(key)),
   );
@@ -194,8 +198,10 @@ test("用户管理：创建账号、分配角色并验证权限边界", async ({
   await expect(drawer.getByText("角色用户", { exact: true })).toBeVisible();
   await drawer.getByRole("checkbox", { name: roleName, exact: true }).check();
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
+  // 抽屉是模态的：打开时背后的表格对可访问性树不可见，因此先关闭再断言列表行。
+  await drawerButton(drawer, "关闭").click();
+  await expect(drawer).toHaveCount(0);
   await expect(row.getByText(roleName, { exact: true })).toBeVisible();
-  await drawer.getByRole("button", { name: "关闭", exact: true }).click();
 
   const memberContext = await browser.newContext();
   const memberPage = await memberContext.newPage();
@@ -227,7 +233,7 @@ test("内置超级管理员角色只读且不可删除", async ({ page }) => {
   await expect(drawer.getByText("iam.users.read", { exact: true })).toBeVisible();
   await expect(drawer.getByRole("button", { name: "保存权限", exact: true })).toHaveCount(0);
   await expect(drawer.getByRole("button", { name: "保存角色信息", exact: true })).toHaveCount(0);
-  await drawer.getByRole("button", { name: "关闭", exact: true }).click();
+  await drawerButton(drawer, "关闭").click();
   await expect(drawer).toHaveCount(0);
 });
 
