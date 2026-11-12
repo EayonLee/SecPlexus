@@ -7,19 +7,21 @@
 <style>
   :root{--background:#fff;--foreground:#0a1317;--card:#fff;--primary:#0064e0;--primary-foreground:#fff;
     --secondary:#f1f4f7;--muted-foreground:#5d6c7b;--destructive:#e41e3f;--border:#dee3e9;--input:#ced0d4;
-    --radius:.75rem;--success:#31a24c;--attention:#f2a918;--chart-1:#0064e0;--chart-4:#8a8a8a;--chart-5:#6b6b6b;--ring:#0064e0}
+    --radius:.75rem;--success:#31a24c;--attention:#f2a918;--chart-1:#0064e0;--chart-2:#1876f2;
+    --chart-4:#8a8a8a;--chart-5:#6b6b6b;--ring:#0064e0}
   @media (prefers-color-scheme:dark){:root{--background:#0a0a0a;--foreground:#fafafa;--card:#171717;
     --primary:#0091ff;--primary-foreground:#0a1317;--secondary:#262626;--muted-foreground:#a3a3a3;
-    --destructive:#f0284a;--border:#262626;--input:#333;--chart-1:#0091ff;--chart-4:#a3a3a3;--chart-5:#d4d4d4;--ring:#0091ff}}
+    --destructive:#f0284a;--border:#262626;--input:#333;--chart-1:#0091ff;--chart-2:#66b8ff;
+    --chart-4:#a3a3a3;--chart-5:#d4d4d4;--ring:#0091ff}}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{font-family:Montserrat,"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
     background:var(--background);color:var(--foreground);font-size:14px;line-height:1.5;letter-spacing:-.01em;
     -webkit-font-smoothing:antialiased}
   button{font:inherit;color:inherit}
-  .shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
-  .sidebar{border-right:1px solid var(--border);background:var(--card);padding:18px 14px;display:flex;
-    flex-direction:column;gap:22px;position:sticky;top:0;height:100vh}
+  .shell{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+  .sidebar{border-right:1px solid var(--border);background:var(--card);padding:16px 12px;display:flex;
+    flex-direction:column;gap:20px;position:sticky;top:0;height:100vh}
   .brand{display:flex;align-items:center;gap:9px;padding:4px 8px}
   .brand-mark{width:26px;height:26px;border-radius:8px;background:var(--primary);color:var(--primary-foreground);
     display:grid;place-items:center;font-weight:700;font-size:13px}
@@ -28,23 +30,30 @@
   .nav-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
     padding:0 8px 6px;font-weight:600}
   .nav-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:10px;
-    color:var(--muted-foreground);text-decoration:none;font-size:13.5px}
+    color:var(--muted-foreground);text-decoration:none;font-size:13.5px;cursor:pointer;border:0;background:none;
+    text-align:left;width:100%}
   .nav-item:hover{background:var(--secondary);color:var(--foreground)}
   .nav-item[aria-current=page]{background:var(--secondary);color:var(--foreground);font-weight:600}
   .nav-item svg{width:16px;height:16px;opacity:.8;flex:none}
+  .nav-sub{padding-left:26px;font-size:13px}
   .main{min-width:0}
-  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:13px 26px;
     border-bottom:1px solid var(--border)}
   .crumbs{color:var(--muted-foreground);font-size:12.5px}
   .crumbs b{color:var(--foreground);font-weight:600}
   .avatar{width:28px;height:28px;border-radius:999px;background:var(--secondary);display:grid;
     place-items:center;font-size:12px;font-weight:600}
-  .content{padding:26px 28px 60px;max-width:1240px}
-  h1{font-size:20px;font-weight:600;margin:0 0 4px;letter-spacing:-.02em}
-  .toolbar{display:flex;align-items:center;gap:8px;margin:20px 0 14px;flex-wrap:wrap}
+  .content{padding:22px 26px 60px;max-width:1320px}
+  h1{font-size:20px;font-weight:600;margin:0;letter-spacing:-.02em}
+  .segmented{display:inline-flex;border:1px solid var(--input);border-radius:999px;padding:2px;gap:2px;
+    background:var(--card)}
+  .segmented button{border:0;background:transparent;padding:5px 13px;border-radius:999px;font-size:12.5px;
+    color:var(--muted-foreground);cursor:pointer;font-weight:500}
+  .segmented button[aria-selected=true]{background:var(--secondary);color:var(--foreground);font-weight:600}
+  .toolbar{display:flex;align-items:center;gap:8px;margin:16px 0 12px;flex-wrap:wrap}
   .toolbar .spacer{margin-left:auto}
   .input-group{display:flex;align-items:center;gap:7px;height:32px;padding:0 10px;
-    border:1px solid var(--input);border-radius:999px;background:var(--card);min-width:250px}
+    border:1px solid var(--input);border-radius:999px;background:var(--card);min-width:230px}
   .input-group:focus-within{outline:2px solid var(--ring);outline-offset:1px}
   .input-group input{border:0;outline:0;background:transparent;width:100%;font-size:13px;color:var(--foreground)}
   .input-group svg{width:15px;height:15px;color:var(--muted-foreground);flex:none}
@@ -60,9 +69,9 @@
   .btn svg{width:15px;height:15px}
   .table-card{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--card)}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  thead th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:10px 14px;
+  thead th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:9px 13px;
     border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap}
-  tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tbody td{padding:11px 13px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr:last-child td{border-bottom:0}
   tbody tr:hover{background:var(--secondary)}
   .cell-name{font-weight:600}
@@ -80,30 +89,30 @@
   .scrim{position:fixed;inset:0;background:rgba(10,19,23,.38);opacity:0;pointer-events:none;
     transition:opacity .18s;z-index:40}
   .scrim.open{opacity:1;pointer-events:auto}
-  .sheet{position:fixed;top:0;right:0;height:100vh;width:min(920px,96vw);background:var(--card);
+  .sheet{position:fixed;top:0;right:0;height:100vh;width:min(960px,96vw);background:var(--card);
     border-left:1px solid var(--border);display:flex;flex-direction:column;transform:translateX(101%);
     transition:transform .22s cubic-bezier(.32,.72,0,1);z-index:41}
   .sheet.open{transform:none}
-  .sheet-head{display:flex;align-items:flex-start;gap:12px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  .sheet-head{display:flex;align-items:flex-start;gap:12px;padding:15px 20px;border-bottom:1px solid var(--border)}
   .sheet-head h2{margin:0;font-size:15px;font-weight:600}
   .sheet-head p{margin:2px 0 0;font-size:12.5px;color:var(--muted-foreground)}
   .icon-btn{margin-left:auto;width:28px;height:28px;border-radius:999px;border:0;background:transparent;
     color:var(--muted-foreground);cursor:pointer;display:grid;place-items:center;flex:none}
   .icon-btn:hover{background:var(--secondary);color:var(--foreground)}
-  .sheet-body{padding:20px 22px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:20px}
-  .sheet-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
+  .sheet-body{padding:18px 20px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:18px}
+  .sheet-foot{padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
   .sheet-foot .spacer{margin-left:auto}
-  .steps{display:flex;align-items:center;padding:0 22px;margin-top:4px}
+  .steps{display:flex;align-items:center;padding:0 20px;margin-top:4px;flex-wrap:nowrap;overflow-x:auto}
   .step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted-foreground);white-space:nowrap}
   .step-num{width:21px;height:21px;border-radius:999px;border:1px solid var(--input);display:grid;
     place-items:center;font-size:11px;font-weight:600;flex:none}
   .step.active{color:var(--foreground);font-weight:600}
   .step.active .step-num{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
   .step.done .step-num{background:var(--secondary);border-color:var(--input);color:var(--foreground)}
-  .step-line{flex:1;height:1px;background:var(--border);margin:0 9px;min-width:12px}
+  .step-line{flex:1;height:1px;background:var(--border);margin:0 8px;min-width:10px}
   .option-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .option{text-align:left;border:1px solid var(--input);border-radius:var(--radius);background:var(--card);
-    padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:7px}
+    padding:13px;cursor:pointer;display:flex;flex-direction:column;gap:7px}
   .option:hover{border-color:var(--muted-foreground)}
   .option[aria-pressed=true]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary) inset}
   .option-top{display:flex;align-items:center;gap:8px}
@@ -113,82 +122,88 @@
   .option-title{font-weight:600;font-size:13.5px}
   .option-desc{color:var(--muted-foreground);font-size:12px;line-height:1.45}
   .option[aria-pressed=true] .option-icon{background:var(--primary);color:var(--primary-foreground)}
-  .fieldset{display:flex;flex-direction:column;gap:10px}
-  .legend{font-size:12px;font-weight:600;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.06em}
+  .fieldset{display:flex;flex-direction:column;gap:9px}
+  .legend{font-size:11.5px;font-weight:600;color:var(--muted-foreground);text-transform:uppercase;
+    letter-spacing:.06em;display:flex;align-items:center;gap:8px}
+  .legend .hint-inline{font-weight:400;text-transform:none;letter-spacing:0;font-size:11.5px}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{font-size:12.5px;font-weight:500}
-  .field input,.field textarea{height:34px;border-radius:10px;border:1px solid var(--input);background:var(--card);
-    color:var(--foreground);padding:0 11px;font:inherit;font-size:13px}
+  .field input,.field select,.field textarea{height:33px;border-radius:10px;border:1px solid var(--input);
+    background:var(--card);color:var(--foreground);padding:0 11px;font:inherit;font-size:13px}
   .field textarea{height:auto;padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:11.5px;line-height:1.5;resize:vertical;min-height:96px}
-  .field input:focus,.field textarea:focus{outline:2px solid var(--ring);outline-offset:1px}
+    font-size:11.5px;line-height:1.5;resize:vertical;min-height:88px}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--ring);outline-offset:1px}
   .field .hint{font-size:11.5px;color:var(--muted-foreground)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
   .template-list{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);
-    overflow:hidden;max-height:300px;overflow-y:auto}
-  .template-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-bottom:1px solid var(--border);
+    overflow:hidden;max-height:290px;overflow-y:auto}
+  .template-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);
     cursor:pointer;background:var(--card);text-align:left;width:100%;border-left:0;border-right:0;border-top:0}
   .template-row:last-child{border-bottom:0}
   .template-row:hover{background:var(--secondary)}
   .template-row[aria-pressed=true]{background:var(--secondary)}
-  .template-row[aria-pressed=true] .tick{opacity:1}
   .tick{margin-left:auto;opacity:0;color:var(--primary);display:grid;place-items:center}
+  .template-row[aria-pressed=true] .tick{opacity:1}
   .tick svg{width:16px;height:16px}
-  .kv{display:grid;grid-template-columns:120px 1fr;gap:8px 14px;font-size:13px;align-items:baseline}
+  .kv{display:grid;grid-template-columns:132px 1fr;gap:8px 14px;font-size:13px;align-items:baseline}
   .kv dt{color:var(--muted-foreground);font-size:12.5px}
-  .kv dd{margin:0}
+  .kv dd{margin:0;min-width:0}
   .code-box{display:flex;align-items:center;gap:8px;background:var(--secondary);border-radius:10px;
-    padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+    padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
     word-break:break-all}
-  .code-box .grow{flex:1}
+  .code-box .grow{flex:1;min-width:0}
   .copy{border:0;background:transparent;color:var(--muted-foreground);cursor:pointer;flex:none;
     display:grid;place-items:center}
   .copy:hover{color:var(--foreground)}
-  .callout{display:flex;gap:10px;padding:11px 13px;border-radius:10px;background:var(--secondary);
+  .callout{display:flex;gap:9px;padding:10px 12px;border-radius:10px;background:var(--secondary);
     font-size:12.5px;line-height:1.5;align-items:flex-start}
-  .callout svg{width:16px;height:16px;flex:none;margin-top:1px;color:var(--muted-foreground)}
+  .callout svg{width:15px;height:15px;flex:none;margin-top:1px;color:var(--muted-foreground)}
   .callout-warn{background:color-mix(in srgb,var(--attention) 14%,var(--card))}
   .callout-warn svg{color:var(--attention)}
   .callout-ok{background:color-mix(in srgb,var(--success) 12%,var(--card))}
   .callout-ok svg{color:var(--success)}
   .callout-err{background:color-mix(in srgb,var(--destructive) 12%,var(--card))}
   .callout-err svg{color:var(--destructive)}
-  pre.event{margin:0;padding:12px;border-radius:10px;background:var(--secondary);
+  pre.event{margin:0;padding:11px;border-radius:10px;background:var(--secondary);
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;
-    overflow:auto;max-height:300px;color:var(--foreground)}
+    overflow:auto;max-height:290px;color:var(--foreground)}
   .ev-key{color:var(--chart-1)}
   .ev-num{color:var(--chart-5)}
   .ev-str{color:var(--success)}
   .ev-null{color:var(--muted-foreground)}
-  .empty{padding:40px 20px;text-align:center;color:var(--muted-foreground);font-size:13px}
-  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 22px}
-  .tab{border:0;background:transparent;padding:9px 12px;font-size:12.5px;color:var(--muted-foreground);
-    cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+  .empty{padding:36px 20px;text-align:center;color:var(--muted-foreground);font-size:13px}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 20px;overflow-x:auto}
+  .tab{border:0;background:transparent;padding:9px 11px;font-size:12.5px;color:var(--muted-foreground);
+    cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;white-space:nowrap}
   .tab:hover{color:var(--foreground)}
   .tab[aria-selected=true]{color:var(--foreground);border-bottom-color:var(--primary);font-weight:600}
-  .panel{border:1px solid var(--border);border-radius:var(--radius)}
-  .panel-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 13px;
+  .panel{border:1px solid var(--border);border-radius:var(--radius);margin:0}
+  .panel-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:9px 12px;
     border-bottom:1px solid var(--border);font-size:12.5px}
   .panel-row:last-child{border-bottom:0}
   .panel-row dt{color:var(--muted-foreground);margin:0}
-  .panel-row dd{margin:0}
+  .panel-row dd{margin:0;min-width:0}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
   .map-table{width:100%;border-collapse:collapse;font-size:12px}
+  .map-table th{text-align:left;color:var(--muted-foreground);font-weight:500;font-size:11px;
+    padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
   .map-table td{padding:5px 8px;border-bottom:1px solid var(--border)}
   .map-table tr:last-child td{border-bottom:0}
   .map-src{color:var(--muted-foreground)}
   .map-ok{color:var(--success)}
   .map-miss{color:var(--attention)}
   .quality{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  .stat{border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px}
+  .stat{border:1px solid var(--border);border-radius:var(--radius);padding:11px 12px}
   .stat-label{font-size:11.5px;color:var(--muted-foreground)}
-  .stat-value{font-size:19px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
+  .stat-value{font-size:19px;font-weight:600;letter-spacing:-.02em;margin-top:2px}
   .stat-value small{font-size:11.5px;font-weight:500;color:var(--muted-foreground)}
   .bar{height:5px;border-radius:999px;background:var(--secondary);margin-top:8px;overflow:hidden}
   .bar>i{display:block;height:100%;border-radius:999px;background:var(--chart-1)}
   .stream{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);
     overflow:hidden;font-size:12px}
-  .stream-row{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:9px 12px;
-    border-bottom:1px solid var(--border)}
+  .stream-row{display:grid;grid-template-columns:62px 1fr auto;gap:10px;padding:8px 11px;
+    border-bottom:1px solid var(--border);align-items:center}
   .stream-row:last-child{border-bottom:0}
   .stream-row.bad{background:color-mix(in srgb,var(--destructive) 8%,var(--card))}
   .stream-time{color:var(--muted-foreground);font-family:ui-monospace,Menlo,monospace}
@@ -197,10 +212,33 @@
     background:var(--secondary);font-size:10.5px;font-weight:600;margin-left:6px}
   .pill-ok{color:var(--success)}
   .pill-bad{color:var(--destructive)}
+  .pill-warn{color:var(--attention)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--input);border-radius:999px;
+    padding:4px 10px;font-size:12px;background:var(--card)}
+  .chip[aria-pressed=true]{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 10%,var(--card));
+    font-weight:600}
+  .kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  .kpi .stat-value{font-size:21px}
+  .spark{display:block;width:100%;height:34px;margin-top:6px}
+  .spark path{fill:none;stroke:var(--chart-1);stroke-width:1.6}
+  .spark .area{fill:color-mix(in srgb,var(--chart-1) 12%,transparent);stroke:none}
+  .tmpl-card{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--card);
+    display:flex;flex-direction:column;gap:7px;cursor:pointer}
+  .tmpl-card:hover{background:var(--secondary)}
+  .tmpl-head{display:flex;align-items:flex-start;gap:8px}
+  .tmpl-name{font-weight:600;font-size:13px}
+  .tmpl-meta{color:var(--muted-foreground);font-size:11.5px}
+  .mini-bar{height:4px;border-radius:999px;background:var(--secondary);overflow:hidden}
+  .mini-bar>i{display:block;height:100%;background:var(--chart-1)}
+  .grid-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .divider{height:1px;background:var(--border);margin:2px 0}
+  @media (max-width:1100px){.kpi{grid-template-columns:repeat(2,1fr)}
+    .grid-cards{grid-template-columns:repeat(2,1fr)}}
   @media (max-width:900px){
     .shell{grid-template-columns:1fr}.sidebar{display:none}
-    .option-grid{grid-template-columns:1fr}.quality{grid-template-columns:1fr 1fr}
-    .two-col{grid-template-columns:1fr}
+    .option-grid,.grid-3,.two-col,.grid-cards{grid-template-columns:1fr}
+    .quality{grid-template-columns:1fr 1fr}
   }
 </style>
 </head>
@@ -211,55 +249,33 @@
     <div class="brand"><span class="brand-mark">S</span><span class="brand-name">SecPlexus</span></div>
     <nav class="nav-group" aria-label="主导航">
       <span class="nav-label">工作区</span>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>工作台</a>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>事件</a>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>审计日志</a>
+      <button class="nav-item" type="button">工作台</button>
+      <button class="nav-item" type="button">事件</button>
+      <button class="nav-item" type="button">审计日志</button>
     </nav>
     <nav class="nav-group" aria-label="设置导航">
       <span class="nav-label">设置</span>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/></svg>个人资料</a>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 2.7-5.5 6-5.5S15 17 15 20"/><path d="M17 11h4M19 9v4"/></svg>用户管理</a>
-      <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v6c0 4.2-2.9 7.5-7 9-4.1-1.5-7-4.8-7-9V6l7-3z"/></svg>角色与权限</a>
-      <a class="nav-item" href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v9a2 2 0 0 1-2 2H3z"/><path d="M3 7V6a2 2 0 0 1 2-2h4l2 2"/></svg>数据源</a>
+      <button class="nav-item" type="button">个人资料</button>
+      <button class="nav-item" type="button">用户管理</button>
+      <button class="nav-item" type="button">角色与权限</button>
+      <button class="nav-item" type="button" aria-current="page">数据源</button>
+      <button class="nav-item nav-sub" type="button" data-view="connectors">接入点</button>
+      <button class="nav-item nav-sub" type="button" data-view="templates">模板目录</button>
+      <button class="nav-item nav-sub" type="button" data-view="metrics">运行指标</button>
     </nav>
   </aside>
 
   <main class="main">
     <div class="topbar">
-      <div class="crumbs">设置 / <b>数据源</b></div>
+      <div class="crumbs">设置 / <b>数据源</b> <span id="crumbLeaf"></span></div>
       <div class="avatar" title="EayonLee">EL</div>
     </div>
-    <div class="content">
-      <h1>数据源</h1>
-      <div id="banner"></div>
-      <div class="toolbar">
-        <div class="input-group">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="search" type="search" placeholder="搜索名称、模板或 OCSF 类" aria-label="搜索名称、模板或 OCSF 类" />
-        </div>
-        <button class="btn btn-outline btn-sm" id="filterState">状态：全部</button>
-        <span class="spacer"></span>
-        <button class="btn" id="openWizard">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-          接入数据源
-        </button>
-      </div>
-      <div class="table-card">
-        <table>
-          <thead><tr>
-            <th style="width:24%">名称</th><th style="width:9%">通道</th><th style="width:22%">模板</th>
-            <th style="width:23%">接入地址</th><th style="width:13%">状态</th><th style="width:9%">近 1 小时</th>
-          </tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-    </div>
+    <div class="content" id="view"></div>
   </main>
 </div>
 
 <div class="scrim" id="scrim"></div>
 
-<!-- 接入向导：通道 → 模板 → 绑定 → 样本验证 → 启动与诊断 -->
 <section class="sheet" id="wizard" role="dialog" aria-modal="true" aria-labelledby="wizardTitle" aria-hidden="true">
   <div class="sheet-head">
     <div><h2 id="wizardTitle">接入数据源</h2><p id="wizardSub"></p></div>
@@ -275,7 +291,6 @@
   </div>
 </section>
 
-<!-- 诊断抽屉 -->
 <section class="sheet" id="detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle" aria-hidden="true">
   <div class="sheet-head">
     <div><h2 id="detailTitle">数据源</h2><p id="detailSub"></p></div>
@@ -286,114 +301,211 @@
     <button class="tab" role="tab" data-tab="diagnose" aria-selected="false">诊断</button>
     <button class="tab" role="tab" data-tab="messages" aria-selected="false">收到的消息</button>
     <button class="tab" role="tab" data-tab="quality" aria-selected="false">映射质量</button>
+    <button class="tab" role="tab" data-tab="publish" aria-selected="false">发布</button>
   </div>
   <div class="sheet-body" id="detailBody"></div>
   <div class="sheet-foot">
-    <button class="btn btn-danger btn-sm" id="detailDelete">删除数据源</button>
+    <button class="btn btn-danger btn-sm" id="detailDelete">删除</button>
     <span class="spacer"></span>
-    <button class="btn btn-outline btn-sm" id="detailToggle">停用</button>
+    <button class="btn btn-outline btn-sm" id="detailToggle">停止</button>
     <button class="btn btn-sm" id="detailStart">启动</button>
+  </div>
+</section>
+
+<section class="sheet" id="tplSheet" role="dialog" aria-modal="true" aria-labelledby="tplTitle" aria-hidden="true">
+  <div class="sheet-head">
+    <div><h2 id="tplTitle">模板</h2><p id="tplSub"></p></div>
+    <button class="icon-btn" data-close aria-label="关闭"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="sheet-body" id="tplBody"></div>
+  <div class="sheet-foot">
+    <span class="dim" style="font-size:12px">内置模板随二进制分发，只读；要改请提模板变更请求</span>
   </div>
 </section>
 
 <script>
 
-/* ------------------------------------------------------------------
-   原型数据。字段形状对齐 spec 的 connectors 表与 OCSF 事件；
-   模板带 field_map / severity_map / time 格式，用来演示"先验证后启用"。
-   ------------------------------------------------------------------ */
+/* ==========================================================================
+   原型数据：与 spec 的 connectors 表、模板契约、发布契约一一对应
+   ========================================================================== */
 const CHANNELS = {
-  http:   { label: "HTTP",   icon: "cloud",  desc: "设备主动推送 JSON 或纯文本，凭 Bearer 令牌鉴权" },
-  syslog: { label: "syslog", icon: "radio",  desc: "UDP 与 TCP 同端口接收，自动识别 RFC5424／3164／6587" },
-  kafka:  { label: "Kafka",  icon: "layers", desc: "从客户已有总线消费，按模板反序列化" }
+  http:   { label:"HTTP",   icon:"cloud",  desc:"设备主动推送 JSON／纯文本，Bearer 令牌鉴权，202 表示已受理" },
+  syslog: { label:"syslog", icon:"radio",  desc:"UDP 与 TCP 同端口，RFC5424／3164／6587 自动识别" },
+  kafka:  { label:"Kafka",  icon:"layers", desc:"消费客户已有总线，位移只在发布成功后提交" }
 };
 
+/* 18 家内置模板。字段顺序：id,厂商,名称,分组,kind,class_uid,类名,版本,覆盖率,实验性,继承自,
+   severity 字段,severity 表,时间字段,时间格式,常量,disposition */
+function T(id, vendor, name, group, kind, classUid, className, version, coverage, experimental, extendsId,
+           severityField, severityMap, timeField, timeFormat, constants, disposition, fields) {
+  return { id:id, vendor:vendor, name:name, group:group, kind:kind, classUid:classUid,
+    className:className, version:version, coverage:coverage, experimental:experimental,
+    extendsId:extendsId, severityField:severityField, severityMap:severityMap || {},
+    timeField:timeField, timeFormat:timeFormat, constants:constants || {},
+    disposition:disposition || null, fieldMap:fields };
+}
+
 const TEMPLATES = [
-  { id:"sangfor-af", version:"3.2.1", vendor:"深信服", name:"AF 下一代防火墙", group:"网络安全设备",
-    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.97, experimental:false,
-    timeField:"time", timeFormat:"unix_ms", severityField:"level",
-    severityMap:{ "高危":4, "中危":3, "低危":2, "提示":1 },
-    fieldMap:{ src_ip:"src_endpoint.ip", dst_ip:"dst_endpoint.ip", src_port:"src_endpoint.port",
-               dst_port:"dst_endpoint.port", event_desc:"message", rule_name:"finding_info.title",
-               dev_name:"device.hostname" },
-    sample:'{"time":1762986541200,"level":"高危","src_ip":"10.20.3.44","dst_ip":"10.20.9.7","src_port":51824,"dst_port":443,"event_desc":"检测到 SQL 注入攻击","rule_name":"SQL 注入","dev_name":"FW-EDGE-01","rule_level":"高危","policy_id":"pol_8821"}' },
+  T("sangfor-af","深信服","AF 下一代防火墙","网络安全设备","detection",2004,"detection_finding","3.2.1",0.97,false,null,
+    "level",{"高危":4,"中危":3,"低危":2,"提示":1},"time","unix_ms",
+    {"metadata.product.vendor_name":"深信服","metadata.product.name":"AF"},
+    {field:"action", map:{"阻断":"blocked","放行":"allowed"}},
+    {src_ip:"src_endpoint.ip",dst_ip:"dst_endpoint.ip",src_port:"src_endpoint.port",dst_port:"dst_endpoint.port",
+     event_desc:"message",rule_name:"finding_info.title",dev_name:"device.hostname"}),
 
-  { id:"qianxin-tianqing", version:"2.4.0", vendor:"奇安信", name:"天擎终端", group:"终端安全",
-    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.93, experimental:false,
-    timeField:"timestamp", timeFormat:"rfc3339", severityField:"severity",
-    severityMap:{ "high":4, "medium":3, "low":2 },
-    fieldMap:{ hostname:"device.hostname", proc_name:"process.name", cmd_line:"process.cmd_line",
-               file_path:"file.path", user_name:"actor.user.name" },
-    sample:'{"timestamp":"2026-11-12T20:31:04+08:00","severity":"high","hostname":"PC-FIN-014","proc_name":"powershell.exe","cmd_line":"powershell -enc SQBFAFgA","file_path":"C:/Temp/a.exe","user_name":"zhangsan","task_id":"t-9912"}' },
+  T("sangfor-sip","深信服","SIP 态势感知","网络安全设备","detection",2004,"detection_finding","2.9.0",0.86,true,"sangfor-af",
+    "severity",{"严重":5,"高危":4,"中危":3},"timestamp","rfc3339",
+    {"metadata.product.vendor_name":"深信服","metadata.product.name":"SIP"},null,
+    {src_ip:"src_endpoint.ip",dst_ip:"dst_endpoint.ip",threat_name:"finding_info.title",host_name:"device.hostname"}),
 
-  { id:"aws-cloudtrail", version:"1.9.0", vendor:"AWS", name:"CloudTrail", group:"云平台",
-    kind:"telemetry", classUid:3002, className:"api_activity", coverage:0.99, experimental:false,
-    timeField:"eventTime", timeFormat:"rfc3339", severityField:null, severityMap:{},
-    fieldMap:{ eventSource:"metadata.product.name", eventName:"activity_name",
-               sourceIPAddress:"src_endpoint.ip", "userIdentity.arn":"actor.user.uid",
-               awsRegion:"cloud.region" },
-    sample:'{"eventTime":"2026-11-12T12:31:04Z","eventSource":"s3.amazonaws.com","eventName":"GetObject","sourceIPAddress":"203.0.113.9","userIdentity":{"arn":"arn:aws:iam::123:user/deploy"},"awsRegion":"cn-north-1","requestID":"req-88f1"}' },
+  T("qianxin-tianqing","奇安信","天擎终端","终端安全","detection",2004,"detection_finding","2.4.0",0.93,false,null,
+    "severity",{"high":4,"medium":3,"low":2},"timestamp","rfc3339",
+    {"metadata.product.vendor_name":"奇安信","metadata.product.name":"天擎"},
+    {field:"handle_result", map:{"killed":"blocked","quarantined":"quarantined"}},
+    {hostname:"device.hostname",proc_name:"process.name",cmd_line:"process.cmd_line",
+     file_path:"file.path",user_name:"actor.user.name"}),
 
-  { id:"paloalto-traffic", version:"2.1.3", vendor:"Palo Alto", name:"PAN-OS 流量", group:"网络安全设备",
-    kind:"telemetry", classUid:4001, className:"network_activity", coverage:0.88, experimental:false,
-    timeField:"TimeGenerated", timeFormat:"rfc3339", severityField:null, severityMap:{},
-    fieldMap:{ src:"src_endpoint.ip", dst:"dst_endpoint.ip", sport:"src_endpoint.port",
-               dport:"dst_endpoint.port", app:"app.name", action:"disposition" },
-    sample:'{"TimeGenerated":"2026-11-12T20:28:11Z","src":"10.20.4.9","dst":"93.184.216.34","sport":51422,"dport":443,"app":"ssl","action":"allow","sessionid":"s-7712"}' },
+  T("venus-ids","启明星辰","IDS 入侵检测","网络安全设备","detection",2004,"detection_finding","1.6.2",0.91,false,null,
+    "grade",{"严重":5,"高":4,"中":3,"低":2},"occur_time","unix_ms",
+    {"metadata.product.vendor_name":"启明星辰","metadata.product.name":"IDS"},null,
+    {sip:"src_endpoint.ip",dip:"dst_endpoint.ip",sport:"src_endpoint.port",dport:"dst_endpoint.port",
+     rule_msg:"finding_info.title",attack_type:"finding_info.types"}),
 
-  { id:"venus-ids", version:"1.6.2", vendor:"启明星辰", name:"IDS 入侵检测", group:"网络安全设备",
-    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.91, experimental:false,
-    timeField:"occur_time", timeFormat:"unix_ms", severityField:"grade",
-    severityMap:{ "严重":5, "高":4, "中":3, "低":2 },
-    fieldMap:{ sip:"src_endpoint.ip", dip:"dst_endpoint.ip", sport:"src_endpoint.port",
-               dport:"dst_endpoint.port", rule_msg:"finding_info.title", attack_type:"finding_info.types" },
-    sample:'{"occur_time":1762986489000,"grade":"高","sip":"10.20.7.31","dip":"10.20.9.7","sport":33814,"dport":22,"rule_msg":"SSH 暴力破解","attack_type":"brute_force","sensor":"IDS-CORE-2"}' },
+  T("nsfocus-ids","绿盟","IDS 入侵检测","网络安全设备","detection",2004,"detection_finding","0.9.4",0.74,true,null,
+    "sev",{"3":4,"2":3,"1":2},"ts","unix_ms",
+    {"metadata.product.vendor_name":"绿盟","metadata.product.name":"IDS"},null,
+    {saddr:"src_endpoint.ip",daddr:"dst_endpoint.ip",msg:"message",rule:"finding_info.title"}),
 
-  { id:"nsfocus-ids", version:"0.9.4", vendor:"绿盟", name:"IDS 入侵检测", group:"网络安全设备",
-    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.74, experimental:true,
-    timeField:"ts", timeFormat:"unix_ms", severityField:"sev",
-    severityMap:{ "3":4, "2":3, "1":2 },
-    fieldMap:{ saddr:"src_endpoint.ip", daddr:"dst_endpoint.ip", msg:"message", rule:"finding_info.title" },
-    sample:'{"ts":1762986111000,"sev":"3","saddr":"10.20.8.12","daddr":"10.20.9.7","msg":"检测到 WebShell 上传","rule":"web_shell","iface":"eth2","pkt_num":184}' },
+  T("hillstone-ngfw","山石网科","NGFW 防火墙","网络安全设备","telemetry",4001,"network_activity","1.3.0",0.89,false,null,
+    null,{},	"log_time","unix_ms",
+    {"metadata.product.vendor_name":"山石网科","metadata.product.name":"NGFW"},null,
+    {srcip:"src_endpoint.ip",dstip:"dst_endpoint.ip",srcport:"src_endpoint.port",dstport:"dst_endpoint.port",
+     app:"app.name",action:"disposition"}),
 
-  { id:"fortinet-fortigate", version:"1.4.1", vendor:"Fortinet", name:"FortiGate", group:"网络安全设备",
-    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.90, experimental:false,
-    timeField:"eventtime", timeFormat:"unix_ms", severityField:"level",
-    severityMap:{ "critical":5, "high":4, "medium":3, "low":2 },
-    fieldMap:{ srcip:"src_endpoint.ip", dstip:"dst_endpoint.ip", srcport:"src_endpoint.port",
-               dstport:"dst_endpoint.port", attack:"finding_info.types", msg:"message" },
-    sample:'{"eventtime":1762986042000,"level":"high","srcip":"198.51.100.7","dstip":"10.20.9.7","srcport":44182,"dstport":443,"attack":"webshell","msg":"Web 攻击被阻断","devname":"FG-CORE"}' },
+  T("dbappsecurity-waf","安恒","明御 WAF","网络安全设备","detection",2004,"detection_finding","1.1.7",0.81,true,null,
+    "risk",{"高":4,"中":3,"低":2},"event_time","rfc3339",
+    {"metadata.product.vendor_name":"安恒","metadata.product.name":"明御 WAF"},
+    {field:"policy_action", map:{"block":"blocked","alert":"logged"}},
+    {client_ip:"src_endpoint.ip",server_ip:"dst_endpoint.ip",attack_type:"finding_info.types",url:"http_request.url"}),
 
-  { id:"generic-json", version:"1.0.0", vendor:"通用", name:"JSON 键值直映射", group:"通用",
-    kind:"telemetry", classUid:6003, className:"api_activity", coverage:1.0, experimental:false,
-    timeField:"time", timeFormat:"unix_ms", severityField:"severity",
-    severityMap:{ "high":4, "medium":3, "low":2 },
-    fieldMap:{ message:"message", host:"device.hostname", user:"actor.user.name" },
-    sample:'{"time":1762986000000,"severity":"medium","message":"示例事件","host":"WEB-01","user":"svc_deploy"}' }
+  T("topsec-ngfw","天融信","NGFW 防火墙","网络安全设备","telemetry",4001,"network_activity","1.0.9",0.85,false,null,
+    null,{},"recv_time","unix_ms",
+    {"metadata.product.vendor_name":"天融信","metadata.product.name":"NGFW"},null,
+    {sip:"src_endpoint.ip",dip:"dst_endpoint.ip",sport:"src_endpoint.port",dport:"dst_endpoint.port",app_proto:"app.name"}),
+
+  T("huawei-usg","华为","USG 防火墙","网络安全设备","telemetry",4001,"network_activity","2.0.4",0.90,false,null,
+    null,{},"eventtime","rfc3339",
+    {"metadata.product.vendor_name":"华为","metadata.product.name":"USG"},null,
+    {srcip:"src_endpoint.ip",dstip:"dst_endpoint.ip",srcport:"src_endpoint.port",dstport:"dst_endpoint.port",
+     app:"app.name",action:"disposition"}),
+
+  T("h3c-secpath","新华三","SecPath 防火墙","网络安全设备","telemetry",4001,"network_activity","1.2.1",0.87,false,null,
+    null,{},"ReceiveTime","rfc3339",
+    {"metadata.product.vendor_name":"新华三","metadata.product.name":"SecPath"},null,
+    {src_ip:"src_endpoint.ip",dst_ip:"dst_endpoint.ip",src_port:"src_endpoint.port",dst_port:"dst_endpoint.port",app:"app.name"}),
+
+  T("paloalto-traffic","Palo Alto","PAN-OS 流量","网络安全设备","telemetry",4001,"network_activity","2.1.3",0.88,false,null,
+    null,{},"TimeGenerated","rfc3339",
+    {"metadata.product.vendor_name":"Palo Alto","metadata.product.name":"PAN-OS"},null,
+    {src:"src_endpoint.ip",dst:"dst_endpoint.ip",sport:"src_endpoint.port",dport:"dst_endpoint.port",
+     app:"app.name",action:"disposition"}),
+
+  T("fortinet-fortigate","Fortinet","FortiGate","网络安全设备","detection",2004,"detection_finding","1.4.1",0.90,false,null,
+    "level",{"critical":5,"high":4,"medium":3,"low":2},"eventtime","unix_ms",
+    {"metadata.product.vendor_name":"Fortinet","metadata.product.name":"FortiGate"},
+    {field:"action", map:{"blocked":"blocked","passthrough":"allowed"}},
+    {srcip:"src_endpoint.ip",dstip:"dst_endpoint.ip",srcport:"src_endpoint.port",dstport:"dst_endpoint.port",
+     attack:"finding_info.types",msg:"message"}),
+
+  T("crowdstrike-falcon","CrowdStrike","Falcon 终端","终端安全","detection",2004,"detection_finding","2.7.0",0.95,false,null,
+    "severity",{"Critical":5,"High":4,"Medium":3,"Low":2,"Informational":1},"timestamp","rfc3339",
+    {"metadata.product.vendor_name":"CrowdStrike","metadata.product.name":"Falcon"},
+    {field:"action_taken", map:{"prevented":"blocked","detected":"logged"}},
+    {hostname:"device.hostname",process_name:"process.name",command_line:"process.cmd_line",
+     tactic:"finding_info.attacks.tactic.name",technique:"finding_info.attacks.technique.name"}),
+
+  T("cisco-asa","Cisco","ASA 防火墙","网络安全设备","telemetry",4001,"network_activity","1.5.2",0.83,false,null,
+    null,{},"eventtime","rfc3339",
+    {"metadata.product.vendor_name":"Cisco","metadata.product.name":"ASA"},null,
+    {src:"src_endpoint.ip",dst:"dst_endpoint.ip",sport:"src_endpoint.port",dport:"dst_endpoint.port",action:"disposition"}),
+
+  T("checkpoint-fw","Check Point","Quantum 防火墙","网络安全设备","telemetry",4001,"network_activity","1.1.0",0.82,false,null,
+    null,{},"lastupdatetime","rfc3339",
+    {"metadata.product.vendor_name":"Check Point","metadata.product.name":"Quantum"},null,
+    {src:"src_endpoint.ip",dst:"dst_endpoint.ip",service:"app.name",action:"disposition"}),
+
+  T("aws-cloudtrail","AWS","CloudTrail","云平台","telemetry",3002,"api_activity","1.9.0",0.99,false,null,
+    null,{},"eventTime","rfc3339",
+    {"metadata.product.vendor_name":"AWS","metadata.product.name":"CloudTrail"},null,
+    {eventSource:"metadata.product.feature.name",eventName:"activity_name",sourceIPAddress:"src_endpoint.ip",
+     "userIdentity.arn":"actor.user.uid",awsRegion:"cloud.region"}),
+
+  T("aliyun-actiontrail","阿里云","操作审计","云平台","telemetry",3002,"api_activity","1.3.4",0.92,true,null,
+    null,{},"apiVersionTime","rfc3339",
+    {"metadata.product.vendor_name":"阿里云","metadata.product.name":"ActionTrail"},null,
+    {eventName:"activity_name",sourceIpAddress:"src_endpoint.ip","userIdentity.userName":"actor.user.name",region:"cloud.region"}),
+
+  T("tencent-cloudaudit","腾讯云","CloudAudit","云平台","telemetry",3002,"api_activity","1.0.5",0.78,true,null,
+    null,{},"eventTime","unix_ms",
+    {"metadata.product.vendor_name":"腾讯云","metadata.product.name":"CloudAudit"},null,
+    {eventName:"activity_name",sourceIPAddress:"src_endpoint.ip",userIdentity:"actor.user.name",region:"cloud.region"})
 ];
 
 const STATE = {
-  draft:   { label: "待启动", kind: "idle" },
-  running: { label: "运行中", kind: "ok" },
-  stopped: { label: "已停止", kind: "warn" },
-  silent:  { label: "运行中 · 无流量", kind: "err" }
+  draft:{ label:"待启动", kind:"idle" },
+  running:{ label:"运行中", kind:"ok" },
+  stopped:{ label:"已停止", kind:"warn" },
+  silent:{ label:"运行中 · 无流量", kind:"err" }
 };
 
 let CONNECTORS = [
-  { id:"cn_7f21a9", name:"边界防火墙", channel:"syslog", template:"sangfor-af", binding:"10.41.84.81:5514",
-    state:"running", hourly:18432, fill:0.97, quarantine:0.4, lastSeen:"2 秒前", token:null },
+  { id:"cn_7f21a9", name:"边界防火墙", channel:"syslog", template:"sangfor-af",
+    binding:"10.41.84.81:5514", state:"running", hourly:18432, fill:0.97, quarantine:0.4,
+    lastSeen:"2 秒前", createdAt:"2026-11-02 09:14",
+    cfg:{ port:"5514", protocol:"UDP+TCP", maxBytes:65536, reloadSec:10 },
+    publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:38, backpressure:false } },
+
   { id:"cn_2b83c1", name:"终端 EDR", channel:"http", template:"qianxin-tianqing",
     binding:"/api/v1/ingestor/ingest/cn_2b83c1", state:"running", hourly:8421, fill:0.93, quarantine:1.2,
-    lastSeen:"8 秒前", token:"ing_live_example000000000000000000" },
+    lastSeen:"8 秒前", createdAt:"2026-11-05 15:02",
+    token:"ing_live_example000000000000000000",
+    cfg:{ ratePerSec:50, burst:200, maxBodyMiB:10, maxBatch:1000, contentTypes:["application/json","text/plain"],
+          redisFailPolicy:"拒绝不放行" },
+    publish:{ keyField:"device.hostname", batch:500, flushMs:2000, lagMs:41, backpressure:false } },
+
   { id:"cn_5d90ee", name:"云审计推送", channel:"http", template:"aws-cloudtrail",
     binding:"/api/v1/ingestor/ingest/cn_5d90ee", state:"stopped", hourly:0, fill:0.99, quarantine:0,
-    lastSeen:"昨天 18:04", token:"ing_live_example111111111111111111" },
+    lastSeen:"昨天 18:04", createdAt:"2026-10-28 11:40",
+    token:"ing_live_example111111111111111111",
+    cfg:{ ratePerSec:50, burst:200, maxBodyMiB:10, maxBatch:1000, contentTypes:["application/json"],
+          redisFailPolicy:"拒绝不放行" },
+    publish:{ keyField:"actor.user.uid", batch:500, flushMs:2000, lagMs:0, backpressure:false } },
+
   { id:"cn_11c4a7", name:"SOC 总线", channel:"kafka", template:"paloalto-traffic",
     binding:"kafka.internal:9092 · topic soc.raw", state:"silent", hourly:0, fill:0.88, quarantine:3.6,
-    lastSeen:"17 分钟前", token:null }
+    lastSeen:"17 分钟前", createdAt:"2026-11-09 20:31",
+    cfg:{ brokers:"kafka.internal:9092", topic:"soc.raw", group:"spx-ingestor-cn_11c4a7",
+          offsetReset:"earliest", commit:"发布成功后提交" },
+    publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:0, backpressure:false } }
 ];
 
-/* ---------- 小工具 ---------- */
+const ISOLATION_REASONS = [
+  { code:"parse_error", label:"解析失败", count:147 },
+  { code:"template_missing", label:"找不到模板", count:23 },
+  { code:"oversize_truncated", label:"超限截断", count:11 },
+  { code:"encoding_lossy", label:"编码有损替换", count:6 }
+];
+
+const METRICS = {
+  ratePerSec: 7.5, parseFailRate: 1.4, quarantineLag: 187, publishP99: 41, outlet: "healthy",
+  series: [5.8,6.4,6.1,7.2,8.0,7.6,7.1,6.9,7.4,7.9,8.2,7.5,7.1,7.3,7.7,7.5],
+  byChannel: [["syslog",5.1],["HTTP",2.3],["Kafka",0.1]],
+  keyDistribution: [["src_endpoint.ip",62],["device.hostname",24],["actor.user.uid",9],["event_id 回退",5]]
+};
+
+/* ==========================================================================
+   工具
+   ========================================================================== */
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
 function el(tag, attrs) {
@@ -427,10 +539,10 @@ const ICON = {
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17h.01"/></svg>',
   ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>'
 };
-function badge(kind, text) { return el("span", { class: "badge badge-" + kind }, el("span", { class: "badge-dot" }), text); }
+function badge(kind, text) { return el("span", { class:"badge badge-" + kind }, el("span", { class:"badge-dot" }), text); }
 function stateBadge(s) { return badge(STATE[s].kind, STATE[s].label); }
 function tpl(id) { for (let i=0;i<TEMPLATES.length;i++) if (TEMPLATES[i].id===id) return TEMPLATES[i]; return TEMPLATES[0]; }
-function codeBox(text, opts) {
+function codeBox(text) {
   const btn = el("button", { class:"copy", "aria-label":"复制", html:ICON.copy });
   btn.addEventListener("click", function (e) {
     e.stopPropagation();
@@ -444,13 +556,28 @@ function jsonBlock(obj) {
   const text = JSON.stringify(obj, null, 2)
     .replace(/"([^"]+)":/g, '<span class="ev-key">"$1"</span>:')
     .replace(/: "([^"]*)"/g, ': <span class="ev-str">"$1"</span>')
-    .replace(/: (\d+\.?\d*)/g, ': <span class="ev-num">$1</span>')
+    .replace(/: (-?\d+\.?\d*)/g, ': <span class="ev-num">$1</span>')
     .replace(/: (true|false)/g, ': <span class="ev-num">$1</span>')
     .replace(/: null/g, ': <span class="ev-null">null</span>');
   return el("pre", { class:"event", html:text });
 }
+function sparkline(values) {
+  const w = 200, h = 34, max = Math.max.apply(null, values), min = Math.min.apply(null, values);
+  const span = max - min || 1;
+  const pts = values.map(function (v, i) {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - 3 - ((v - min) / span) * (h - 8);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  });
+  const d = "M" + pts.join(" L");
+  const area = d + " L" + w + "," + h + " L0," + h + " Z";
+  return el("div", { html:'<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    '<path class="area" d="' + area + '"/><path d="' + d + '"/></svg>' });
+}
 
-/* ---------- 映射引擎（原型内的最小实现，用来证明流程可行） ---------- */
+/* ==========================================================================
+   映射引擎（原型内的最小实现；用来证明"先验证后启用"可行）
+   ========================================================================== */
 function getPath(obj, path) {
   const parts = String(path).split(".");
   let cur = obj;
@@ -469,160 +596,402 @@ function setPath(obj, path, value) {
   }
   cur[parts[parts.length - 1]] = value;
 }
-function parseTime(raw, tpl0) {
-  const v = raw[tpl0.timeField];
-  if (v === undefined || v === null || v === "") return { value:null, note:"时间字段缺失：" + tpl0.timeField + "，置 null 并记 warning" };
-  if (tpl0.timeFormat === "unix_ms") {
+function detectFormat(text) {
+  const t = text.trim();
+  if (t.charAt(0) === "{" || t.charAt(0) === "[") {
+    try { JSON.parse(t); return { format:"JSON", note:"首字符 { 且可解析" }; }
+    catch (e) { return { format:"未知", note:"看起来像 JSON 但无法解析" }; }
+  }
+  if (t.indexOf("CEF:") === 0) return { format:"CEF", note:"前缀 CEF:" };
+  if (t.indexOf("LEEF:") === 0) return { format:"LEEF", note:"前缀 LEEF:" };
+  if (/^[A-Za-z0-9_.-]+=/.test(t)) return { format:"KV", note:"键值对，多分隔符" };
+  return { format:"纯文本", note:"无结构，整体作为 message" };
+}
+function detectEncoding(text) {
+  // 浏览器里已被解码成字符串；这里演示"探测结论"的呈现位置。
+  const hasReplacement = text.indexOf("\uFFFD") >= 0;
+  if (hasReplacement) return { encoding:"GB18030 → UTF-8（有损）", lossy:true };
+  return { encoding:"UTF-8（严格）", lossy:false };
+}
+function parseTime(raw, t) {
+  const v = raw[t.timeField];
+  if (v === undefined || v === null || v === "") return { value:null, ok:false, note:"字段缺失，置 null 并记 warning" };
+  if (t.timeFormat === "unix_ms") {
     const n = Number(v);
-    if (!isFinite(n) || n <= 0) return { value:null, note:"不是合法的毫秒时间戳「" + v + "」" };
-    return { value:new Date(n).toISOString(), note:"unix_ms → ISO" };
+    if (!isFinite(n) || n <= 0) return { value:null, ok:false, note:"非法毫秒时间戳" };
+    return { value:new Date(n).toISOString(), ok:true, note:"unix_ms → ISO" };
   }
   const d = new Date(v);
-  if (isNaN(d.getTime())) return { value:null, note:"不是合法的 RFC3339「" + v + "」" };
-  return { value:d.toISOString(), note:"RFC3339 → ISO" };
+  if (isNaN(d.getTime())) return { value:null, ok:false, note:"非法 RFC3339" };
+  return { value:d.toISOString(), ok:true, note:"RFC3339 → ISO" };
 }
-function parseSeverity(raw, tpl0) {
-  if (!tpl0.severityField) return { value:0, note:"模板未声明 severity 字段，按 0 (Unknown)" };
-  const v = raw[tpl0.severityField];
-  if (v === undefined || v === null) return { value:0, note:"源字段「" + tpl0.severityField + "」缺失，按 0 (Unknown)" };
+function parseSeverity(raw, t) {
+  if (!t.severityField) return { value:0, ok:true, note:"模板未声明 severity 字段，0 (Unknown)" };
+  const v = raw[t.severityField];
+  if (v === undefined || v === null) return { value:0, ok:false, note:"源字段缺失，0 (Unknown)" };
   const key = String(v).trim();
-  const lower = key.toLowerCase();
-  for (const k in tpl0.severityMap) {
-    if (k.toLowerCase() === lower) return { value:tpl0.severityMap[k], note:"「" + key + "」→ " + tpl0.severityMap[k] };
+  for (const k in t.severityMap) {
+    if (k.toLowerCase() === key.toLowerCase()) return { value:t.severityMap[k], ok:true, note:"「" + key + "」→ " + t.severityMap[k] };
   }
   const n = Number(key);
-  if (!isNaN(n) && n >= 0 && n <= 6) return { value:n, note:"已是 OCSF 档位" };
-  return { value:0, note:"未识别的档位「" + key + "」，按 0 (Unknown) 并记 warning" };
+  if (!isNaN(n) && n >= 0 && n <= 6) return { value:n, ok:true, note:"已是 OCSF 档位" };
+  return { value:0, ok:false, note:"未识别档位「" + key + "」，0 + warning" };
 }
-function mapSample(tpl0, rawText) {
+function mapSample(t, rawText) {
+  const fmt = detectFormat(rawText);
+  const enc = detectEncoding(rawText);
+  if (fmt.format !== "JSON") {
+    return { error:"该模板要求 JSON；探测到 " + fmt.format + "（" + fmt.note + "）", fmt:fmt, enc:enc };
+  }
   let raw;
-  try { raw = JSON.parse(rawText); }
-  catch (e) { return { error:"样本不是合法 JSON：" + e.message.slice(0, 60) }; }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error:"样本必须是 JSON 对象" };
+  try { raw = JSON.parse(rawText); } catch (e) { return { error:"样本不是合法 JSON", fmt:fmt, enc:enc }; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error:"样本必须是 JSON 对象", fmt:fmt, enc:enc };
 
   const rows = [];
   const consumed = {};
   const event = {
-    class_uid: tpl0.classUid,
-    category_uid: Math.floor(tpl0.classUid / 1000),
-    severity_id: 0,
-    is_alert: tpl0.kind === "detection",
-    time: null,
-    message: null,
-    metadata: { product: { vendor_name: tpl0.vendor, name: tpl0.name }, version: tpl0.version },
+    class_uid: t.classUid, category_uid: Math.floor(t.classUid / 1000),
+    activity_id: 1, severity_id: 0, is_alert: t.kind === "detection", time: null, message: null,
+    metadata: { product: { vendor_name: t.vendor, name: t.name }, version: t.version },
     unmapped: {}
   };
 
-  const t = parseTime(raw, tpl0);
-  event.time = t.value;
-  consumed[tpl0.timeField] = true;
-  rows.push({ src:tpl0.timeField, dst:"time", ok:t.value !== null, note:t.note });
+  const tm = parseTime(raw, t);
+  event.time = tm.value; consumed[t.timeField] = true;
+  rows.push({ src:t.timeField, dst:"time", ok:tm.ok, note:tm.note });
 
-  const sv = parseSeverity(raw, tpl0);
+  const sv = parseSeverity(raw, t);
   event.severity_id = sv.value;
-  if (tpl0.severityField) consumed[tpl0.severityField] = true;
-  rows.push({ src:tpl0.severityField || "（未声明）", dst:"severity_id", ok:sv.value !== 0 || !tpl0.severityField, note:sv.note });
+  if (t.severityField) consumed[t.severityField] = true;
+  rows.push({ src:t.severityField || "（未声明）", dst:"severity_id", ok:sv.ok, note:sv.note });
 
-  const typeMap = { port:"int", int:"int" };
-  for (const src in tpl0.fieldMap) {
-    const dst = tpl0.fieldMap[src];
+  for (const src in t.fieldMap) {
+    const dst = t.fieldMap[src];
     const value = getPath(raw, src);
     consumed[src.split(".")[0]] = true;
     if (value === undefined || value === null) {
-      rows.push({ src:src, dst:dst, ok:false, note:"源字段缺失，置 null" });
       setPath(event, dst, null);
+      rows.push({ src:src, dst:dst, ok:false, note:"源字段缺失，置 null" });
       continue;
     }
-    const want = typeMap[src] || null;
-    const converted = want === "int" && isFinite(Number(value)) ? Number(value) : value;
-    setPath(event, dst, converted);
-    rows.push({ src:src, dst:dst, ok:true, note:want === "int" ? "转 int" : "直映射" });
+    const wantInt = /\.port$/.test(dst);
+    setPath(event, dst, wantInt && isFinite(Number(value)) ? Number(value) : value);
+    rows.push({ src:src, dst:dst, ok:true, note:wantInt ? "转 int" : "直映射" });
   }
 
-  for (const k in raw) {
-    if (!consumed[k]) event.unmapped[k] = raw[k];
+  for (const c in t.constants) setPath(event, c, t.constants[c]);
+  if (t.disposition && raw[t.disposition.field] !== undefined) {
+    const mapped = t.disposition.map[String(raw[t.disposition.field])];
+    event.disposition = mapped || null;
+    consumed[t.disposition.field] = true;
+    rows.push({ src:t.disposition.field, dst:"disposition",
+      ok:Boolean(mapped), note:mapped ? "security_control：" + mapped : "未在映射表中，置 null" });
   }
-  const unmappedKeys = Object.keys(event.unmapped);
+
+  for (const k in raw) if (!consumed[k]) event.unmapped[k] = raw[k];
+
   const mapped = rows.filter(function (r) { return r.ok; }).length;
-  return { event:event, rows:rows, mapped:mapped, total:rows.length,
-           unmappedKeys:unmappedKeys, fill: rows.length ? mapped / rows.length : 0 };
+  const unmappedKeys = Object.keys(event.unmapped);
+  return { event:event, rows:rows, mapped:mapped, total:rows.length, unmappedKeys:unmappedKeys,
+           fmt:fmt, enc:enc, keyField:unmappedKeys.length ? "src_endpoint.ip" : "src_endpoint.ip",
+           fill: rows.length ? mapped / rows.length : 0 };
+}
+function inheritanceChain(t) {
+  const chain = [t];
+  let cur = t;
+  while (cur.extendsId) { cur = tpl(cur.extendsId); chain.unshift(cur); }
+  return chain;
 }
 
-/* ---------- 列表 ---------- */
-let stateFilter = "all";
-function renderBanner() {
-  const draft = CONNECTORS.filter(function (c) { return c.state === "draft"; }).length;
-  const silent = CONNECTORS.filter(function (c) { return c.state === "silent"; }).length;
-  const host = $("#banner");
-  host.replaceChildren();
-  if (!draft && !silent) return;
-  const parts = [];
-  if (draft) parts.push(draft + " 个数据源已创建但尚未启动");
-  if (silent) parts.push(silent + " 个数据源运行中但 15 分钟内没有收到流量");
-  host.append(el("div", { style:"margin-top:14px" },
-    el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }), parts.join("；") + "。")));
+/* ==========================================================================
+   路由
+   ========================================================================== */
+let view = "connectors";
+const VIEW_LABEL = { connectors:"接入点", templates:"模板目录", metrics:"运行指标" };
+function navigate(next) {
+  view = next;
+  $$(".nav-sub").forEach(function (b) { b.setAttribute("aria-current", b.dataset.view === view ? "page" : "false"); });
+  $("#crumbLeaf").textContent = " / " + VIEW_LABEL[view];
+  renderView();
 }
-function renderRows() {
-  const q = $("#search").value.trim().toLowerCase();
-  const rows = CONNECTORS.filter(function (c) {
+function renderView() {
+  const host = $("#view");
+  host.replaceChildren();
+  if (view === "connectors") renderConnectors(host);
+  if (view === "templates") renderTemplates(host);
+  if (view === "metrics") renderMetrics(host);
+}
+$$(".nav-sub").forEach(function (b) { b.addEventListener("click", function () { navigate(b.dataset.view); }); });
+
+/* ---------- 视图：接入点 ---------- */
+let channelFilter = "all";
+let stateFilter = "all";
+let page = 0;
+const PAGE_SIZE = 5;
+let query = "";
+let readOnly = false;
+
+function renderConnectors(host) {
+  host.append(el("h1", {}, "接入点"));
+  host.append(el("div", { style:"margin-top:14px", id:"banner" }));
+
+  const search = el("input", { type:"search", value:query, placeholder:"搜索名称、模板或 OCSF 类",
+    "aria-label":"搜索名称、模板或 OCSF 类",
+    oninput:function(e){ query = e.target.value; page = 0; refreshTable(); } });
+  const channelBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
+    const order = ["all","http","syslog","kafka"];
+    channelFilter = order[(order.indexOf(channelFilter)+1)%order.length];
+    channelBtn.textContent = "通道：" + (channelFilter === "all" ? "全部" : CHANNELS[channelFilter].label);
+    page = 0; refreshTable();
+  } }, "通道：" + (channelFilter === "all" ? "全部" : CHANNELS[channelFilter].label));
+  const stateBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
+    const order = ["all","running","draft","stopped","silent"];
+    stateFilter = order[(order.indexOf(stateFilter)+1)%order.length];
+    stateBtn.textContent = "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label);
+    page = 0; refreshTable();
+  } }, "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label));
+
+  const roleChip = el("button", { class:"chip", "aria-pressed":String(readOnly),
+    title:"演示 ingestor.connectors.read 与 manage 的差别",
+    onclick:function(){ readOnly = !readOnly; renderView(); } }, readOnly ? "只读身份（read）" : "管理员身份（manage）");
+
+  host.append(el("div", { class:"toolbar" },
+    el("div", { class:"input-group" },
+      el("span", { html:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>' }),
+      search),
+    channelBtn, stateBtn, roleChip,
+    el("span", { class:"spacer" }),
+    readOnly
+      ? el("span", { class:"dim", style:"font-size:12.5px" }, "缺少 ingestor.connectors.manage")
+      : el("button", { class:"btn", id:"openWizard", onclick:openWizard }, "接入数据源")));
+
+  host.append(el("div", { class:"table-card" },
+    el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", { style:"width:23%" }, "名称"), el("th", { style:"width:9%" }, "通道"),
+        el("th", { style:"width:21%" }, "模板"), el("th", { style:"width:22%" }, "接入地址"),
+        el("th", { style:"width:13%" }, "状态"), el("th", { style:"width:12%" }, "操作"))),
+      el("tbody", { id:"rows" }))));
+  host.append(el("div", { id:"pager", style:"margin-top:12px" }));
+
+  refreshTable();
+  refreshBanner();
+}
+
+function filtered() {
+  const q = query.trim().toLowerCase();
+  return CONNECTORS.filter(function (c) {
     const t = tpl(c.template);
     const hay = (c.name + " " + t.vendor + " " + t.name + " cls" + t.classUid + " " + c.id).toLowerCase();
-    const okState = stateFilter === "all" || c.state === stateFilter;
-    return okState && (!q || hay.indexOf(q) >= 0);
+    return (channelFilter === "all" || c.channel === channelFilter)
+        && (stateFilter === "all" || c.state === stateFilter)
+        && (!q || hay.indexOf(q) >= 0);
   });
+}
+function refreshBanner() {
+  const host = $("#banner");
+  if (!host) return;
+  host.replaceChildren();
+  const draft = CONNECTORS.filter(function (c) { return c.state === "draft"; }).length;
+  const silent = CONNECTORS.filter(function (c) { return c.state === "silent"; }).length;
+  if (!draft && !silent) return;
+  const parts = [];
+  if (draft) parts.push(draft + " 个接入点已创建但尚未启动");
+  if (silent) parts.push(silent + " 个接入点运行中但 15 分钟无入站流量");
+  host.append(el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+    parts.join("；") + "。启动或排查后才会计入接收速率。"));
+}
+function refreshTable() {
   const body = $("#rows");
+  if (!body) return;
+  const rows = filtered();
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (page >= pages) page = pages - 1;
+  const slice = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   body.replaceChildren();
-  if (!rows.length) {
-    body.append(el("tr", {}, el("td", { colspan:"6" }, el("div", { class:"empty" }, "没有匹配的数据源"))));
-    return;
+  if (!slice.length) {
+    body.append(el("tr", {}, el("td", { colspan:"6" }, el("div", { class:"empty" }, "没有匹配的接入点"))));
   }
-  rows.forEach(function (c) {
+  slice.forEach(function (c) {
     const t = tpl(c.template);
-    body.append(el("tr", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
-      el("td", {}, el("div", { class:"cell-name" }, c.name), el("div", { class:"mono cell-sub" }, c.id)),
-      el("td", {}, el("span", { class:"badge badge-outline" }, CHANNELS[c.channel].label)),
-      el("td", {},
+    const canStart = c.state !== "running" && c.state !== "silent";
+    body.append(el("tr", {},
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
+        el("div", { class:"cell-name" }, c.name),
+        el("div", { class:"mono cell-sub" }, c.id)),
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
+        el("span", { class:"badge badge-outline" }, CHANNELS[c.channel].label)),
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
         el("div", {}, t.name),
         el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.className +
           (t.experimental ? " · 实验性" : ""))),
-      el("td", {}, el("span", { class:"mono dim" }, c.binding)),
-      el("td", {}, stateBadge(c.state)),
-      el("td", { class:"mono dim" }, c.hourly.toLocaleString("zh-CN"))));
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
+        el("span", { class:"mono dim" }, c.binding)),
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" }, stateBadge(c.state)),
+      el("td", {},
+        readOnly
+          ? el("span", { class:"dim", style:"font-size:12.5px" }, "只读")
+          : (canStart
+              ? el("button", { class:"btn btn-outline btn-sm", onclick:function(){ c.state = "running"; c.lastSeen = "刚刚"; refreshTable(); refreshBanner(); } }, "启动")
+              : el("button", { class:"btn btn-outline btn-sm", onclick:function(){ c.state = "stopped"; refreshTable(); refreshBanner(); } }, "停止")))));
   });
-}
-$("#search").addEventListener("input", renderRows);
-$("#filterState").addEventListener("click", function () {
-  const order = ["all", "running", "draft", "stopped", "silent"];
-  stateFilter = order[(order.indexOf(stateFilter) + 1) % order.length];
-  $("#filterState").textContent = "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label);
-  renderRows();
-});
 
-/* ---------- 抽屉 ---------- */
-let openSheet = null;
-function show(sheet) {
+  const pager = $("#pager");
+  if (!pager) return;
+  pager.replaceChildren();
+  pager.append(el("div", { style:"display:flex;align-items:center;gap:8px" },
+    el("span", { class:"dim", style:"font-size:12.5px" },
+      "共 " + rows.length + " 个 · 第 " + (page + 1) + "/" + pages + " 页"),
+    el("span", { class:"spacer" }),
+    el("button", { class:"btn btn-outline btn-sm", disabled: page === 0,
+      onclick:function(){ page--; refreshTable(); } }, "上一页"),
+    el("button", { class:"btn btn-outline btn-sm", disabled: page >= pages - 1,
+      onclick:function(){ page++; refreshTable(); } }, "下一页")));
+}
+
+/* ---------- 视图：模板目录 ---------- */
+let tplGroup = "全部";
+let tplKind = "全部";
+function renderTemplates(host) {
+  host.append(el("h1", {}, "模板目录"));
+  host.append(el("div", { class:"dim", style:"margin-top:4px;font-size:12.5px" },
+    "内置 " + TEMPLATES.length + " 家，随二进制分发、只读。覆盖率来自最近 24 小时真实样本的字段填充率。"));
+
+  const groups = ["全部"].concat(Array.from(new Set(TEMPLATES.map(function (t) { return t.group; }))));
+  const chips = el("div", { class:"chips", style:"margin-top:14px" });
+  groups.forEach(function (g) {
+    chips.append(el("button", { class:"chip", "aria-pressed":String(tplGroup === g),
+      onclick:function(){ tplGroup = g; renderView(); } }, g));
+  });
+  host.append(chips);
+
+  const kinds = el("div", { class:"chips", style:"margin-top:8px" });
+  ["全部","detection","telemetry"].forEach(function (k) {
+    kinds.append(el("button", { class:"chip", "aria-pressed":String(tplKind === k),
+      onclick:function(){ tplKind = k; renderView(); } }, k));
+  });
+  host.append(kinds);
+
+  const list = TEMPLATES.filter(function (t) {
+    return (tplGroup === "全部" || t.group === tplGroup) && (tplKind === "全部" || t.kind === tplKind);
+  });
+  const grid = el("div", { class:"grid-cards", style:"margin-top:14px" });
+  list.forEach(function (t) {
+    grid.append(el("div", { class:"tmpl-card", onclick:function(){ openTemplate(t); } },
+      el("div", { class:"tmpl-head" },
+        el("div", { style:"min-width:0;flex:1" },
+          el("div", { class:"tmpl-name" }, t.name),
+          el("div", { class:"tmpl-meta" }, t.vendor + " · v" + t.version)),
+        t.experimental ? el("span", { class:"badge badge-warn" }, "实验性") : null),
+      el("div", { class:"tmpl-meta" }, "class_uid " + t.classUid + " · " + t.className + " · " + t.kind),
+      el("div", {},
+        el("div", { style:"display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted-foreground)" },
+          el("span", {}, "覆盖率"), el("span", {}, Math.round(t.coverage * 100) + "%")),
+        el("div", { class:"mini-bar", style:"margin-top:4px" },
+          el("i", { style:"width:" + (t.coverage * 100) + "%" }))),
+      t.extendsId ? el("div", { class:"tmpl-meta" }, "继承自 " + tpl(t.extendsId).id) : null));
+  });
+  host.append(grid);
+}
+
+/* ---------- 视图：运行指标 ---------- */
+function renderMetrics(host) {
+  host.append(el("h1", {}, "运行指标"));
+  host.append(el("div", { class:"dim", style:"margin-top:4px;font-size:12.5px" },
+    "接收、解析、发布三段的状态。背压期间接收会被阻塞，这是有意的取舍：不丢数据、不落盘。"));
+  const m = METRICS;
+  const kpi = el("div", { class:"kpi", style:"margin-top:16px" },
+    el("div", { class:"stat" }, el("div", { class:"stat-label" }, "接收速率"),
+      el("div", { class:"stat-value" }, m.ratePerSec.toFixed(1), el("small", {}, " 条/秒")),
+      sparkline(m.series)),
+    el("div", { class:"stat" }, el("div", { class:"stat-label" }, "解析失败率"),
+      el("div", { class:"stat-value" }, m.parseFailRate.toFixed(1), el("small", {}, "%")),
+      el("div", { class:"bar" }, el("i", { style:"width:" + (m.parseFailRate * 10) + "%;background:var(--chart-4)" }))),
+    el("div", { class:"stat" }, el("div", { class:"stat-label" }, "隔离区积压"),
+      el("div", { class:"stat-value" }, m.quarantineLag, el("small", {}, " 条")),
+      el("div", { class:"bar" }, el("i", { style:"width:18%;background:var(--attention)" }))),
+    el("div", { class:"stat" }, el("div", { class:"stat-label" }, "发布延迟 p99"),
+      el("div", { class:"stat-value" }, m.publishP99, el("small", {}, " ms")),
+      el("div", { class:"bar" }, el("i", { style:"width:22%" }))),
+    el("div", { class:"stat" }, el("div", { class:"stat-label" }, "出口"),
+      el("div", { class:"stat-value", style:"font-size:15px;font-weight:600" }, badge("ok", "正常")),
+      el("div", { class:"hint", style:"font-size:11.5px;color:var(--muted-foreground);margin-top:6px" },
+        "spx.ingest.event · 3 分区")));
+  host.append(kpi);
+
+  const byChannel = el("table", { class:"map-table" });
+  byChannel.append(el("tr", {}, el("th", {}, "通道"), el("th", { style:"text-align:right" }, "条/秒"),
+    el("th", { style:"text-align:right" }, "占比")));
+  m.byChannel.forEach(function (r) {
+    byChannel.append(el("tr", {},
+      el("td", {}, r[0]),
+      el("td", { style:"text-align:right" }, r[1].toFixed(1)),
+      el("td", { style:"text-align:right" }, Math.round(r[1] / m.ratePerSec * 100) + "%")));
+  });
+
+  const reasons = el("table", { class:"map-table" });
+  reasons.append(el("tr", {}, el("th", {}, "隔离原因码"), el("th", {}, "含义"), el("th", { style:"text-align:right" }, "条")));
+  ISOLATION_REASONS.forEach(function (r) {
+    reasons.append(el("tr", {}, el("td", { class:"mono" }, r.code), el("td", {}, r.label),
+      el("td", { style:"text-align:right" }, r.count)));
+  });
+
+  const keys = el("table", { class:"map-table" });
+  keys.append(el("tr", {}, el("th", {}, "分区键来源"), el("th", { style:"text-align:right" }, "占比")));
+  m.keyDistribution.forEach(function (r) {
+    keys.append(el("tr", {}, el("td", { class:"mono" }, r[0]),
+      el("td", { style:"text-align:right" }, r[1] + "%")));
+  });
+
+  host.append(el("div", { class:"two-col", style:"margin-top:16px" },
+    el("div", { class:"fieldset" }, el("div", { class:"legend" }, "按通道接收"), byChannel),
+    el("div", { class:"fieldset" }, el("div", { class:"legend" }, "隔离区原因码"), reasons)));
+  const policy = el("dl", { class:"panel" },
+    el("div", { class:"panel-row" }, el("dt", {}, "批量"), el("dd", {}, "满 500 条或 2 秒刷出")),
+    el("div", { class:"panel-row" }, el("dt", {}, "分区键优先级"), el("dd", {}, "src_ip → device → user → 域名 → event_id")),
+    el("div", { class:"panel-row" }, el("dt", {}, "event_id"), el("dd", {}, "UUIDv5(connector_id + 原始指纹)，下游可幂等去重")),
+    el("div", { class:"panel-row" }, el("dt", {}, "Kafka 不可用"), el("dd", {}, "阻塞接收（背压），不丢不落盘")));
+  const keyBox = el("div", { class:"fieldset" },
+    el("div", { class:"legend" }, "分区键分布（决定同实体保序）"), keys);
+  const policyBox = el("div", { class:"fieldset" },
+    el("div", { class:"legend" }, "发布策略"), policy);
+  host.append(el("div", { class:"two-col", style:"margin-top:14px" }, keyBox, policyBox));
+}
+
+/* ==========================================================================
+   向导：通道 → 模板 → 绑定(限流/上限/热重载/消费组) → 样本验证 → 启动与诊断
+   ========================================================================== */
+const STEP_TITLES = ["通道", "模板", "绑定与凭据", "样本验证", "启动与诊断"];
+let step = 0;
+let verifyResult = null;
+let openSheetRef = null;
+const draft = {
+  channel:null, template:null, name:"",
+  port:"5515", brokers:"kafka.internal:9092", topic:"soc.raw",
+  ratePerSec:"50", burst:"200", maxBodyMiB:"10", maxBatch:"1000",
+  contentTypes:["application/json"], reloadSec:"10",
+  sample:""
+};
+
+function showSheet(sheet) {
   $("#scrim").classList.add("open");
   sheet.classList.add("open");
   sheet.setAttribute("aria-hidden", "false");
-  openSheet = sheet;
+  openSheetRef = sheet;
 }
-function hide() {
+function hideSheets() {
   $("#scrim").classList.remove("open");
-  ["#wizard", "#detail"].forEach(function (s) {
-    const n = $(s); n.classList.remove("open"); n.setAttribute("aria-hidden", "true");
+  ["#wizard", "#detail", "#tplSheet"].forEach(function (s) {
+    const n = $(s);
+    if (!n) return;
+    n.classList.remove("open");
+    n.setAttribute("aria-hidden", "true");
   });
-  openSheet = null;
+  openSheetRef = null;
 }
-$("#scrim").addEventListener("click", hide);
-document.addEventListener("keydown", function (e) { if (e.key === "Escape" && openSheet) hide(); });
-$$("[data-close]").forEach(function (b) { b.addEventListener("click", hide); });
-
-/* ---------- 向导 ---------- */
-const STEP_TITLES = ["通道", "模板", "绑定", "样本验证", "启动与诊断"];
-let step = 0;
-let verifyResult = null;
-const draft = { channel:null, template:null, name:"", port:"5514", topic:"soc.raw",
-                brokers:"kafka.internal:9092", sample:"", diagDone:false };
+$("#scrim").addEventListener("click", hideSheets);
+document.addEventListener("keydown", function (e) { if (e.key === "Escape" && openSheetRef) hideSheets(); });
+$$("[data-close]").forEach(function (b) { b.addEventListener("click", hideSheets); });
 
 function renderSteps() {
   const host = $("#steps");
@@ -635,19 +1004,29 @@ function renderSteps() {
   });
 }
 
+function chipsOf(list, selected, onToggle) {
+  const box = el("div", { class:"chips" });
+  list.forEach(function (v) {
+    box.append(el("button", { type:"button", class:"chip",
+      "aria-pressed":String(selected.indexOf(v) >= 0),
+      onclick:function(){ onToggle(v); } }, v));
+  });
+  return box;
+}
+
 function renderWizardBody() {
   const body = $("#wizardBody");
   body.replaceChildren();
-  $("#wizPrev").style.visibility = step === 0 ? "hidden" : "visible";
 
   if (step === 0) {
-    $("#wizardSub").textContent = "先决定设备如何把数据送进来";
+    $("#wizardSub").textContent = "通道决定传输与鉴权方式；格式与模板无关";
     const grid = el("div", { class:"option-grid" });
     Object.keys(CHANNELS).forEach(function (key) {
       const c = CHANNELS[key];
       grid.append(el("button", { class:"option", "aria-pressed":String(draft.channel === key),
         onclick:function(){ draft.channel = key; renderWizardBody(); } },
-        el("div", { class:"option-top" }, el("span", { class:"option-icon", html:ICON[c.icon] }),
+        el("div", { class:"option-top" },
+          el("span", { class:"option-icon", html:ICON[c.icon] }),
           el("span", { class:"option-title" }, c.label)),
         el("span", { class:"option-desc" }, c.desc)));
     });
@@ -655,153 +1034,263 @@ function renderWizardBody() {
   }
 
   if (step === 1) {
-    $("#wizardSub").textContent = "模板决定字段如何映射成 OCSF；版本决定映射规则集";
+    $("#wizardSub").textContent = "模板决定字段映射；版本决定规则集，创建后绑定不可变";
     const list = el("div", { class:"template-list" });
     TEMPLATES.forEach(function (t) {
       list.append(el("button", { class:"template-row", "aria-pressed":String(draft.template === t.id),
-        onclick:function(){ draft.template = t.id; draft.sample = t.sample; verifyResult = null; renderWizardBody(); } },
-        el("div", { style:"min-width:0" },
+        onclick:function(){ draft.template = t.id; draft.sample = defaultSample(t); verifyResult = null; renderWizardBody(); } },
+        el("div", { style:"min-width:0;flex:1" },
           el("div", { style:"font-weight:600;font-size:13px" }, t.name),
-          el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.group)),
+          el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.group +
+            (t.extendsId ? " · 继承 " + tpl(t.extendsId).id : ""))),
         el("span", { class:"badge badge-outline" }, t.kind),
         el("span", { class:"dim mono", style:"white-space:nowrap" }, "class " + t.classUid),
         el("span", { class:"dim mono", style:"white-space:nowrap" }, Math.round(t.coverage * 100) + "%"),
         el("span", { class:"tick", html:ICON.check })));
     });
-    const warn = draft.template && tpl(draft.template).experimental
-      ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-          "实验性模板：厂商格式无公开规范，映射覆盖率偏低；未映射字段会进 unused，失败样本进隔离区。")
-      : null;
+    const tr = draft.template ? tpl(draft.template) : null;
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "模板（覆盖率来自最近 24 小时真实样本）"), list, warn));
+      el("div", { class:"legend" }, "模板"), list,
+      tr && tr.experimental
+        ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+            "实验性模板：厂商格式无公开规范，覆盖率 " + Math.round(tr.coverage * 100) +
+            "%。未映射字段进 event.unmapped，解析失败进隔离区并计原因码。")
+        : null));
   }
 
   if (step === 2) {
-    $("#wizardSub").textContent = "绑定接入方式；通道类型与模板在创建后不可变";
-    body.append(el("div", { class:"field" },
+    $("#wizardSub").textContent = "绑定接入方式与限额；通道与模板在创建后不可变";
+    body.append(el("div", { class:"field", style:"max-width:340px" },
       el("label", { for:"cnName" }, "数据源名称"),
       el("input", { id:"cnName", value:draft.name, placeholder:"例如 边界防火墙",
-        oninput:function(e){ draft.name = e.target.value; } })));
+        oninput:function(e){ draft.name = e.target.value; $("#wizNext").disabled = !stepReady(); } })));
 
     if (draft.channel === "http") {
       body.append(el("div", { class:"fieldset" },
-        el("div", { class:"legend" }, "接入令牌"),
-        codeBox("ing_live_" + Math.random().toString(16).slice(2, 10) + "d47b2e96c1a8d3b70e5f294c"),
+        el("div", { class:"legend" }, "接入令牌",
+          el("span", { class:"hint-inline" }, "SHA-256 摘要存储，常数时间比较；只显示一次")),
+        codeBox("ing_live_example222222222222222222"),
+        el("div", { class:"grid-2" },
+          el("div", { class:"field" }, el("label", { for:"cnRate" }, "限流（请求/秒）"),
+            el("input", { id:"cnRate", value:draft.ratePerSec, oninput:function(e){ draft.ratePerSec = e.target.value; } }),
+            el("span", { class:"hint" }, "默认 50")),
+          el("div", { class:"field" }, el("label", { for:"cnBurst" }, "突发上限"),
+            el("input", { id:"cnBurst", value:draft.burst, oninput:function(e){ draft.burst = e.target.value; } }),
+            el("span", { class:"hint" }, "默认 200，用令牌桶")),
+          el("div", { class:"field" }, el("label", { for:"cnBody" }, "请求体上限（MiB）"),
+            el("input", { id:"cnBody", value:draft.maxBodyMiB, oninput:function(e){ draft.maxBodyMiB = e.target.value; } }),
+            el("span", { class:"hint" }, "超限返回 413")),
+          el("div", { class:"field" }, el("label", { for:"cnBatch" }, "单批数组上限"),
+            el("input", { id:"cnBatch", value:draft.maxBatch, oninput:function(e){ draft.maxBatch = e.target.value; } }),
+            el("span", { class:"hint" }, "默认 1000 条"))),
+        el("div", { class:"fieldset" },
+          el("label", { style:"font-size:12.5px;font-weight:500" }, "允许的 Content-Type"),
+          chipsOf(["application/json","text/plain"], draft.contentTypes, function (v) {
+            const i = draft.contentTypes.indexOf(v);
+            if (i >= 0) { if (draft.contentTypes.length > 1) draft.contentTypes.splice(i, 1); }
+            else draft.contentTypes.push(v);
+            renderWizardBody();
+          }),
+          el("span", { class:"hint" }, "其余类型返回 415")),
         el("div", { class:"callout" }, el("span", { html:ICON.info }),
-          "令牌只在创建时完整显示一次，之后只留摘要；可随时轮换。单源 50 次/秒、突发 200，单请求 10 MiB、单批 1000 条。")));
+          "Redis 计数不可用时的策略固定为「拒绝不放行」，与 IAM 登录限流同语义，不提供开关。"),
+        el("div", { class:"callout" }, el("span", { html:ICON.info }),
+          "成功返回 202 与受理计数；解析与发布在响应之后异步完成，失败走指标与隔离区，不回传设备。")));
     }
+
     if (draft.channel === "syslog") {
-      const listening = CONNECTORS.filter(function (c) { return c.channel === "syslog"; })
-        .map(function (c) { return c.binding.split(":").pop(); });
-      const conflict = listening.indexOf(draft.port) >= 0;
+      const taken = CONNECTORS.filter(function (c) { return c.channel === "syslog"; })
+        .map(function (c) { return c.cfg.port; });
+      const conflict = taken.indexOf(draft.port) >= 0;
       body.append(el("div", { class:"fieldset" },
-        el("div", { class:"legend" }, "监听端口"),
-        el("div", { class:"field" },
-          el("label", { for:"cnPort" }, "UDP 与 TCP 同端口"),
-          el("input", { id:"cnPort", value:draft.port, oninput:function(e){ draft.port = e.target.value; },
-            onchange:function(){ renderWizardBody(); } }),
-          el("span", { class:"hint" }, "建议 1024 以上；绑定由服务端完成，报文内不读取任何身份字段")),
+        el("div", { class:"grid-2" },
+          el("div", { class:"field" }, el("label", { for:"cnPort" }, "监听端口（UDP+TCP 同端口）"),
+            el("input", { id:"cnPort", value:draft.port,
+              oninput:function(e){ draft.port = e.target.value; },
+              onchange:function(){ renderWizardBody(); } }),
+            el("span", { class:"hint" }, "建议 ≥1024，低于 1024 需要特权")),
+          el("div", { class:"field" }, el("label", { for:"cnReload" }, "绑定刷新间隔（秒）"),
+            el("input", { id:"cnReload", value:draft.reloadSec, oninput:function(e){ draft.reloadSec = e.target.value; } }),
+            el("span", { class:"hint" }, "另有 SIGHUP 立即重载"))),
         conflict
           ? el("div", { class:"callout callout-err" }, el("span", { html:ICON.warn }),
-              "端口 " + draft.port + " 已被其他数据源占用。一个端口只能绑一个数据源。")
+              "端口 " + draft.port + " 已被占用。一个端口只能绑定一个接入点。")
           : el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
-              "端口 " + draft.port + " 可用（已探测本机监听与防火墙规则）。")));
+              "端口 " + draft.port + " 可用（已探测本机监听与防火墙规则）。"),
+        el("div", { class:"callout" }, el("span", { html:ICON.info }),
+          "单条上限 64 KiB，超限截断并记 oversize_truncated；RFC5424／3164／6587 自动识别；UDP 永不向发送方回错误。")));
     }
+
     if (draft.channel === "kafka") {
       body.append(el("div", { class:"fieldset" },
-        el("div", { class:"legend" }, "消费来源"),
-        el("div", { class:"field" }, el("label", { for:"cnBrokers" }, "Brokers"),
-          el("input", { id:"cnBrokers", value:draft.brokers, oninput:function(e){ draft.brokers = e.target.value; } })),
-        el("div", { class:"field" }, el("label", { for:"cnTopic" }, "Topic"),
-          el("input", { id:"cnTopic", value:draft.topic, oninput:function(e){ draft.topic = e.target.value; } })),
-        el("div", { class:"callout" }, el("span", { html:ICON.info }),
-          "独立消费组 spx-ingestor-" + "{connector_id}；位移只在事件成功发布后才提交，重启会重放未确认部分。")));
+        el("div", { class:"grid-2" },
+          el("div", { class:"field" }, el("label", { for:"cnBrokers" }, "Brokers"),
+            el("input", { id:"cnBrokers", value:draft.brokers, oninput:function(e){ draft.brokers = e.target.value; } })),
+          el("div", { class:"field" }, el("label", { for:"cnTopic" }, "Topic"),
+            el("input", { id:"cnTopic", value:draft.topic, oninput:function(e){ draft.topic = e.target.value; } }))),
+        el("dl", { class:"panel" },
+          el("div", { class:"panel-row" }, el("dt", {}, "消费组"), el("dd", { class:"mono" }, "spx-ingestor-{connector_id}（自动生成）")),
+          el("div", { class:"panel-row" }, el("dt", {}, "起始位移"), el("dd", {}, "earliest（固定）")),
+          el("div", { class:"panel-row" }, el("dt", {}, "提交策略"), el("dd", {}, "仅当该批已成功发布到 spx.ingest.event 才提交")),
+          el("div", { class:"panel-row" }, el("dt", {}, "故障重放"), el("dd", {}, "未提交的位移在重启后重放，可能重复；下游用 event_id 去重")))));
     }
   }
 
   if (step === 3) {
-    $("#wizardSub").textContent = "用一条真实样本先验证映射，再决定是否启用";
+    $("#wizardSub").textContent = "先验证映射，再决定要不要启用";
     const t = tpl(draft.template);
     const area = el("textarea", { id:"cnSample", oninput:function(e){ draft.sample = e.target.value; } });
-    area.value = draft.sample || t.sample;
-
-    const resultHost = el("div", { id:"verifyHost" });
-    const btn = el("button", { id:"verifyBtn", class:"btn btn-outline btn-sm", onclick:function(){
-      verifyResult = mapSample(t, area.value);
-      renderWizardBody();
-    } }, "验证映射");
+    area.value = draft.sample || defaultSample(t);
 
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "样本"),
+      el("div", { class:"legend" }, "样本", el("span", { class:"hint-inline" }, "贴一条设备真实日志；也可从「收到的消息」里取")),
       area,
-      el("div", { style:"display:flex;gap:8px;align-items:center" }, btn,
-        el("span", { class:"hint" }, "贴一条设备真实日志；也可以从最近收到的消息里取一条"))
-    ));
+      el("div", { style:"display:flex;gap:8px" },
+        el("button", { id:"verifyBtn", class:"btn btn-outline btn-sm", onclick:function(){
+          verifyResult = mapSample(t, area.value); renderWizardBody();
+        } }, "验证映射"))));
 
     if (verifyResult) {
-      if (verifyResult.error) {
-        body.append(el("div", { class:"callout callout-err" }, el("span", { html:ICON.warn }), verifyResult.error));
-      } else {
-        const r = verifyResult;
-        const mapTable = el("table", { class:"map-table" });
-        r.rows.forEach(function (row) {
-          mapTable.append(el("tr", {},
-            el("td", { class:"map-src mono" }, row.src),
-            el("td", { class:"mono" }, row.dst),
-            el("td", { class:row.ok ? "map-ok" : "map-miss", style:"text-align:right;white-space:nowrap" },
-              row.ok ? "✓ " : "! ", row.note)));
-        });
-        const unmapped = r.unmappedKeys.length
-          ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-              "未映射字段 " + r.unmappedKeys.length + " 个，会原样进 event.unmapped：" + r.unmappedKeys.join("、"))
-          : el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }), "全部源字段都已映射");
+      const r = verifyResult;
+      const detect = el("dl", { class:"panel" },
+        el("div", { class:"panel-row" }, el("dt", {}, "格式"),
+          el("dd", {}, r.fmt.format + "（" + r.fmt.note + "）")),
+        el("div", { class:"panel-row" }, el("dt", {}, "编码"),
+          el("dd", {}, r.enc.encoding + (r.enc.lossy ? " · 有损，metadata.encoding 会记录" : ""))),
+        el("div", { class:"panel-row" }, el("dt", {}, "模板"),
+          el("dd", {}, t.id + " v" + t.version)),
+        el("div", { class:"panel-row" }, el("dt", {}, "继承链"),
+          el("dd", { class:"mono" }, inheritanceChain(t).map(function (x) { return x.id; }).join(" → "))));
 
-        body.append(el("div", { class:"fieldset" },
-          el("div", { class:"legend" }, "验证结果 · 映射 " + r.mapped + "/" + r.total + " 字段"),
-          el("div", { class:"two-col" },
-            el("div", { class:"fieldset" }, el("span", { class:"hint" }, "解析出的 OCSF 事件"), jsonBlock(r.event)),
-            el("div", { class:"fieldset" }, el("span", { class:"hint" }, "字段映射"), mapTable)),
-          unmapped));
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "探测结果"), detect));
+
+      if (r.error) {
+        body.append(el("div", { class:"callout callout-err" },
+          el("span", { html:ICON.warn }),
+          el("span", {}, r.error + " "),
+          el("span", { class:"mono dim" }, "code=ingest.parse_failed · request_id=req_8f21c4a0")));
+        $("#wizNext").disabled = !stepReady();
+        return;
       }
+
+      const mapTable = el("table", { class:"map-table" });
+      mapTable.append(el("tr", {},
+        el("th", {}, "源字段"),
+        el("th", {}, "OCSF 目标"),
+        el("th", { style:"text-align:right" }, "说明")));
+      r.rows.forEach(function (row) {
+        mapTable.append(el("tr", {},
+          el("td", { class:"map-src mono" }, row.src),
+          el("td", { class:"mono" }, row.dst),
+          el("td", { class: row.ok ? "map-ok" : "map-miss", style:"text-align:right;white-space:nowrap" },
+            (row.ok ? "✓ " : "! ") + row.note)));
+      });
+
+      const unmappedNote = r.unmappedKeys.length
+        ? el("div", { class:"callout callout-warn" },
+            el("span", { html:ICON.warn }),
+            "未映射 " + r.unmappedKeys.length + " 个字段，原样进 event.unmapped：" + r.unmappedKeys.join("、"))
+        : el("div", { class:"callout callout-ok" },
+            el("span", { html:ICON.ok }), "全部源字段已映射");
+
+      const keyValue = r.event.src_endpoint && r.event.src_endpoint.ip
+        ? "src_endpoint.ip = " + r.event.src_endpoint.ip
+        : "无 src_endpoint.ip → 回退 device → user → event_id";
+      const eventMeta = el("dl", { class:"panel" },
+        el("div", { class:"panel-row" }, el("dt", {}, "分区键"),
+          el("dd", { class:"mono" }, keyValue)),
+        el("div", { class:"panel-row" }, el("dt", {}, "event_id"),
+          el("dd", { class:"mono" }, "UUIDv5(connector + 指纹)")));
+
+      const eventCol = el("div", { class:"fieldset" },
+        el("span", { class:"hint" }, "解析出的 OCSF 事件"),
+        jsonBlock(r.event),
+        eventMeta);
+      const mapCol = el("div", { class:"fieldset" },
+        el("span", { class:"hint" }, "字段映射"),
+        mapTable);
+
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "验证结果 · 映射 " + r.mapped + "/" + r.total),
+        el("div", { class:"two-col" }, eventCol, mapCol),
+        unmappedNote));
     }
   }
 
   if (step === 4) {
-    $("#wizardSub").textContent = "创建后默认不运行；确认诊断结论后再启动";
+    $("#wizardSub").textContent = "创建后默认不运行；启动才绑定端口、才计入接收速率";
     const t = tpl(draft.template);
+    const ok = verifyResult && !verifyResult.error;
     const bindAddr = draft.channel === "syslog" ? "10.41.84.81:" + draft.port
       : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
       : "POST /api/v1/ingestor/ingest/{new}";
-    const ok = verifyResult && !verifyResult.error;
+
+    const cfgRows = [];
+    if (draft.channel === "http") {
+      cfgRows.push(["限流", draft.ratePerSec + " 请求/秒 · 突发 " + draft.burst]);
+      cfgRows.push(["上限", draft.maxBodyMiB + " MiB · 单批 " + draft.maxBatch + " 条"]);
+      cfgRows.push(["Content-Type", draft.contentTypes.join("、")]);
+    }
+    if (draft.channel === "syslog") {
+      cfgRows.push(["协议", "UDP + TCP 同端口"]);
+      cfgRows.push(["单条上限", "64 KiB（超限截断）"]);
+      cfgRows.push(["热重载", "每 " + draft.reloadSec + " 秒 + SIGHUP"]);
+    }
+    if (draft.channel === "kafka") {
+      cfgRows.push(["消费组", "spx-ingestor-{connector_id}"]);
+      cfgRows.push(["起始位移", "earliest"]);
+      cfgRows.push(["提交", "发布成功后提交"]);
+    }
+
+    const dl = el("dl", { class:"kv" },
+      el("dt", {}, "名称"), el("dd", { style:"font-weight:600" }, draft.name || "未命名接入点"),
+      el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
+      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version),
+      el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
+      el("dt", {}, "接入地址"), el("dd", {}, codeBox(bindAddr)));
+    cfgRows.forEach(function (r) { dl.append(el("dt", {}, r[0]), el("dd", {}, r[1])); });
+
+    body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入摘要"), dl));
 
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "接入摘要"),
-      el("dl", { class:"kv" },
-        el("dt", {}, "名称"), el("dd", { style:"font-weight:600" }, draft.name || "未命名数据源"),
-        el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
-        el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version),
-        el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
-        el("dt", {}, "接入地址"), el("dd", {}, codeBox(bindAddr)))));
+      el("div", { class:"legend" }, "启动前诊断"),
+      el("dl", { class:"panel" },
+        el("div", { class:"panel-row" }, el("dt", {}, "绑定"),
+          el("dd", {}, draft.channel === "syslog" ? "10.41.84.81:" + draft.port + " · UDP+TCP"
+            : draft.channel === "kafka" ? draft.brokers : "HTTP 路由已就绪")),
+        el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "1 个实例待启动")),
+        el("div", { class:"panel-row" }, el("dt", {}, "样本验证"),
+          el("dd", {}, ok ? "通过 · 映射 " + verifyResult.mapped + "/" + verifyResult.total + " 字段" : "未验证")),
+        el("div", { class:"panel-row" }, el("dt", {}, "预期故障"), el("dd", { class:"dim" }, "未发现"))),
+      ok
+        ? el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
+            "可以创建。创建后处于「待启动」，启动才会绑定端口并开始计入接收速率。")
+        : el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+            "尚未通过样本验证，建议返回上一步确认映射后再创建。")));
 
-    const diag = el("div", { class:"fieldset" }, el("div", { class:"legend" }, "启动前诊断"));
-    diag.append(el("dl", { class:"panel" },
-      el("div", { class:"panel-row" }, el("dt", {}, "绑定"), el("dd", {},
-        draft.channel === "syslog" ? "10.41.84.81:" + draft.port + " · UDP+TCP" :
-        draft.channel === "kafka" ? draft.brokers : "HTTP 路由已就绪")),
-      el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "1 个实例待启动")),
-      el("div", { class:"panel-row" }, el("dt", {}, "样本验证"), el("dd", {},
-        ok ? "通过 · 映射 " + verifyResult.mapped + "/" + verifyResult.total : "未验证（可返回上一步执行）")),
-      el("div", { class:"panel-row" }, el("dt", {}, "预期故障"), el("dd", { class:"dim" }, "未发现"))
-    ));
-
-    if (ok) {
-      diag.append(el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
-        "可以创建。创建后处于「待启动」，启动才会真正绑定端口并计入接收流量。"));
-    }
-    body.append(diag);
     $("#wizNext").textContent = "创建（待启动）";
   }
+
+  $("#wizPrev").style.visibility = step === 0 ? "hidden" : "visible";
   $("#wizNext").disabled = !stepReady();
+}
+
+function defaultSample(t) {
+  const s = {};
+  s[t.timeField] = t.timeFormat === "unix_ms" ? 1762986541200 : "2026-11-12T20:31:04Z";
+  if (t.severityField) {
+    const keys = Object.keys(t.severityMap);
+    s[t.severityField] = keys.length ? keys[0] : "high";
+  }
+  const srcs = Object.keys(t.fieldMap).slice(0, 5);
+  srcs.forEach(function (k, i) {
+    if (k === t.timeField || k === t.severityField) return;
+    const dst = t.fieldMap[k];
+    s[k] = /\.port$/.test(dst) ? 443 + i : (i === 0 ? "10.20.3.44" : "值-" + (i + 1));
+  });
+  s["extra_field"] = "该厂商独有，模板未映射";
+  return JSON.stringify(s, null, 2);
 }
 
 function stepReady() {
@@ -810,7 +1299,7 @@ function stepReady() {
   if (step === 2) {
     if (!draft.name.trim()) return false;
     if (draft.channel === "syslog") {
-      return !CONNECTORS.some(function (c) { return c.channel === "syslog" && c.binding.split(":").pop() === draft.port; });
+      return !CONNECTORS.some(function (c) { return c.channel === "syslog" && c.cfg.port === draft.port; });
     }
     return true;
   }
@@ -818,39 +1307,53 @@ function stepReady() {
   return true;
 }
 
-$("#openWizard").addEventListener("click", function () {
+function openWizard() {
   draft.channel = null; draft.template = null; draft.name = "";
-  draft.port = "5514"; draft.topic = "soc.raw"; draft.brokers = "kafka.internal:9092";
-  draft.sample = ""; verifyResult = null;
-  step = 0; renderSteps(); renderWizardBody(); show($("#wizard"));
-});
-$("#wizCancel").addEventListener("click", hide);
+  draft.port = "5515"; draft.brokers = "kafka.internal:9092"; draft.topic = "soc.raw";
+  draft.ratePerSec = "50"; draft.burst = "200"; draft.maxBodyMiB = "10"; draft.maxBatch = "1000";
+  draft.contentTypes = ["application/json"]; draft.reloadSec = "10"; draft.sample = "";
+  verifyResult = null; step = 0;
+  renderSteps(); renderWizardBody(); showSheet($("#wizard"));
+}
+
+$("#wizCancel").addEventListener("click", hideSheets);
 $("#wizPrev").addEventListener("click", function () { if (step > 0) { step--; renderSteps(); renderWizardBody(); } });
 $("#wizNext").addEventListener("click", function () {
   if (!stepReady()) return;
   if (step < 4) { step++; renderSteps(); renderWizardBody(); return; }
   const t = tpl(draft.template);
   const id = "cn_" + Math.random().toString(16).slice(2, 8);
-  CONNECTORS.unshift({
+  const c = {
     id:id, name:draft.name, channel:draft.channel, template:t.id,
     binding: draft.channel === "syslog" ? "10.41.84.81:" + draft.port
       : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
       : "/api/v1/ingestor/ingest/" + id,
-    state:"draft", hourly:0, fill:t.coverage, quarantine:0, lastSeen:"从未", token:null
-  });
-  renderRows(); renderBanner(); hide();
+    state:"draft", hourly:0, fill:t.coverage, quarantine:0, lastSeen:"从未",
+    createdAt:"刚刚", token: draft.channel === "http" ? "ing_live_example333333333333333333" : null,
+    cfg: draft.channel === "syslog" ? { port:draft.port, protocol:"UDP+TCP", maxBytes:65536, reloadSec:Number(draft.reloadSec) }
+      : draft.channel === "kafka" ? { brokers:draft.brokers, topic:draft.topic, group:"spx-ingestor-" + id,
+          offsetReset:"earliest", commit:"发布成功后提交" }
+      : { ratePerSec:Number(draft.ratePerSec), burst:Number(draft.burst), maxBodyMiB:Number(draft.maxBodyMiB),
+          maxBatch:Number(draft.maxBatch), contentTypes:draft.contentTypes.slice(), redisFailPolicy:"拒绝不放行" },
+    publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:0, backpressure:false }
+  };
+  CONNECTORS.unshift(c);
+  hideSheets();
+  navigate("connectors");
 });
 
-/* ---------- 诊断抽屉 ---------- */
+/* ==========================================================================
+   详情抽屉：概览 / 诊断 / 消息 / 映射质量 / 发布
+   ========================================================================== */
 let current = null;
 let currentTab = "overview";
 const STREAM = [
-  { t:"20:31:04", ok:true,  msg:"检测到 SQL 注入攻击 · 10.20.3.44 → 10.20.9.7:443" },
-  { t:"20:31:02", ok:true,  msg:"Web 攻击被阻断 · 198.51.100.7 → 10.20.9.7:443" },
-  { t:"20:30:58", ok:false, msg:"parquet: 期望 JSON，收到非 UTF-8 字节序列（隔离）" },
-  { t:"20:30:55", ok:true,  msg:"域控账户非工作时段异常登录 · CN-SH-DC01" },
-  { t:"20:30:51", ok:true,  msg:"端口扫描 · 10.20.8.12 → 10.20.9.0/24" },
-  { t:"20:30:47", ok:false, msg:"severity 值「未知档位」无法识别，按 0 处理（隔离）" }
+  { t:"20:31:04", ok:true, fmt:"JSON", enc:"UTF-8", msg:"检测到 SQL 注入攻击 · 10.20.3.44 → 10.20.9.7:443" },
+  { t:"20:31:02", ok:true, fmt:"JSON", enc:"UTF-8", msg:"Web 攻击被阻断 · 198.51.100.7 → 10.20.9.7:443" },
+  { t:"20:30:58", ok:false, fmt:"CEF", enc:"GB18030", reason:"parse_error", msg:"CEF 扩展键未转义，模板无法匹配" },
+  { t:"20:30:55", ok:true, fmt:"JSON", enc:"UTF-8", msg:"域控账户非工作时段异常登录 · CN-SH-DC01" },
+  { t:"20:30:51", ok:false, fmt:"JSON", enc:"UTF-8", reason:"oversize_truncated", msg:"单条 71 KiB，截断到 64 KiB" },
+  { t:"20:30:47", ok:true, fmt:"JSON", enc:"UTF-8", msg:"端口扫描 · 10.20.8.12 → 10.20.9.0/24" }
 ];
 
 function openDetail(c) {
@@ -858,8 +1361,7 @@ function openDetail(c) {
   $("#detailTitle").textContent = c.name;
   $("#detailSub").textContent = c.id + " · " + CHANNELS[c.channel].label + " · " + tpl(c.template).name;
   $$("#detailTabs .tab").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === "overview")); });
-  renderDetail();
-  show($("#detail"));
+  renderDetail(); showSheet($("#detail"));
 }
 $$("#detailTabs .tab").forEach(function (b) {
   b.addEventListener("click", function () {
@@ -875,28 +1377,52 @@ function renderDetail() {
   const t = tpl(c.template);
   const body = $("#detailBody");
   body.replaceChildren();
-  $("#detailToggle").style.display = c.state === "running" || c.state === "silent" ? "" : "none";
-  $("#detailStart").style.display = c.state === "running" || c.state === "silent" ? "none" : "";
+  const live = c.state === "running" || c.state === "silent";
+  $("#detailToggle").style.display = live && !readOnly ? "" : "none";
+  $("#detailStart").style.display = live || readOnly ? "none" : "";
 
   if (currentTab === "overview") {
-    const rows = [["接入地址", codeBox(c.binding)], ["通道", CHANNELS[c.channel].label],
-      ["模板", t.name + " · v" + t.version + " · " + t.vendor],
-      ["目标类", "class_uid " + t.classUid + " (" + t.className + ") · " + t.kind],
-      ["状态", stateBadge(c.state)], ["最近收到", c.lastSeen]];
+    const dl = el("dl", { class:"kv" },
+      el("dt", {}, "接入地址"), el("dd", {}, codeBox(c.binding)),
+      el("dt", {}, "通道"), el("dd", {}, CHANNELS[c.channel].label),
+      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version + " · " + t.vendor),
+      el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
+      el("dt", {}, "状态"), el("dd", {}, stateBadge(c.state)),
+      el("dt", {}, "创建时间"), el("dd", {}, c.createdAt),
+      el("dt", {}, "最近收到"), el("dd", {}, c.lastSeen));
+    if (c.channel === "http") {
+      dl.append(el("dt", {}, "限流"), el("dd", {}, c.cfg.ratePerSec + " 请求/秒 · 突发 " + c.cfg.burst));
+      dl.append(el("dt", {}, "上限"), el("dd", {}, c.cfg.maxBodyMiB + " MiB · 单批 " + c.cfg.maxBatch + " 条"));
+      dl.append(el("dt", {}, "Content-Type"), el("dd", {}, c.cfg.contentTypes.join("、")));
+    }
+    if (c.channel === "syslog") {
+      dl.append(el("dt", {}, "协议"), el("dd", {}, c.cfg.protocol));
+      dl.append(el("dt", {}, "单条上限"), el("dd", {}, (c.cfg.maxBytes / 1024) + " KiB"));
+      dl.append(el("dt", {}, "热重载"), el("dd", {}, "每 " + c.cfg.reloadSec + " 秒 + SIGHUP"));
+    }
+    if (c.channel === "kafka") {
+      dl.append(el("dt", {}, "消费组"), el("dd", { class:"mono" }, c.cfg.group));
+      dl.append(el("dt", {}, "起始位移"), el("dd", {}, c.cfg.offsetReset));
+      dl.append(el("dt", {}, "提交"), el("dd", {}, c.cfg.commit));
+    }
+    body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入信息"), dl));
+
     if (c.channel === "http" && c.token) {
       const rotate = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
-        c.token = "ing_live_" + Math.random().toString(16).slice(2,10) + "c1a8d3b70e5f294c";
-        renderDetail();
+        c.token = "ing_live_example444444444444444444"; renderDetail();
       } }, "轮换令牌");
-      rows.push(["令牌", el("div", { class:"fieldset", style:"gap:8px" }, codeBox(c.token), rotate)]);
-    }
-    const dl = el("dl", { class:"kv" });
-    rows.forEach(function (r) { dl.append(el("dt", {}, r[0]), el("dd", {}, r[1])); });
-    body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入信息"), dl));
-    if (c.channel === "http") {
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "令牌", el("span", { class:"hint-inline" }, "轮换后旧令牌立即失效")),
+        codeBox(c.token), rotate));
       body.append(el("div", { class:"callout" }, el("span", { html:ICON.info }),
-        "推送示例：curl -H \"Authorization: Bearer <令牌>\" -H \"Content-Type: application/json\" --data @sample.json " +
-        "https://<host>" + c.binding));
+        "推送示例：curl -X POST -H \"Authorization: Bearer <令牌>\" -H \"Content-Type: application/json\" " +
+        "--data @sample.json https://<host>" + c.binding));
+    }
+    if (c.channel === "syslog") {
+      const reload = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
+        reload.textContent = "已重载"; setTimeout(function(){ reload.textContent = "立即重载绑定"; }, 1200);
+      } }, "立即重载绑定");
+      body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "绑定"), reload));
     }
   }
 
@@ -906,25 +1432,25 @@ function renderDetail() {
       el("div", { class:"panel-row" }, el("dt", {}, "信息"), el("dd", {},
         "type=" + CHANNELS[c.channel].label + " · bind=" + c.binding + " · node=ingestor-1")),
       el("div", { class:"panel-row" }, el("dt", {}, "状态"), el("dd", {},
-        c.state === "draft" ? "尚未启动，未占用端口" :
-        c.state === "stopped" ? "已停止；端口已释放" :
-        c.state === "silent" ? "进程运行中，但 15 分钟内未观察到入站流量" : "运行中")),
+        c.state === "draft" ? "尚未启动，未占用端口"
+        : c.state === "stopped" ? "已停止，端口已释放"
+        : c.state === "silent" ? "进程运行中，但 15 分钟未观察到入站流量"
+        : "运行中")),
       el("div", { class:"panel-row" }, el("dt", {}, "收到流量"), el("dd", {},
-        trafficOk ? "18,432 条 / 小时 · 最近 2 秒前" : "0 条 · 最近 17 分钟前（异常）")),
+        trafficOk ? c.hourly.toLocaleString("zh-CN") + " 条 / 小时 · 最近 " + c.lastSeen : "0 条 · 最近 " + c.lastSeen)),
       el("div", { class:"panel-row" }, el("dt", {}, "处理错误"), el("dd", {},
-        c.quarantine > 0 ? c.quarantine.toFixed(1) + "% 进入隔离区（近 1 小时 3 条）" : "无")),
-      el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "ingestor-1：正常"))
-    ));
+        c.quarantine > 0 ? c.quarantine.toFixed(1) + "% 进入隔离区" : "无")),
+      el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "ingestor-1：正常"))));
 
     const fixes = [];
+    if (c.state === "draft") fixes.push("接入点已创建但未启动；启动才会绑定端口、才计入接收速率。");
     if (c.state === "silent") {
-      fixes.push("确认设备侧目标地址填的是 " + c.binding + "，不是前端代理地址");
-      fixes.push("若中间有 rsyslog 中继，源 IP 会变成中继地址；归属只按端口判定，不受影响");
+      fixes.push("确认设备侧填写的是 " + c.binding + "，不是前端代理地址。");
+      fixes.push("若中间有 rsyslog 中继，源 IP 会变成中继地址；归属只按端口判定，不受影响。");
     }
-    if (c.quarantine > 2) fixes.push("隔离区占比 " + c.quarantine.toFixed(1) + "%，检查模板 severity_map 是否缺档位");
-    if (c.state === "draft") fixes.push("创建后需要手动启动，启动才会绑定端口");
-    if (!fixes.length) fixes.push("未发现需要处理的项");
-
+    if (c.quarantine > 2) fixes.push("隔离区 " + c.quarantine.toFixed(1) + "%，检查模板 severity_map 是否缺档位。");
+    if (c.channel === "syslog" && Number(c.cfg.port) < 1024) fixes.push("端口低于 1024 需要特权或 cap_net_bind_service。");
+    if (!fixes.length) fixes.push("未发现需要处理的项。");
     body.append(el("div", { class:"fieldset" },
       el("div", { class:"legend" }, "建议"),
       el("ul", { style:"margin:0;padding-left:18px;font-size:12.5px;color:var(--muted-foreground);line-height:1.7" },
@@ -933,69 +1459,146 @@ function renderDetail() {
 
   if (currentTab === "messages") {
     const host = el("div", { class:"stream" });
-    if (c.state === "draft" || c.state === "stopped") {
-      host.append(el("div", { class:"empty" }, "未启动，暂无消息"));
-    } else {
-      STREAM.forEach(function (m) {
-        host.append(el("div", { class:"stream-row" + (m.ok ? "" : " bad") },
-          el("span", { class:"stream-time" }, m.t),
-          el("div", { style:"min-width:0" },
-            el("div", { class:"stream-msg" }, m.msg),
-            el("span", { class:"pill " + (m.ok ? "pill-ok" : "pill-bad") }, m.ok ? "已发布" : "隔离"))));
-      });
-    }
+    if (!live) host.append(el("div", { class:"empty" }, "未启动，暂无消息"));
+    else STREAM.forEach(function (m) {
+      host.append(el("div", { class:"stream-row" + (m.ok ? "" : " bad") },
+        el("span", { class:"stream-time" }, m.t),
+        el("div", { style:"min-width:0" },
+          el("div", { class:"stream-msg" }, m.msg),
+          el("span", { class:"pill" }, m.fmt),
+          el("span", { class:"pill" }, m.enc)),
+        el("span", { class:"pill " + (m.ok ? "pill-ok" : "pill-bad") },
+          m.ok ? "已发布" : (m.reason || "隔离"))));
+    });
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "最近收到的消息（原始 → 解析结果）"), host));
+      el("div", { class:"legend" }, "最近收到的消息", el("span", { class:"hint-inline" }, "含探测到的格式、编码与失败原因码")),
+      host));
   }
 
   if (currentTab === "quality") {
-    body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "映射质量 · 最近 24 小时"),
-      el("div", { class:"quality" },
-        el("div", { class:"stat" },
-          el("div", { class:"stat-label" }, "填充率"),
-          el("div", { class:"stat-value" }, (c.fill * 100).toFixed(1), el("small", {}, "%")),
-          el("div", { class:"bar" }, el("i", { style:"width:" + (c.fill * 100) + "%" }))),
-        el("div", { class:"stat" },
-          el("div", { class:"stat-label" }, "事件量"),
-          el("div", { class:"stat-value" }, c.hourly.toLocaleString("zh-CN"))),
-        el("div", { class:"stat" },
-          el("div", { class:"stat-label" }, "隔离区"),
-          el("div", { class:"stat-value" }, c.quarantine.toFixed(1), el("small", {}, "%")),
-          el("div", { class:"bar" }, el("i", { style:"width:" + Math.min(c.quarantine * 8, 100) + "%;background:var(--chart-4)" }))),
-        el("div", { class:"stat" },
-          el("div", { class:"stat-label" }, "未映射字段"),
-          el("div", { class:"stat-value" }, "2")))));
+    body.append(el("div", { class:"quality" },
+      el("div", { class:"stat" }, el("div", { class:"stat-label" }, "填充率"),
+        el("div", { class:"stat-value" }, (c.fill * 100).toFixed(1), el("small", {}, "%")),
+        el("div", { class:"bar" }, el("i", { style:"width:" + (c.fill * 100) + "%" }))),
+      el("div", { class:"stat" }, el("div", { class:"stat-label" }, "事件量"),
+        el("div", { class:"stat-value" }, c.hourly.toLocaleString("zh-CN"))),
+      el("div", { class:"stat" }, el("div", { class:"stat-label" }, "隔离率"),
+        el("div", { class:"stat-value" }, c.quarantine.toFixed(1), el("small", {}, "%")),
+        el("div", { class:"bar" }, el("i", { style:"width:" + Math.min(c.quarantine * 8, 100) + "%;background:var(--chart-4)" }))),
+      el("div", { class:"stat" }, el("div", { class:"stat-label" }, "时间解析失败"),
+        el("div", { class:"stat-value" }, "3", el("small", {}, " 条")),
+        el("div", { class:"bar" }, el("i", { style:"width:12%;background:var(--attention)" })))));
+
+    body.append(el("div", { class:"two-col" },
+      el("div", { class:"fieldset" }, el("div", { class:"legend" }, "未映射最多的源字段"),
+        el("table", { class:"map-table" },
+          el("tr", {}, el("th", {}, "源字段"), el("th", { style:"text-align:right" }, "出现率")),
+          el("tr", {}, el("td", { class:"map-src mono" }, "policy_id"), el("td", { style:"text-align:right" }, "100%")),
+          el("tr", {}, el("td", { class:"map-src mono" }, "rule_level"), el("td", { style:"text-align:right" }, "98%")),
+          el("tr", {}, el("td", { class:"map-src mono" }, "sessionid"), el("td", { style:"text-align:right" }, "42%")))),
+      el("div", { class:"fieldset" }, el("div", { class:"legend" }, "severity 分布"),
+        el("table", { class:"map-table" },
+          el("tr", {}, el("th", {}, "severity_id"), el("th", { style:"text-align:right" }, "占比")),
+          el("tr", {}, el("td", {}, "4 High"), el("td", { style:"text-align:right" }, "61%")),
+          el("tr", {}, el("td", {}, "3 Medium"), el("td", { style:"text-align:right" }, "27%")),
+          el("tr", {}, el("td", {}, "0 Unknown（未映射）"), el("td", { style:"text-align:right" }, "8%"))))));
+
+    body.append(el("div", { class:"callout" }, el("span", { html:ICON.info }),
+      "未映射字段不丢弃，原样写入 event.unmapped；severity 映射不上按 0 (Unknown) 并记 warning，不猜。"));
+  }
+
+  if (currentTab === "publish") {
+    const p = c.publish;
+    body.append(el("dl", { class:"panel" },
+      el("div", { class:"panel-row" }, el("dt", {}, "出口 topic"), el("dd", { class:"mono" }, "spx.ingest.event")),
+      el("div", { class:"panel-row" }, el("dt", {}, "分区键"), el("dd", { class:"mono" }, p.keyField)),
+      el("div", { class:"panel-row" }, el("dt", {}, "批量"), el("dd", {}, "满 " + p.batch + " 条或 " + (p.flushMs / 1000) + " 秒")),
+      el("div", { class:"panel-row" }, el("dt", {}, "最近一批延迟"), el("dd", {}, p.lagMs + " ms")),
+      el("div", { class:"panel-row" }, el("dt", {}, "背压"), el("dd", {},
+        p.backpressure ? "是（Kafka 不可用，接收被阻塞）" : "否")),
+      el("div", { class:"panel-row" }, el("dt", {}, "event_id"), el("dd", { class:"mono" }, "UUIDv5(connector + 指纹)"))));
 
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "未映射最多的字段"),
+      el("div", { class:"legend" }, "最近批次"),
       el("table", { class:"map-table" },
-        el("tr", {}, el("td", { class:"map-src mono" }, "policy_id"), el("td", { style:"text-align:right" }, "100%")),
-        el("tr", {}, el("td", { class:"map-src mono" }, "rule_level"), el("td", { style:"text-align:right" }, "98%")),
-        el("tr", {}, el("td", { class:"map-src mono" }, "sessionid"), el("td", { style:"text-align:right" }, "42%"))),
-      el("div", { class:"callout" }, el("span", { html:ICON.info }),
-        "未映射字段不丢弃，原样写入 event.unmapped；下游可据此提出模板补充。")));
+        el("tr", {}, el("th", {}, "时间"), el("th", {}, "条数"), el("th", {}, "分区"),
+          el("th", {}, "实体键"), el("th", { style:"text-align:right" }, "结果")),
+        el("tr", {}, el("td", { class:"mono" }, "20:31:04"), el("td", {}, "500"), el("td", {}, "1"),
+          el("td", { class:"mono" }, "10.20.3.44"), el("td", { style:"text-align:right" }, "已确认")),
+        el("tr", {}, el("td", { class:"mono" }, "20:31:02"), el("td", {}, "500"), el("td", {}, "0"),
+          el("td", { class:"mono" }, "10.20.9.7"), el("td", { style:"text-align:right" }, "已确认")),
+        el("tr", {}, el("td", { class:"mono" }, "20:30:58"), el("td", {}, "172"), el("td", {}, "2"),
+          el("td", { class:"mono" }, "10.20.8.12"), el("td", { style:"text-align:right" }, "已确认")))));
+
+    if (c.channel === "kafka") {
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "消费位移"),
+        el("dl", { class:"panel" },
+          el("div", { class:"panel-row" }, el("dt", {}, "lag"), el("dd", {}, "0（发布后已提交）")),
+          el("div", { class:"panel-row" }, el("dt", {}, "最后提交"), el("dd", {}, "20:31:04")),
+          el("div", { class:"panel-row" }, el("dt", {}, "重放风险"), el("dd", {}, "进程重启时可能重复最近一批；用 event_id 去重")))));
+    }
+    body.append(el("div", { class:"callout" }, el("span", { html:ICON.info }),
+      "同一实体的键相同才落同一分区、才保序；没有实体时回退 event_id，绝不回退固定常量，避免热分区。"));
   }
 }
 $("#detailToggle").addEventListener("click", function () {
   if (!current) return;
-  current.state = current.state === "running" ? "stopped" : "stopped";
-  current.lastSeen = "刚刚";
-  renderDetail(); renderRows(); renderBanner();
+  current.state = "stopped"; renderDetail(); refreshTable(); refreshBanner();
 });
 $("#detailStart").addEventListener("click", function () {
   if (!current) return;
-  current.state = "running"; current.lastSeen = "2 秒前";
-  renderDetail(); renderRows(); renderBanner();
+  current.state = "running"; current.lastSeen = "2 秒前"; current.hourly = 1200;
+  renderDetail(); refreshTable(); refreshBanner();
 });
+$("#detailDelete").style.display = readOnly ? "none" : "";
 $("#detailDelete").addEventListener("click", function () {
   if (!current) return;
   CONNECTORS = CONNECTORS.filter(function (x) { return x.id !== current.id; });
-  hide(); renderRows(); renderBanner();
+  hideSheets(); refreshTable(); refreshBanner();
 });
 
-renderRows();
-renderBanner();
+/* ---------- 模板详情 ---------- */
+function openTemplate(t) {
+  $("#tplTitle").textContent = t.name;
+  $("#tplSub").textContent = t.vendor + " · v" + t.version + " · " + t.group +
+    (t.experimental ? " · 实验性" : "");
+  const body = $("#tplBody");
+  body.replaceChildren();
+
+  const chain = inheritanceChain(t);
+  body.append(el("div", { class:"fieldset" },
+    el("div", { class:"legend" }, "契约"),
+    el("dl", { class:"panel" },
+      el("div", { class:"panel-row" }, el("dt", {}, "id"), el("dd", { class:"mono" }, t.id)),
+      el("div", { class:"panel-row" }, el("dt", {}, "kind"), el("dd", {}, t.kind + "（生产者声明，不靠 severity 推断）")),
+      el("div", { class:"panel-row" }, el("dt", {}, "class_uid"), el("dd", { class:"mono" }, t.classUid + " " + t.className)),
+      el("div", { class:"panel-row" }, el("dt", {}, "时间"), el("dd", { class:"mono" }, t.timeField + " · " + t.timeFormat)),
+      el("div", { class:"panel-row" }, el("dt", {}, "severity"), el("dd", {},
+        t.severityField ? t.severityField + " · " + Object.keys(t.severityMap).join("／") : "未声明（固定 0 Unknown）")),
+      el("div", { class:"panel-row" }, el("dt", {}, "继承"), el("dd", { class:"mono" },
+        chain.length > 1 ? chain.map(function (x) { return x.id; }).join(" → ") + "（逐键覆盖）" : "无")),
+      el("div", { class:"panel-row" }, el("dt", {}, "disposition"), el("dd", {},
+        t.disposition ? "security_control · " + t.disposition.field : "无（非阻断类）")),
+      el("div", { class:"panel-row" }, el("dt", {}, "校验"), el("dd", {}, badge("ok", "通过") + " 加载时校验 class_uid 与 severity 值域")),
+      el("div", { class:"panel-row" }, el("dt", {}, "覆盖率"), el("dd", {}, Math.round(t.coverage * 100) + "%（最近 24h 真实样本）")))));
+
+  const map = el("table", { class:"map-table" });
+  map.append(el("tr", {}, el("th", {}, "厂商字段"), el("th", {}, "OCSF 目标")));
+  for (const src in t.fieldMap) map.append(el("tr", {}, el("td", { class:"map-src mono" }, src), el("td", { class:"mono" }, t.fieldMap[src])));
+  body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "字段映射"), map));
+
+  if (Object.keys(t.constants).length) {
+    const cs = el("table", { class:"map-table" });
+    cs.append(el("tr", {}, el("th", {}, "常量目标"), el("th", {}, "值")));
+    for (const k in t.constants) cs.append(el("tr", {}, el("td", { class:"map-src mono" }, k), el("td", {}, t.constants[k])));
+    body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "常量"), cs));
+  }
+  showSheet($("#tplSheet"));
+}
+
+/* ---------- 启动 ---------- */
+navigate("connectors");
 
 </script>
 </body>
