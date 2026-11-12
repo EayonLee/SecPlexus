@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { PlusIcon, SearchIcon, UserRoundCogIcon } from "lucide-react";
+import { PlusIcon, UserRoundCogIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   createUser,
@@ -32,6 +31,7 @@ import { Can, useCan } from "../components/access";
 import { DataTable, useAction, usePagedQuery } from "../components/data";
 import { FormDialog, FormInput } from "../components/forms";
 import { PageHeader } from "../components/page-header";
+import { SearchField } from "../components/search-field";
 import { SheetPanel } from "../components/sheet-panel";
 import { StatusBadge } from "../components/status-badge";
 import { Toolbar } from "../components/toolbar";
@@ -93,24 +93,13 @@ export function UsersPage() {
           </Can>
         }
       >
-        <InputGroup className="w-64">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          <InputGroupInput
-            className="h-8"
-            value={term}
-            placeholder={t("searchUsersPlaceholder")}
-            aria-label={t("searchUsersPlaceholder")}
-            onChange={(event) => setTerm(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") setApplied(term);
-            }}
-          />
-        </InputGroup>
-        <Button size="sm" variant="outline" onClick={() => setApplied(term)}>
-          {t("search")}
-        </Button>
+        <SearchField
+          value={term}
+          onChange={setTerm}
+          onSubmit={() => setApplied(term)}
+          placeholder={t("searchUsersPlaceholder")}
+          submitLabel={t("search")}
+        />
       </Toolbar>
 
       <DataTable
