@@ -121,30 +121,68 @@ constants:
 
 ## 原型
 
-[prototype.html](prototype.html) 是可交互的静态原型（内联 CSS/JS，无构建、无依赖）。它不是凭感觉画的：下面每条交互都能对上行业实现，来源逐条列出。
+[prototype.html](prototype.html) 是可交互的静态原型：单文件、内联 CSS/JS、无构建无依赖。它不是示意稿——**spec 里每条可被界面表达的行为契约，下面都能指到具体位置**；指不到的，单独列为"界面不表达"，并说明理由。
 
-### 交互依据
+### 一、交互依据（为什么这样设计）
 
-| 采纳的做法 | 出处（原文要点） | 在原型里落成 |
+| 采纳的做法 | 出处（原文要点） | 落成位置 |
 |---|---|---|
-| **先验证映射，再启用数据源** | Cribl [Data Onboarding](https://docs.cribl.io/stream/data-onboarding)：官方建议的循环是 "Create configuration settings → **Verify that settings do the right thing** → Iterate"，并强调 "before it starts flowing" 用真实样本预览 | 向导第 4 步「样本验证」：贴一条设备真实日志，当场给出解析出的 OCSF 事件、逐字段映射表与未映射字段 |
-| **索引/发布前预览数据形态** | Splunk [Assign the correct source types](https://help.splunk.com/en/splunk-enterprise/get-started/get-data-in/10.2/how-to-get-data-into-your-splunk-deployment/assign-the-correct-source-types-to-your-data)：Set Source Type 页 "you can see how Splunk Enterprise will index the data" | 同上；未通过验证不能进入下一步（按钮禁用，不是只给提示） |
-| **创建 ≠ 运行** | Graylog [Set Up an Input](https://go2docs.graylog.org/current/getting_in_log_data/setup_an_input.htm)："it is not in a running state until after you complete the Input Setup Wizard" | 创建后状态是「待启动」，必须在列表或抽屉里显式启动；启动才绑定端口、才计入接收流量 |
-| **诊断页的信息结构** | Graylog [Input Diagnosis](https://go2docs.graylog.org/current/getting_in_log_data/input_diagnosis.htm)：Information（bind 地址、端口、traffic type）/ State（逐节点，含 `bind(..) failed: Cannot assign requested address`）/ Received Traffic（Network I/O）/ Errors During Processing / 内建排障建议（特权端口 <1024、地址不可达、TLS 过期） | 抽屉「诊断」页签：信息／状态／收到流量／处理错误／实例，并按当前状态给「建议」列表 |
-| **能看原始 → 解析的对照** | Graylog 每个输入页的 Show received messages | 抽屉「收到的消息」页签：时间、摘要、已发布／隔离标记 |
-| **模板要带版本** | Elastic [Agent policies](https://www.elastic.co/docs/reference/fleet/agent-policy)："The available settings in an integration depend on the version of the integration in use"；Graylog 的 Illuminate processing packs 同样按版本分发 | 模板行显示 `v3.2.1` 与「覆盖率」（最近 24 小时真实样本的填充率），实验性模板单独标注 |
-| **端口绑定错误就地暴露** | Graylog Input Diagnosis 把 bind 失败与 <1024 特权端口列为最常见故障 | 绑定步骤实时校验端口是否已被其它数据源占用，冲突时直接给出错误提示并禁用下一步 |
+| 启用前先用样本验证映射 | Cribl [Data Onboarding](https://docs.cribl.io/stream/data-onboarding)：`Create settings → Verify that settings do the right thing → Iterate`，"before it starts flowing" | 向导第 4 步；未通过验证不能前进 |
+| 保存前预览数据形态 | Splunk [Set Source Type](https://help.splunk.com/en/splunk-enterprise/get-started/get-data-in/10.2/how-to-get-data-into-your-splunk-deployment/assign-the-correct-source-types-to-your-data)："you can see how Splunk Enterprise will index the data" | 同第 4 步：事件 + 逐字段映射 + 未映射 |
+| 创建 ≠ 运行 | Graylog [Set Up an Input](https://go2docs.graylog.org/current/getting_in_log_data/setup_an_input.htm)："not in a running state until after you complete the Input Setup Wizard" | 创建后为「待启动」；启动才绑端口、才计速率 |
+| 诊断页的固定结构 | Graylog [Input Diagnosis](https://go2docs.graylog.org/current/getting_in_log_data/input_diagnosis.htm)：Information / State（含 bind 失败原文）/ Received Traffic / Errors / 内建排障建议 | 抽屉「诊断」页签 + 状态相关的「建议」 |
+| 能看原始 → 解析的对照 | Graylog Show received messages | 抽屉「收到的消息」：时间、摘要、格式、编码、已发布/隔离+原因码 |
+| 模板按版本管理 | Elastic [Agent policies](https://www.elastic.co/docs/reference/fleet/agent-policy)："settings depend on the version of the integration"；Graylog Illuminate packs | 模板目录显示 `v3.2.1`、覆盖率、继承链 |
+| 绑定错误提前暴露 | Graylog 把 bind 失败与 <1024 端口列为头号故障 | 绑定步骤即时校验端口占用并禁用下一步 |
 
-### 刻意不做（以及为什么）
+### 二、契约 → 界面 对照
 
-- **不抄 Elastic 的 agent policy 绑定**：Elastic 的接入对象是装了 agent 的主机，我们没有 agent，通道本身就是接入点，多一层 policy 只会增加空概念。
-- **不做 Graylog 的多节点状态矩阵**：第一版只有一个 ingestor 实例，"逐节点"退化成一行；等多副本部署时再加。
-- **不抄 Cribl 的 devnull pipeline 抓样**：那依赖 pipeline 概念，本计划没有；样本验证用"贴一条真实日志"覆盖同样目的。
-- **不引入图灵完备的映射编辑器**：模板仍是声明式 YAML，原型只负责让人看见映射结果。
+| spec 契约 | 原型位置 |
+|---|---|
+| 统一响应 `{code,message,data,request_id}` | 验证失败提示带 `code=… request_id=…` |
+| 权限点 `connectors.read` / `manage` | 工具栏身份切换；只读时隐藏「接入数据源」与行内启停，并提示缺少 manage |
+| 通道 = HTTP／syslog／Kafka | 向导第 1 步三张卡 |
+| HTTP：Bearer 令牌、摘要存储、只显示一次 | 第 3 步令牌区（带说明）；详情「概览」可轮换，轮换后旧令牌失效 |
+| HTTP：限流 50/s、突发 200、Redis 故障拒绝 | 第 3 步两个输入 + 固定策略说明（不提供开关） |
+| HTTP：10 MiB、单批 1000、415、202 | 第 3 步上限输入 + Content-Type 多选；说明 413/415/202/异步语义 |
+| syslog：UDP+TCP 同端口、一端口一接入点 | 第 3 步端口校验（冲突即错误并禁用下一步） |
+| syslog：64 KiB 截断、特权端口 | 第 3 步上限只读说明；<1024 时诊断建议里点名 |
+| syslog：周期刷新 + SIGHUP | 第 3 步刷新间隔输入；详情「概览」有「立即重载绑定」 |
+| Kafka：消费组、earliest、发布成功才提交 | 第 3 步只读面板三条；详情「概览」与「发布·消费位移」 |
+| 格式探测 JSON→CEF→LEEF→KV→文本 | 第 4 步「探测结果」面板显示探测到哪种格式及依据 |
+| 编码 UTF-8 → GB18030 → replace | 同面板显示编码结论；有损时提示会被 `metadata.encoding` 记录 |
+| 模板 `extends` 继承逐键覆盖 | 第 4 步「继承链」；模板详情「契约」行 |
+| 模板 `kind` / `class_uid` / 不用废弃 2001 | 模板目录与详情显示 `class_uid`+`className`+`kind`（detection → 2004） |
+| `severity_map`、`time_formats` 失败置 null/0 | 第 4 步映射表逐行给出"未识别档位→0 + warning""时间字段缺失→null" |
+| `constants` | 模板详情「常量」表 |
+| security_control `disposition` | 模板详情「disposition」行；模板声明时映射表出现 `disposition` 行 |
+| 未知字段进 `unmapped` | 第 4 步未映射提示并列名；「映射质量」页签统计未映射 Top |
+| 发布：单一出口 topic | 「运行指标」出口卡 + 详情「发布」 |
+| 发布：分区键优先级与保序 | 第 4 步「分区键」行（实体值或回退链）；「发布」页签分区键 + 最近批次分区 |
+| 发布：500 条 / 2s 批量 | 「运行指标·发布策略」与详情「发布」 |
+| 发布：Kafka 不可用则背压不丢 | 「运行指标」出口状态与说明；「发布」页签背压行 |
+| 确定性 `event_id`（UUIDv5） | 第 4 步与「发布」页签均标注来源 |
+| 隔离区 + 原因码 | 「运行指标」原因码表；「收到的消息」行内原因码 |
+| 可观测：接收速率／解析失败／隔离积压／发布延迟 | 「运行指标」五个 KPI + 按通道表 + 分区键分布 |
+| connectors 列表/启停/换令牌/换绑定 | 列表行内启停；详情概览可轮换令牌、重载绑定 |
+| 模板加载即校验，非法模板启动失败 | 模板详情「校验：通过」并注明校验范围 |
 
-### 验收口径
+### 三、界面不表达的（与理由）
 
-原型同时定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些字段没映射上、severity 判成几。只显示"连通成功"不足以判断模板能否用，这正是 Cribl 与 Splunk 都把预览放在保存之前的原因。
+- **配置加载与环境变量**：属于部署面，界面不呈现。
+- **迁移与启动同步**：运维命令，不进产品界面。
+- **字段级错误计数**：原型只给到"哪条消息失败、什么原因码"；精确到字段的计数需要后端聚合，留到实施时再定粒度。
+- **多实例状态**：v1 单实例，"逐节点"退化为一行；多副本时再展开。
+
+### 四、刻意不抄
+
+- Elastic 的 agent policy：我们的接入对象是通道不是主机，没有 agent，多一层空 policy。
+- Cribl 的 devnull pipeline 抓样：依赖 pipeline 概念，本计划没有。
+- 图灵完备的映射编辑器：模板保持声明式 YAML，原型只让人看见映射结果。
+
+### 五、验收口径
+
+原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断模板能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
 
 ## 后续（不在本计划）
 
