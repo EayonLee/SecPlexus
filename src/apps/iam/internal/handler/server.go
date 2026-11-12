@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/csrf"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -105,16 +104,13 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Retry-After", strconv.FormatInt(limited.RetryAfter, 10))
 		}
 	default:
-		var pgerr *pgconn.PgError
-		if errors.As(err, &pgerr) {
-			switch pgerr.Code {
-			case "08000", "08001", "08003", "08004", "08006", "08007", "08P01", "57P01", "57P02", "57P03":
-				code = result.CodeServiceUnavailable
-			case "23505", "23503":
-				code = result.CodeConflict
-			case "23514", "22P02":
-				code = result.CodeInvalidRequest
-			}
+		switch repository.SQLState(err) {
+		case "08000", "08001", "08003", "08004", "08006", "08007", "08P01", "57P01", "57P02", "57P03":
+			code = result.CodeServiceUnavailable
+		case "23505", "23503":
+			code = result.CodeConflict
+		case "23514", "22P02":
+			code = result.CodeInvalidRequest
 		}
 	}
 

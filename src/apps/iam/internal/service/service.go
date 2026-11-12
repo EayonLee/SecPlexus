@@ -8,15 +8,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	"github.com/google/uuid"
 )
 
 // Service 协调 IAM 用例、会话校验和数据存储。
@@ -115,8 +113,7 @@ func (s *Service) Manage(ctx context.Context, action, requestID, targetType stri
 		if err != nil {
 			outcome, level = "failed", slog.LevelWarn
 			// 只有基础设施和数据库故障升级为 error；业务拒绝保持 warn，避免审计噪声。
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrConnDone) {
+			if repository.IsDatabaseError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrConnDone) {
 				level = slog.LevelError
 			}
 		}
