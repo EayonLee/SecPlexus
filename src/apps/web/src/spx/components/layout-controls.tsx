@@ -9,7 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { fontOptions } from "@/lib/fonts/registry";
-import { PREFERENCE_REGISTRY } from "@/lib/preferences/preferences-config";
+import { PREFERENCE_REGISTRY, type PreferenceKey, type PreferenceValueMap } from "@/lib/preferences/preferences-config";
+import { PREFERENCE_TOGGLES } from "@/lib/preferences/preferences-toggles";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export function LayoutControls() {
@@ -23,49 +24,11 @@ export function LayoutControls() {
     })),
   );
 
-  const {
-    theme_mode: themeMode,
-    content_layout: contentLayout,
-    navbar_style: navbarStyle,
-    sidebar_variant: variant,
-    sidebar_collapsible: collapsible,
-    font,
-  } = values;
-
-  const onThemeModeChange = (value: string) => {
-    const mode = PREFERENCE_REGISTRY.theme_mode.values.find((mode) => mode === value);
-    if (!mode) return;
-    setPreference("theme_mode", mode);
-  };
-
-  const onContentLayoutChange = (value: string) => {
-    const layout = PREFERENCE_REGISTRY.content_layout.values.find((layout) => layout === value);
-    if (!layout) return;
-    setPreference("content_layout", layout);
-  };
-
-  const onNavbarStyleChange = (value: string) => {
-    const style = PREFERENCE_REGISTRY.navbar_style.values.find((style) => style === value);
-    if (!style) return;
-    setPreference("navbar_style", style);
-  };
-
-  const onSidebarStyleChange = (value: string) => {
-    const variant = PREFERENCE_REGISTRY.sidebar_variant.values.find((variant) => variant === value);
-    if (!variant) return;
-    setPreference("sidebar_variant", variant);
-  };
-
-  const onSidebarCollapseModeChange = (value: string) => {
-    const collapsible = PREFERENCE_REGISTRY.sidebar_collapsible.values.find((collapsible) => collapsible === value);
-    if (!collapsible) return;
-    setPreference("sidebar_collapsible", collapsible);
-  };
-
-  const onFontChange = (value: string) => {
-    const font = PREFERENCE_REGISTRY.font.values.find((font) => font === value);
-    if (!font) return;
-    setPreference("font", font);
+  // 只接受注册表声明过的取值：DOM 里的 value 是字符串，越界值不得写进偏好。
+  const commit = <K extends PreferenceKey>(key: K, value: string) => {
+    const allowed: readonly string[] = PREFERENCE_REGISTRY[key].values;
+    if (!allowed.includes(value)) return;
+    setPreference(key, value as PreferenceValueMap[K]);
   };
 
   return (
@@ -84,7 +47,7 @@ export function LayoutControls() {
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
             <div className="space-y-1">
               <Label className="text-xs font-medium">{t("fonts")}</Label>
-              <Select value={font} onValueChange={onFontChange}>
+              <Select value={values.font} onValueChange={(value) => commit("font", value)}>
                 <SelectTrigger size="sm" className="w-full text-xs">
                   <SelectValue placeholder={t("selectFont")} />
                 </SelectTrigger>
@@ -100,106 +63,25 @@ export function LayoutControls() {
               </Select>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("themeMode")}</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={themeMode}
-                onValueChange={onThemeModeChange}
-              >
-                <ToggleGroupItem value="light" aria-label={t("light")}>
-                  {t("light")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="dark" aria-label={t("dark")}>
-                  {t("dark")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="system" aria-label={t("system")}>
-                  {t("system")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("pageLayout")}</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={contentLayout}
-                onValueChange={onContentLayoutChange}
-              >
-                <ToggleGroupItem value="centered" aria-label={t("centered")}>
-                  {t("centered")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="full-width" aria-label={t("fullWidth")}>
-                  {t("fullWidth")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("navbarBehavior")}</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={navbarStyle}
-                onValueChange={onNavbarStyleChange}
-              >
-                <ToggleGroupItem value="sticky" aria-label={t("sticky")}>
-                  {t("sticky")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="scroll" aria-label={t("scroll")}>
-                  {t("scroll")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("sidebarStyle")}</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={variant}
-                onValueChange={onSidebarStyleChange}
-              >
-                <ToggleGroupItem value="inset" aria-label={t("inset")}>
-                  {t("inset")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="sidebar" aria-label={t("sidebar")}>
-                  {t("sidebar")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="floating" aria-label={t("floating")}>
-                  {t("floating")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">{t("collapseMode")}</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={collapsible}
-                onValueChange={onSidebarCollapseModeChange}
-              >
-                <ToggleGroupItem value="icon" aria-label={t("icon")}>
-                  {t("icon")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="offcanvas" aria-label={t("offCanvas")}>
-                  {t("offCanvas")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
+            {PREFERENCE_TOGGLES.map(({ preference, label, options }) => (
+              <div key={preference} className="space-y-1">
+                <Label className="text-xs font-medium">{t(label)}</Label>
+                <ToggleGroup
+                  size="sm"
+                  spacing={0}
+                  variant="outline"
+                  type="single"
+                  value={values[preference]}
+                  onValueChange={(value) => commit(preference, value)}
+                >
+                  {options.map(({ value, label: optionLabel }) => (
+                    <ToggleGroupItem key={value} value={value} aria-label={t(optionLabel)}>
+                      {t(optionLabel)}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+            ))}
 
             <Button type="button" size="sm" variant="outline" className="w-full text-xs" onClick={resetPreferences}>
               {t("restore")}
