@@ -116,4 +116,5 @@ bin/*.exe
 
 # 本地代理运行产生的临时输出，不进入仓库。
 .dsh-tmp/
+.local/
 .tmp-exec-out.txt
