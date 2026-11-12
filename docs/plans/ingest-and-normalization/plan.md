@@ -73,6 +73,8 @@ go vet ./src/...
 
 集成测试需要 Kafka：`--docker` 模式扩展测试脚本创建临时 Kafka（KRaft 单节点）容器，与既有 PG/Redis 隔离容器同生命周期管理；仅清理本次创建的资源。
 
+界面按 [prototype.html](prototype.html) 实施，视觉以 DESIGN.md 为准。
+
 浏览器/接口实测项：HTTP 通道用真实 token 推送样本告警，观察 `spx.ingest.event` 收到 OCSF 事件、`event_id` 确定性、限流触发 429；syslog 用 `logger`/`nc` 向绑定端口发 RFC5424 与 CEF 样本，核对发布结果。
 
 ## 验收证据
