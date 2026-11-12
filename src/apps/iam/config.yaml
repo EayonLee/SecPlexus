@@ -14,6 +14,9 @@ app:
   port: "${SPX_IAM_BIND_PORT-${SPX_IAM_PORT-8081}}"
   # 只信任这些网段传来的反向代理头（X-Forwarded-For 等），多个用逗号分隔。
   # 留空 = 不信任任何代理头，直接取连接来源 IP。前面有 Nginx 时填它的网段，否则限流和审计记录的 IP 是错的。
+  # 允许转发客户端地址的反向代理网段（逗号分隔），留空表示直连部署、完全不解析 X-Forwarded-For。
+  # 反向代理之后必须填真实代理网段：留空会让所有请求的来源都变成代理地址，登录限流按代理 IP 分桶，
+  # 全站共用一个桶；填 0.0.0.0/0 或 ::/0 会被拒绝启动——那等于信任任意客户端伪造的来源。
   trusted_proxy_cidrs: "${SPX_IAM_TRUSTED_PROXY_CIDRS-}"
 
 # ---- PostgreSQL ----

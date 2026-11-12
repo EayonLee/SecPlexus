@@ -148,6 +148,10 @@ func (c Config) Validate() error {
 		return err
 	}
 
+	if err := c.ValidateTrustedProxies(); err != nil {
+		return err
+	}
+
 	origin, err := url.Parse(c.Auth.WebOrigin)
 	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
 		return errors.New("auth.web_origin must be an HTTP(S) origin without credentials")
@@ -205,6 +209,24 @@ func (c Config) Validate() error {
 }
 
 // ValidateSecurity 校验已提供的安全值；required 仅在运行认证服务时要求完整配置。
+// ValidateTrustedProxies 拒绝"信任任意来源"的配置。
+// Gin 官方文档 Trusted proxies 指出：可信代理列表决定 X-Forwarded-For 里哪些段可信；
+// 写成 0.0.0.0/0 或 ::/0 等于信任任意客户端伪造的来源地址，按来源分桶的登录限流随即失效。
+// 配置错误在启动时就失败，不留到运行期才发现。
+func (c Config) ValidateTrustedProxies() error {
+	for _, cidr := range c.App.TrustedProxyCIDRs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return fmt.Errorf("app.trusted_proxy_cidrs contains an invalid CIDR %q", cidr)
+		}
+		// 前缀长度 0 就是 "所有来源"：0.0.0.0/0 与 ::/0 都会走到这里。
+		if ones, _ := network.Mask.Size(); ones == 0 {
+			return fmt.Errorf("app.trusted_proxy_cidrs must not trust every source (%s); list the actual proxy addresses", cidr)
+		}
+	}
+	return nil
+}
+
 func (c Config) ValidateSecurity(required bool) error {
 	if (required || c.Auth.CSRFKey != "") && len(c.Auth.CSRFKey) != 32 {
 		return errors.New("auth.csrf_key (SPX_IAM_CSRF_KEY) must contain exactly 32 bytes")

@@ -265,3 +265,28 @@ func TestValidateAdministratorReportsPasswordLength(t *testing.T) {
 		t.Fatalf("error leaks the password value: %v", err)
 	}
 }
+
+func TestTrustedProxiesRejectEverySource(t *testing.T) {
+	for _, cidr := range []string{"0.0.0.0/0", "::/0"} {
+		cfg := Config{App: App{TrustedProxyCIDRs: []string{cidr}}}
+		if err := cfg.ValidateTrustedProxies(); err == nil {
+			t.Fatalf("%s must be rejected: trusting every source lets any client forge X-Forwarded-For", cidr)
+		}
+	}
+
+	for _, cidr := range []string{"10.0.0.0/8", "192.168.1.10/32", "fd00::/8"} {
+		cfg := Config{App: App{TrustedProxyCIDRs: []string{cidr}}}
+		if err := cfg.ValidateTrustedProxies(); err != nil {
+			t.Fatalf("%s must be accepted: %v", cidr, err)
+		}
+	}
+}
+
+func TestConfigurationRejectsTrustAllProxies(t *testing.T) {
+	file := configFile(t)
+	t.Setenv("SPX_IAM_TRUSTED_PROXY_CIDRS", "0.0.0.0/0")
+
+	if _, err := Load(file); err == nil {
+		t.Fatal("loading a configuration that trusts every proxy must fail")
+	}
+}

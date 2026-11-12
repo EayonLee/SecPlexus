@@ -173,6 +173,40 @@ Compose默认使用工作区项目名，也支持原生COMPOSE_PROJECT_NAME覆�
 Web 与 API 默认通过同一个入口访问。IAM 根据 `auth.web_origin` 校验请求来源，并使用 Cookie 与 CSRF 令牌保护写操作。公开入口配置为 localhost、127.0.0.1 或 ::1 时，接受相同协议和端口的明确回环别名；可分别使用 localhost 和 127.0.0.1 登录，Cookie/会话仍由浏览器按主机隔离。非回环入口只接受配置中的来源，其他端口、协议或主机不在兼容范围。当前没有开放通用跨域白名单或跨域凭证访问；如需跨域部署，必须同时设计可信来源、Cookie、CSRF 和代理策略，不能只加允许所有来源的响应头。
 
 
+## 反向代理与安全响应头
+
+### 可信代理
+
+登录限流按来源地址分桶，来源地址取自 `ClientIP()`，而它是否采信 `X-Forwarded-For` 完全由可信代理列表决定。
+
+- 未配置 `SPX_IAM_TRUSTED_PROXY_CIDRS`：不解析转发头，来源地址就是直连对端。直连部署必须保持这个状态，否则任何客户端都能伪造来源。
+- 部署在反向代理之后：填真实代理网段。留空会让所有请求看起来都来自代理地址，登录限流退化为全站共用一个桶（默认 20 次/分钟）。
+- 写成 `0.0.0.0/0` 或 `::/0`：启动直接失败。这两个值等于信任任意客户端，与限流的目的相反。
+
+依据：Gin 官方文档 *Trusted proxies* 明确 "Gin trusts all proxies by default if you don't specify a trusted proxy … this is NOT safe"，并说明非可信代理直连时转发头会被完全忽略；同类真实缺陷见 [router-for-me/CLIProxyAPI#4733](https://github.com/router-for-me/CLIProxyAPI/issues/4733)（限流键取自未校验的 XFF）。
+
+启动日志在未配置可信代理时输出一条 `service.proxy_trust_disabled`，提示部署者确认是否处于反代之后。
+
+### 安全响应头
+
+Go 服务（IAM、Console）与 Web 都下发同一组头，取值依据 [OWASP HTTP Headers Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html)：
+
+| 头 | 值 | 作用 |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | 禁止 MIME 嗅探 |
+| `X-Frame-Options` | `DENY` | 管理台不允许被内嵌 |
+| `Content-Security-Policy` | API：`frame-ancestors 'none'; base-uri 'none'; form-action 'none'`；Web：`frame-ancestors 'none'; base-uri 'self'; object-src 'none'` | 压住点击劫持与基址劫持 |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 显式声明，不依赖浏览器默认 |
+| `Permissions-Policy` | 关闭 camera/microphone/geolocation/usb/payment | 本平台不使用这些特性 |
+| `Strict-Transport-Security` | `max-age=31536000` | 明文 HTTP 下浏览器会忽略，反代终止 TLS 时同样生效 |
+| `Cross-Origin-Opener-Policy` / `Cross-Origin-Resource-Policy` | `same-origin` | 隔离跨源窗口引用与资源加载 |
+| `X-XSS-Protection` | `0` | 该头已废弃，显式关闭 |
+
+CSP 目前不写 `script-src`：Web 的内联启动脚本需要 nonce 方案，属于独立改动；写死 `script-src` 会直接打断页面。
+Web 关闭 `x-powered-by`，避免把框架与版本告诉扫描器。
+
+Go 侧的安全头挂在 `httpx/middleware` 的 `NewEngine` 最前面，因此 404、405、panic 恢复与鉴权拒绝的响应带同一组头，不会出现"错误响应泄露路由是否存在"的差异。
+
 ## 配置与启动代码的职责
 
 模块的 `internal/config` 只做加载、显式环境绑定、类型转换和校验，以及依据字段构造连接地址；不会访问数据库、创建 Redis/HTTP 客户端或执行迁移。`internal/bootstrap` 显式创建依赖、挂载路由并负责失败清理和退出关闭；数据库操作由 repository 承担。
