@@ -3,7 +3,10 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/google/uuid"
 
@@ -48,4 +51,21 @@ func uuidArray(values []uuid.UUID) (json.RawMessage, error) {
 	}
 
 	return json.Marshal(items)
+}
+
+// SQLState 返回数据库错误的 SQLSTATE；错误不来自数据库时返回空串。
+// 驱动错误如何读取只属于仓库层；上层据此做日志分级或 HTTP 映射，不再各自导入驱动。
+func SQLState(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+
+	return ""
+}
+
+// IsDatabaseError 判断错误是否直接来自数据库服务端。
+// 仓库已把业务性数据库拒绝翻译成哨兵错误，因此能到这里的多是基础设施故障。
+func IsDatabaseError(err error) bool {
+	return SQLState(err) != ""
 }
