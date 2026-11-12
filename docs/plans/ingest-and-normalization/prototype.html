@@ -384,10 +384,10 @@ let CONNECTORS = [
     state:"running", hourly:18432, fill:0.97, quarantine:0.4, lastSeen:"2 秒前", token:null },
   { id:"cn_2b83c1", name:"终端 EDR", channel:"http", template:"qianxin-tianqing",
     binding:"/api/v1/ingestor/ingest/cn_2b83c1", state:"running", hourly:8421, fill:0.93, quarantine:1.2,
-    lastSeen:"8 秒前", token:"ing_live_3c81d5a0f47b2e96c1a8d3b70e5f294c" },
+    lastSeen:"8 秒前", token:"ing_live_example000000000000000000" },
   { id:"cn_5d90ee", name:"云审计推送", channel:"http", template:"aws-cloudtrail",
     binding:"/api/v1/ingestor/ingest/cn_5d90ee", state:"stopped", hourly:0, fill:0.99, quarantine:0,
-    lastSeen:"昨天 18:04", token:"ing_live_9b2f7c14d68a350e92f4c7d1a80b3e65" },
+    lastSeen:"昨天 18:04", token:"ing_live_example111111111111111111" },
   { id:"cn_11c4a7", name:"SOC 总线", channel:"kafka", template:"paloalto-traffic",
     binding:"kafka.internal:9092 · topic soc.raw", state:"silent", hourly:0, fill:0.88, quarantine:3.6,
     lastSeen:"17 分钟前", token:null }
