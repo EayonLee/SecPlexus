@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>数据源接入 · 原型 · SecPlexus</title>
 <style>
-  /* 设计令牌取自 DESIGN.md 的 SecPlexus Implementation Mapping：只换值，不换名。 */
   :root{--background:#fff;--foreground:#0a1317;--card:#fff;--primary:#0064e0;--primary-foreground:#fff;
     --secondary:#f1f4f7;--muted-foreground:#5d6c7b;--destructive:#e41e3f;--border:#dee3e9;--input:#ced0d4;
     --radius:.75rem;--success:#31a24c;--attention:#f2a918;--chart-1:#0064e0;--chart-4:#8a8a8a;--chart-5:#6b6b6b;--ring:#0064e0}
@@ -29,7 +28,7 @@
   .nav-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-foreground);
     padding:0 8px 6px;font-weight:600}
   .nav-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:10px;
-    color:var(--muted-foreground);text-decoration:none;font-size:13.5px;transition:background .12s,color .12s}
+    color:var(--muted-foreground);text-decoration:none;font-size:13.5px}
   .nav-item:hover{background:var(--secondary);color:var(--foreground)}
   .nav-item[aria-current=page]{background:var(--secondary);color:var(--foreground);font-weight:600}
   .nav-item svg{width:16px;height:16px;opacity:.8;flex:none}
@@ -40,7 +39,7 @@
   .crumbs b{color:var(--foreground);font-weight:600}
   .avatar{width:28px;height:28px;border-radius:999px;background:var(--secondary);display:grid;
     place-items:center;font-size:12px;font-weight:600}
-  .content{padding:26px 28px 60px;max-width:1180px}
+  .content{padding:26px 28px 60px;max-width:1240px}
   h1{font-size:20px;font-weight:600;margin:0 0 4px;letter-spacing:-.02em}
   .toolbar{display:flex;align-items:center;gap:8px;margin:20px 0 14px;flex-wrap:wrap}
   .toolbar .spacer{margin-left:auto}
@@ -51,7 +50,7 @@
   .input-group svg{width:15px;height:15px;color:var(--muted-foreground);flex:none}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;
     border-radius:999px;border:1px solid transparent;background:var(--primary);color:var(--primary-foreground);
-    font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity .12s,background .12s}
+    font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
   .btn:hover{opacity:.9}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .btn-outline{background:var(--card);border-color:var(--input);color:var(--foreground);font-weight:500}
@@ -63,9 +62,8 @@
   table{width:100%;border-collapse:collapse;font-size:13px}
   thead th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:10px 14px;
     border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap}
-  tbody td{padding:13px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tbody td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr:last-child td{border-bottom:0}
-  tbody tr{cursor:pointer;transition:background .1s}
   tbody tr:hover{background:var(--secondary)}
   .cell-name{font-weight:600}
   .cell-sub{color:var(--muted-foreground);font-size:12px;margin-top:2px}
@@ -75,12 +73,14 @@
     background:var(--secondary);color:var(--foreground);font-size:11.5px;font-weight:500;white-space:nowrap}
   .badge-dot{width:6px;height:6px;border-radius:999px;background:var(--muted-foreground)}
   .badge-ok .badge-dot{background:var(--success)}
-  .badge-paused .badge-dot{background:var(--attention)}
+  .badge-warn .badge-dot{background:var(--attention)}
+  .badge-err .badge-dot{background:var(--destructive)}
+  .badge-idle .badge-dot{background:var(--muted-foreground)}
   .badge-outline{background:transparent;border:1px solid var(--input)}
   .scrim{position:fixed;inset:0;background:rgba(10,19,23,.38);opacity:0;pointer-events:none;
     transition:opacity .18s;z-index:40}
   .scrim.open{opacity:1;pointer-events:auto}
-  .sheet{position:fixed;top:0;right:0;height:100vh;width:min(780px,94vw);background:var(--card);
+  .sheet{position:fixed;top:0;right:0;height:100vh;width:min(920px,96vw);background:var(--card);
     border-left:1px solid var(--border);display:flex;flex-direction:column;transform:translateX(101%);
     transition:transform .22s cubic-bezier(.32,.72,0,1);z-index:41}
   .sheet.open{transform:none}
@@ -90,20 +90,20 @@
   .icon-btn{margin-left:auto;width:28px;height:28px;border-radius:999px;border:0;background:transparent;
     color:var(--muted-foreground);cursor:pointer;display:grid;place-items:center;flex:none}
   .icon-btn:hover{background:var(--secondary);color:var(--foreground)}
-  .sheet-body{padding:20px 22px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:22px}
+  .sheet-body{padding:20px 22px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:20px}
   .sheet-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
   .sheet-foot .spacer{margin-left:auto}
   .steps{display:flex;align-items:center;padding:0 22px;margin-top:4px}
-  .step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted-foreground)}
-  .step-num{width:22px;height:22px;border-radius:999px;border:1px solid var(--input);display:grid;
-    place-items:center;font-size:11.5px;font-weight:600;flex:none}
+  .step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted-foreground);white-space:nowrap}
+  .step-num{width:21px;height:21px;border-radius:999px;border:1px solid var(--input);display:grid;
+    place-items:center;font-size:11px;font-weight:600;flex:none}
   .step.active{color:var(--foreground);font-weight:600}
   .step.active .step-num{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
   .step.done .step-num{background:var(--secondary);border-color:var(--input);color:var(--foreground)}
-  .step-line{flex:1;height:1px;background:var(--border);margin:0 12px;min-width:18px}
+  .step-line{flex:1;height:1px;background:var(--border);margin:0 9px;min-width:12px}
   .option-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .option{text-align:left;border:1px solid var(--input);border-radius:var(--radius);background:var(--card);
-    padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:7px;transition:border-color .12s}
+    padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:7px}
   .option:hover{border-color:var(--muted-foreground)}
   .option[aria-pressed=true]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary) inset}
   .option-top{display:flex;align-items:center;gap:8px}
@@ -117,13 +117,15 @@
   .legend{font-size:12px;font-weight:600;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.06em}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{font-size:12.5px;font-weight:500}
-  .field input{height:34px;border-radius:10px;border:1px solid var(--input);background:var(--card);
+  .field input,.field textarea{height:34px;border-radius:10px;border:1px solid var(--input);background:var(--card);
     color:var(--foreground);padding:0 11px;font:inherit;font-size:13px}
-  .field input:focus{outline:2px solid var(--ring);outline-offset:1px}
+  .field textarea{height:auto;padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11.5px;line-height:1.5;resize:vertical;min-height:96px}
+  .field input:focus,.field textarea:focus{outline:2px solid var(--ring);outline-offset:1px}
   .field .hint{font-size:11.5px;color:var(--muted-foreground)}
   .template-list{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);
-    overflow:hidden;max-height:320px;overflow-y:auto}
-  .template-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border);
+    overflow:hidden;max-height:300px;overflow-y:auto}
+  .template-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-bottom:1px solid var(--border);
     cursor:pointer;background:var(--card);text-align:left;width:100%;border-left:0;border-right:0;border-top:0}
   .template-row:last-child{border-bottom:0}
   .template-row:hover{background:var(--secondary)}
@@ -131,7 +133,7 @@
   .template-row[aria-pressed=true] .tick{opacity:1}
   .tick{margin-left:auto;opacity:0;color:var(--primary);display:grid;place-items:center}
   .tick svg{width:16px;height:16px}
-  .kv{display:grid;grid-template-columns:132px 1fr;gap:9px 16px;font-size:13px;align-items:baseline}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:8px 14px;font-size:13px;align-items:baseline}
   .kv dt{color:var(--muted-foreground);font-size:12.5px}
   .kv dd{margin:0}
   .code-box{display:flex;align-items:center;gap:8px;background:var(--secondary);border-radius:10px;
@@ -148,29 +150,58 @@
   .callout-warn svg{color:var(--attention)}
   .callout-ok{background:color-mix(in srgb,var(--success) 12%,var(--card))}
   .callout-ok svg{color:var(--success)}
-  .check-step{display:flex;align-items:center;gap:10px;font-size:13px;padding:7px 0}
-  .check-step .spinner{width:14px;height:14px;border-radius:999px;flex:none;border:2px solid var(--border);
-    border-top-color:var(--primary);animation:spin .8s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .check-icon{width:16px;height:16px;flex:none;display:grid;place-items:center}
-  .check-step.pending{color:var(--muted-foreground)}
-  pre.event{margin:0;padding:13px;border-radius:10px;background:var(--secondary);
+  .callout-err{background:color-mix(in srgb,var(--destructive) 12%,var(--card))}
+  .callout-err svg{color:var(--destructive)}
+  pre.event{margin:0;padding:12px;border-radius:10px;background:var(--secondary);
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;
-    overflow:auto;max-height:340px;color:var(--foreground)}
+    overflow:auto;max-height:300px;color:var(--foreground)}
   .ev-key{color:var(--chart-1)}
   .ev-num{color:var(--chart-5)}
   .ev-str{color:var(--success)}
   .ev-null{color:var(--muted-foreground)}
-  .empty{padding:44px 20px;text-align:center;color:var(--muted-foreground);font-size:13px}
-  .quality{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-  .stat{border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+  .empty{padding:40px 20px;text-align:center;color:var(--muted-foreground);font-size:13px}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 22px}
+  .tab{border:0;background:transparent;padding:9px 12px;font-size:12.5px;color:var(--muted-foreground);
+    cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+  .tab:hover{color:var(--foreground)}
+  .tab[aria-selected=true]{color:var(--foreground);border-bottom-color:var(--primary);font-weight:600}
+  .panel{border:1px solid var(--border);border-radius:var(--radius)}
+  .panel-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 13px;
+    border-bottom:1px solid var(--border);font-size:12.5px}
+  .panel-row:last-child{border-bottom:0}
+  .panel-row dt{color:var(--muted-foreground);margin:0}
+  .panel-row dd{margin:0}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  .map-table{width:100%;border-collapse:collapse;font-size:12px}
+  .map-table td{padding:5px 8px;border-bottom:1px solid var(--border)}
+  .map-table tr:last-child td{border-bottom:0}
+  .map-src{color:var(--muted-foreground)}
+  .map-ok{color:var(--success)}
+  .map-miss{color:var(--attention)}
+  .quality{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .stat{border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px}
   .stat-label{font-size:11.5px;color:var(--muted-foreground)}
-  .stat-value{font-size:20px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
-  .stat-value small{font-size:12px;font-weight:500;color:var(--muted-foreground)}
-  .bar{height:5px;border-radius:999px;background:var(--secondary);margin-top:9px;overflow:hidden}
+  .stat-value{font-size:19px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
+  .stat-value small{font-size:11.5px;font-weight:500;color:var(--muted-foreground)}
+  .bar{height:5px;border-radius:999px;background:var(--secondary);margin-top:8px;overflow:hidden}
   .bar>i{display:block;height:100%;border-radius:999px;background:var(--chart-1)}
-  @media (max-width:900px){.shell{grid-template-columns:1fr}.sidebar{display:none}
-    .option-grid{grid-template-columns:1fr}.quality{grid-template-columns:1fr}}
+  .stream{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;font-size:12px}
+  .stream-row{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:9px 12px;
+    border-bottom:1px solid var(--border)}
+  .stream-row:last-child{border-bottom:0}
+  .stream-row.bad{background:color-mix(in srgb,var(--destructive) 8%,var(--card))}
+  .stream-time{color:var(--muted-foreground);font-family:ui-monospace,Menlo,monospace}
+  .stream-msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill{display:inline-block;padding:0 7px;height:18px;line-height:18px;border-radius:999px;
+    background:var(--secondary);font-size:10.5px;font-weight:600;margin-left:6px}
+  .pill-ok{color:var(--success)}
+  .pill-bad{color:var(--destructive)}
+  @media (max-width:900px){
+    .shell{grid-template-columns:1fr}.sidebar{display:none}
+    .option-grid{grid-template-columns:1fr}.quality{grid-template-columns:1fr 1fr}
+    .two-col{grid-template-columns:1fr}
+  }
 </style>
 </head>
 <body>
@@ -200,12 +231,13 @@
     </div>
     <div class="content">
       <h1>数据源</h1>
+      <div id="banner"></div>
       <div class="toolbar">
         <div class="input-group">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          <input id="search" type="search" placeholder="搜索数据源名称或模板" aria-label="搜索数据源名称或模板" />
+          <input id="search" type="search" placeholder="搜索名称、模板或 OCSF 类" aria-label="搜索名称、模板或 OCSF 类" />
         </div>
-        <button class="btn btn-outline btn-sm" id="filterChannel">通道：全部</button>
+        <button class="btn btn-outline btn-sm" id="filterState">状态：全部</button>
         <span class="spacer"></span>
         <button class="btn" id="openWizard">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -215,8 +247,8 @@
       <div class="table-card">
         <table>
           <thead><tr>
-            <th style="width:26%">名称</th><th style="width:10%">通道</th><th style="width:24%">模板</th>
-            <th style="width:26%">接入地址</th><th style="width:8%">状态</th><th style="width:6%">近 1 小时</th>
+            <th style="width:24%">名称</th><th style="width:9%">通道</th><th style="width:22%">模板</th>
+            <th style="width:23%">接入地址</th><th style="width:13%">状态</th><th style="width:9%">近 1 小时</th>
           </tr></thead>
           <tbody id="rows"></tbody>
         </table>
@@ -227,9 +259,10 @@
 
 <div class="scrim" id="scrim"></div>
 
+<!-- 接入向导：通道 → 模板 → 绑定 → 样本验证 → 启动与诊断 -->
 <section class="sheet" id="wizard" role="dialog" aria-modal="true" aria-labelledby="wizardTitle" aria-hidden="true">
   <div class="sheet-head">
-    <div><h2 id="wizardTitle">接入数据源</h2><p id="wizardSub">选择通道，绑定模板，拿到接入地址</p></div>
+    <div><h2 id="wizardTitle">接入数据源</h2><p id="wizardSub"></p></div>
     <button class="icon-btn" data-close aria-label="关闭"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   </div>
   <div class="steps" id="steps"></div>
@@ -242,24 +275,32 @@
   </div>
 </section>
 
+<!-- 诊断抽屉 -->
 <section class="sheet" id="detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle" aria-hidden="true">
   <div class="sheet-head">
     <div><h2 id="detailTitle">数据源</h2><p id="detailSub"></p></div>
     <button class="icon-btn" data-close aria-label="关闭"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   </div>
+  <div class="tabs" id="detailTabs" role="tablist">
+    <button class="tab" role="tab" data-tab="overview" aria-selected="true">概览</button>
+    <button class="tab" role="tab" data-tab="diagnose" aria-selected="false">诊断</button>
+    <button class="tab" role="tab" data-tab="messages" aria-selected="false">收到的消息</button>
+    <button class="tab" role="tab" data-tab="quality" aria-selected="false">映射质量</button>
+  </div>
   <div class="sheet-body" id="detailBody"></div>
   <div class="sheet-foot">
     <button class="btn btn-danger btn-sm" id="detailDelete">删除数据源</button>
     <span class="spacer"></span>
-    <button class="btn btn-outline btn-sm" id="detailPause">停用</button>
-    <button class="btn btn-sm" id="detailRecheck">重新自检</button>
+    <button class="btn btn-outline btn-sm" id="detailToggle">停用</button>
+    <button class="btn btn-sm" id="detailStart">启动</button>
   </div>
 </section>
 
 <script>
 
 /* ------------------------------------------------------------------
-   原型数据：形状与 spec 的 connectors 表、OCSF 事件一致。
+   原型数据。字段形状对齐 spec 的 connectors 表与 OCSF 事件；
+   模板带 field_map / severity_map / time 格式，用来演示"先验证后启用"。
    ------------------------------------------------------------------ */
 const CHANNELS = {
   http:   { label: "HTTP",   icon: "cloud",  desc: "设备主动推送 JSON 或纯文本，凭 Bearer 令牌鉴权" },
@@ -268,116 +309,294 @@ const CHANNELS = {
 };
 
 const TEMPLATES = [
-  { id: "sangfor-af",         vendor: "深信服",     name: "AF 下一代防火墙", kind: "detection", class: 2004, experimental: false },
-  { id: "sangfor-sip",        vendor: "深信服",     name: "SIP 态势感知",    kind: "detection", class: 2004, experimental: true  },
-  { id: "qianxin-tianqing",   vendor: "奇安信",     name: "天擎终端",        kind: "detection", class: 2004, experimental: false },
-  { id: "venus-ids",          vendor: "启明星辰",   name: "IDS 入侵检测",    kind: "detection", class: 2004, experimental: false },
-  { id: "nsfocus-ids",        vendor: "绿盟",       name: "IDS 入侵检测",    kind: "detection", class: 2004, experimental: true  },
-  { id: "hillstone-ngfw",     vendor: "山石网科",   name: "NGFW 防火墙",     kind: "telemetry", class: 4001, experimental: false },
-  { id: "paloalto-traffic",   vendor: "Palo Alto",  name: "PAN-OS 流量",     kind: "telemetry", class: 4001, experimental: false },
-  { id: "fortinet-fortigate", vendor: "Fortinet",   name: "FortiGate",       kind: "detection", class: 2004, experimental: false },
-  { id: "crowdstrike-falcon", vendor: "CrowdStrike",name: "Falcon 终端",     kind: "detection", class: 2004, experimental: false },
-  { id: "aws-cloudtrail",     vendor: "AWS",        name: "CloudTrail",      kind: "telemetry", class: 3002, experimental: false },
-  { id: "aliyun-actiontrail", vendor: "阿里云",     name: "操作审计",        kind: "telemetry", class: 3002, experimental: true  },
-  { id: "generic-json",       vendor: "通用",       name: "JSON 键值直映射", kind: "telemetry", class: 6003, experimental: false }
+  { id:"sangfor-af", version:"3.2.1", vendor:"深信服", name:"AF 下一代防火墙", group:"网络安全设备",
+    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.97, experimental:false,
+    timeField:"time", timeFormat:"unix_ms", severityField:"level",
+    severityMap:{ "高危":4, "中危":3, "低危":2, "提示":1 },
+    fieldMap:{ src_ip:"src_endpoint.ip", dst_ip:"dst_endpoint.ip", src_port:"src_endpoint.port",
+               dst_port:"dst_endpoint.port", event_desc:"message", rule_name:"finding_info.title",
+               dev_name:"device.hostname" },
+    sample:'{"time":1762986541200,"level":"高危","src_ip":"10.20.3.44","dst_ip":"10.20.9.7","src_port":51824,"dst_port":443,"event_desc":"检测到 SQL 注入攻击","rule_name":"SQL 注入","dev_name":"FW-EDGE-01","rule_level":"高危","policy_id":"pol_8821"}' },
+
+  { id:"qianxin-tianqing", version:"2.4.0", vendor:"奇安信", name:"天擎终端", group:"终端安全",
+    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.93, experimental:false,
+    timeField:"timestamp", timeFormat:"rfc3339", severityField:"severity",
+    severityMap:{ "high":4, "medium":3, "low":2 },
+    fieldMap:{ hostname:"device.hostname", proc_name:"process.name", cmd_line:"process.cmd_line",
+               file_path:"file.path", user_name:"actor.user.name" },
+    sample:'{"timestamp":"2026-11-12T20:31:04+08:00","severity":"high","hostname":"PC-FIN-014","proc_name":"powershell.exe","cmd_line":"powershell -enc SQBFAFgA","file_path":"C:/Temp/a.exe","user_name":"zhangsan","task_id":"t-9912"}' },
+
+  { id:"aws-cloudtrail", version:"1.9.0", vendor:"AWS", name:"CloudTrail", group:"云平台",
+    kind:"telemetry", classUid:3002, className:"api_activity", coverage:0.99, experimental:false,
+    timeField:"eventTime", timeFormat:"rfc3339", severityField:null, severityMap:{},
+    fieldMap:{ eventSource:"metadata.product.name", eventName:"activity_name",
+               sourceIPAddress:"src_endpoint.ip", "userIdentity.arn":"actor.user.uid",
+               awsRegion:"cloud.region" },
+    sample:'{"eventTime":"2026-11-12T12:31:04Z","eventSource":"s3.amazonaws.com","eventName":"GetObject","sourceIPAddress":"203.0.113.9","userIdentity":{"arn":"arn:aws:iam::123:user/deploy"},"awsRegion":"cn-north-1","requestID":"req-88f1"}' },
+
+  { id:"paloalto-traffic", version:"2.1.3", vendor:"Palo Alto", name:"PAN-OS 流量", group:"网络安全设备",
+    kind:"telemetry", classUid:4001, className:"network_activity", coverage:0.88, experimental:false,
+    timeField:"TimeGenerated", timeFormat:"rfc3339", severityField:null, severityMap:{},
+    fieldMap:{ src:"src_endpoint.ip", dst:"dst_endpoint.ip", sport:"src_endpoint.port",
+               dport:"dst_endpoint.port", app:"app.name", action:"disposition" },
+    sample:'{"TimeGenerated":"2026-11-12T20:28:11Z","src":"10.20.4.9","dst":"93.184.216.34","sport":51422,"dport":443,"app":"ssl","action":"allow","sessionid":"s-7712"}' },
+
+  { id:"venus-ids", version:"1.6.2", vendor:"启明星辰", name:"IDS 入侵检测", group:"网络安全设备",
+    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.91, experimental:false,
+    timeField:"occur_time", timeFormat:"unix_ms", severityField:"grade",
+    severityMap:{ "严重":5, "高":4, "中":3, "低":2 },
+    fieldMap:{ sip:"src_endpoint.ip", dip:"dst_endpoint.ip", sport:"src_endpoint.port",
+               dport:"dst_endpoint.port", rule_msg:"finding_info.title", attack_type:"finding_info.types" },
+    sample:'{"occur_time":1762986489000,"grade":"高","sip":"10.20.7.31","dip":"10.20.9.7","sport":33814,"dport":22,"rule_msg":"SSH 暴力破解","attack_type":"brute_force","sensor":"IDS-CORE-2"}' },
+
+  { id:"nsfocus-ids", version:"0.9.4", vendor:"绿盟", name:"IDS 入侵检测", group:"网络安全设备",
+    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.74, experimental:true,
+    timeField:"ts", timeFormat:"unix_ms", severityField:"sev",
+    severityMap:{ "3":4, "2":3, "1":2 },
+    fieldMap:{ saddr:"src_endpoint.ip", daddr:"dst_endpoint.ip", msg:"message", rule:"finding_info.title" },
+    sample:'{"ts":1762986111000,"sev":"3","saddr":"10.20.8.12","daddr":"10.20.9.7","msg":"检测到 WebShell 上传","rule":"web_shell","iface":"eth2","pkt_num":184}' },
+
+  { id:"fortinet-fortigate", version:"1.4.1", vendor:"Fortinet", name:"FortiGate", group:"网络安全设备",
+    kind:"detection", classUid:2004, className:"detection_finding", coverage:0.90, experimental:false,
+    timeField:"eventtime", timeFormat:"unix_ms", severityField:"level",
+    severityMap:{ "critical":5, "high":4, "medium":3, "low":2 },
+    fieldMap:{ srcip:"src_endpoint.ip", dstip:"dst_endpoint.ip", srcport:"src_endpoint.port",
+               dstport:"dst_endpoint.port", attack:"finding_info.types", msg:"message" },
+    sample:'{"eventtime":1762986042000,"level":"high","srcip":"198.51.100.7","dstip":"10.20.9.7","srcport":44182,"dstport":443,"attack":"webshell","msg":"Web 攻击被阻断","devname":"FG-CORE"}' },
+
+  { id:"generic-json", version:"1.0.0", vendor:"通用", name:"JSON 键值直映射", group:"通用",
+    kind:"telemetry", classUid:6003, className:"api_activity", coverage:1.0, experimental:false,
+    timeField:"time", timeFormat:"unix_ms", severityField:"severity",
+    severityMap:{ "high":4, "medium":3, "low":2 },
+    fieldMap:{ message:"message", host:"device.hostname", user:"actor.user.name" },
+    sample:'{"time":1762986000000,"severity":"medium","message":"示例事件","host":"WEB-01","user":"svc_deploy"}' }
 ];
 
+const STATE = {
+  draft:   { label: "待启动", kind: "idle" },
+  running: { label: "运行中", kind: "ok" },
+  stopped: { label: "已停止", kind: "warn" },
+  silent:  { label: "运行中 · 无流量", kind: "err" }
+};
+
 let CONNECTORS = [
-  { id: "cn_7f21a9", name: "边界防火墙", channel: "syslog", template: "sangfor-af",
-    binding: "10.41.84.81:5514", status: "active", hourly: 18432, fill: 0.97, quarantine: 0.4 },
-  { id: "cn_2b83c1", name: "终端 EDR", channel: "http", template: "qianxin-tianqing",
-    binding: "/api/v1/ingestor/ingest/cn_2b83c1", status: "active", hourly: 8421, fill: 0.93, quarantine: 1.2 },
-  { id: "cn_5d90ee", name: "云审计推送", channel: "http", template: "aws-cloudtrail",
-    binding: "/api/v1/ingestor/ingest/cn_5d90ee", status: "paused", hourly: 0, fill: 0.99, quarantine: 0 },
-  { id: "cn_11c4a7", name: "SOC 总线", channel: "kafka", template: "paloalto-traffic",
-    binding: "kafka.internal:9092 · topic soc.raw", status: "active", hourly: 4210, fill: 0.88, quarantine: 3.6 }
+  { id:"cn_7f21a9", name:"边界防火墙", channel:"syslog", template:"sangfor-af", binding:"10.41.84.81:5514",
+    state:"running", hourly:18432, fill:0.97, quarantine:0.4, lastSeen:"2 秒前", token:null },
+  { id:"cn_2b83c1", name:"终端 EDR", channel:"http", template:"qianxin-tianqing",
+    binding:"/api/v1/ingestor/ingest/cn_2b83c1", state:"running", hourly:8421, fill:0.93, quarantine:1.2,
+    lastSeen:"8 秒前", token:"ing_live_3c81d5a0f47b2e96c1a8d3b70e5f294c" },
+  { id:"cn_5d90ee", name:"云审计推送", channel:"http", template:"aws-cloudtrail",
+    binding:"/api/v1/ingestor/ingest/cn_5d90ee", state:"stopped", hourly:0, fill:0.99, quarantine:0,
+    lastSeen:"昨天 18:04", token:"ing_live_9b2f7c14d68a350e92f4c7d1a80b3e65" },
+  { id:"cn_11c4a7", name:"SOC 总线", channel:"kafka", template:"paloalto-traffic",
+    binding:"kafka.internal:9092 · topic soc.raw", state:"silent", hourly:0, fill:0.88, quarantine:3.6,
+    lastSeen:"17 分钟前", token:null }
 ];
 
 /* ---------- 小工具 ---------- */
 const $ = (s, r) => (r || document).querySelector(s);
-function el(tag, attrs, ...kids) {
+const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
+function el(tag, attrs) {
   const n = document.createElement(tag);
-  for (const k in (attrs || {})) {
-    const v = attrs[k];
+  const a = attrs || {};
+  for (const k in a) {
+    const v = a[k];
+    if (v === null || v === undefined || v === false) continue;
     if (k === "class") n.className = v;
     else if (k === "html") n.innerHTML = v;
+    else if (k === "text") n.textContent = v;
     else if (k.indexOf("on") === 0) n.addEventListener(k.slice(2), v);
     else n.setAttribute(k, v);
   }
-  kids.flat().forEach(function (kid) {
-    if (kid === null || kid === undefined) return;
-    n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
-  });
+  for (let i = 2; i < arguments.length; i++) {
+    const kids = Array.isArray(arguments[i]) ? arguments[i] : [arguments[i]];
+    kids.forEach(function (kid) {
+      if (kid === null || kid === undefined || kid === false) return;
+      n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    });
+  }
   return n;
 }
 const ICON = {
-  cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 18a4 4 0 0 1 0-8 6 6 0 0 1 11.4 1.4A3.5 3.5 0 0 1 18 18z"/></svg>',
-  radio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M8 8a5.7 5.7 0 0 0 0 8M16 8a5.7 5.7 0 0 1 0 8M5 5a9.9 9.9 0 0 0 0 14M19 5a9.9 9.9 0 0 1 0 14"/></svg>',
-  layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
-  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>',
-  copy: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>',
-  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
-  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17h.01"/></svg>',
-  ok:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>'
+  cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 18a4 4 0 0 1 0-8 6 6 0 0 1 11.4 1.4A3.5 3.5 0 0 1 18 18z"/></svg>',
+  radio:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M8 8a5.7 5.7 0 0 0 0 8M16 8a5.7 5.7 0 0 1 0 8M5 5a9.9 9.9 0 0 0 0 14M19 5a9.9 9.9 0 0 1 0 14"/></svg>',
+  layers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+  warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17h.01"/></svg>',
+  ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>'
 };
-function badge(kind, text) {
-  return el("span", { class: "badge badge-" + kind }, el("span", { class: "badge-dot" }), text);
+function badge(kind, text) { return el("span", { class: "badge badge-" + kind }, el("span", { class: "badge-dot" }), text); }
+function stateBadge(s) { return badge(STATE[s].kind, STATE[s].label); }
+function tpl(id) { for (let i=0;i<TEMPLATES.length;i++) if (TEMPLATES[i].id===id) return TEMPLATES[i]; return TEMPLATES[0]; }
+function codeBox(text, opts) {
+  const btn = el("button", { class:"copy", "aria-label":"复制", html:ICON.copy });
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function(){});
+    const old = btn.innerHTML; btn.innerHTML = ICON.check;
+    setTimeout(function(){ btn.innerHTML = old; }, 1200);
+  });
+  return el("div", { class:"code-box" }, el("span", { class:"grow" }, text), btn);
 }
-function channelBadge(c) { return el("span", { class: "badge badge-outline" }, CHANNELS[c].label); }
+function jsonBlock(obj) {
+  const text = JSON.stringify(obj, null, 2)
+    .replace(/"([^"]+)":/g, '<span class="ev-key">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span class="ev-str">"$1"</span>')
+    .replace(/: (\d+\.?\d*)/g, ': <span class="ev-num">$1</span>')
+    .replace(/: (true|false)/g, ': <span class="ev-num">$1</span>')
+    .replace(/: null/g, ': <span class="ev-null">null</span>');
+  return el("pre", { class:"event", html:text });
+}
 
-function copyToClipboard(text, btn) {
-  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
-  const old = btn.innerHTML;
-  btn.innerHTML = ICON.check;
-  setTimeout(function () { btn.innerHTML = old; }, 1200);
+/* ---------- 映射引擎（原型内的最小实现，用来证明流程可行） ---------- */
+function getPath(obj, path) {
+  const parts = String(path).split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length; i++) {
+    if (cur === null || cur === undefined) return undefined;
+    cur = cur[parts[i]];
+  }
+  return cur;
 }
-function codeBox(text) {
-  const btn = el("button", { class: "copy", "aria-label": "复制", html: ICON.copy });
-  btn.addEventListener("click", function (e) { e.stopPropagation(); copyToClipboard(text, btn); });
-  return el("div", { class: "code-box" }, el("span", { class: "grow" }, text), btn);
+function setPath(obj, path, value) {
+  const parts = String(path).split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!cur[parts[i]] || typeof cur[parts[i]] !== "object") cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
 }
-function tpl(id) {
-  for (let i = 0; i < TEMPLATES.length; i++) if (TEMPLATES[i].id === id) return TEMPLATES[i];
-  return TEMPLATES[0];
+function parseTime(raw, tpl0) {
+  const v = raw[tpl0.timeField];
+  if (v === undefined || v === null || v === "") return { value:null, note:"时间字段缺失：" + tpl0.timeField + "，置 null 并记 warning" };
+  if (tpl0.timeFormat === "unix_ms") {
+    const n = Number(v);
+    if (!isFinite(n) || n <= 0) return { value:null, note:"不是合法的毫秒时间戳「" + v + "」" };
+    return { value:new Date(n).toISOString(), note:"unix_ms → ISO" };
+  }
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return { value:null, note:"不是合法的 RFC3339「" + v + "」" };
+  return { value:d.toISOString(), note:"RFC3339 → ISO" };
+}
+function parseSeverity(raw, tpl0) {
+  if (!tpl0.severityField) return { value:0, note:"模板未声明 severity 字段，按 0 (Unknown)" };
+  const v = raw[tpl0.severityField];
+  if (v === undefined || v === null) return { value:0, note:"源字段「" + tpl0.severityField + "」缺失，按 0 (Unknown)" };
+  const key = String(v).trim();
+  const lower = key.toLowerCase();
+  for (const k in tpl0.severityMap) {
+    if (k.toLowerCase() === lower) return { value:tpl0.severityMap[k], note:"「" + key + "」→ " + tpl0.severityMap[k] };
+  }
+  const n = Number(key);
+  if (!isNaN(n) && n >= 0 && n <= 6) return { value:n, note:"已是 OCSF 档位" };
+  return { value:0, note:"未识别的档位「" + key + "」，按 0 (Unknown) 并记 warning" };
+}
+function mapSample(tpl0, rawText) {
+  let raw;
+  try { raw = JSON.parse(rawText); }
+  catch (e) { return { error:"样本不是合法 JSON：" + e.message.slice(0, 60) }; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error:"样本必须是 JSON 对象" };
+
+  const rows = [];
+  const consumed = {};
+  const event = {
+    class_uid: tpl0.classUid,
+    category_uid: Math.floor(tpl0.classUid / 1000),
+    severity_id: 0,
+    is_alert: tpl0.kind === "detection",
+    time: null,
+    message: null,
+    metadata: { product: { vendor_name: tpl0.vendor, name: tpl0.name }, version: tpl0.version },
+    unmapped: {}
+  };
+
+  const t = parseTime(raw, tpl0);
+  event.time = t.value;
+  consumed[tpl0.timeField] = true;
+  rows.push({ src:tpl0.timeField, dst:"time", ok:t.value !== null, note:t.note });
+
+  const sv = parseSeverity(raw, tpl0);
+  event.severity_id = sv.value;
+  if (tpl0.severityField) consumed[tpl0.severityField] = true;
+  rows.push({ src:tpl0.severityField || "（未声明）", dst:"severity_id", ok:sv.value !== 0 || !tpl0.severityField, note:sv.note });
+
+  const typeMap = { port:"int", int:"int" };
+  for (const src in tpl0.fieldMap) {
+    const dst = tpl0.fieldMap[src];
+    const value = getPath(raw, src);
+    consumed[src.split(".")[0]] = true;
+    if (value === undefined || value === null) {
+      rows.push({ src:src, dst:dst, ok:false, note:"源字段缺失，置 null" });
+      setPath(event, dst, null);
+      continue;
+    }
+    const want = typeMap[src] || null;
+    const converted = want === "int" && isFinite(Number(value)) ? Number(value) : value;
+    setPath(event, dst, converted);
+    rows.push({ src:src, dst:dst, ok:true, note:want === "int" ? "转 int" : "直映射" });
+  }
+
+  for (const k in raw) {
+    if (!consumed[k]) event.unmapped[k] = raw[k];
+  }
+  const unmappedKeys = Object.keys(event.unmapped);
+  const mapped = rows.filter(function (r) { return r.ok; }).length;
+  return { event:event, rows:rows, mapped:mapped, total:rows.length,
+           unmappedKeys:unmappedKeys, fill: rows.length ? mapped / rows.length : 0 };
 }
 
 /* ---------- 列表 ---------- */
-let channelFilter = "all";
+let stateFilter = "all";
+function renderBanner() {
+  const draft = CONNECTORS.filter(function (c) { return c.state === "draft"; }).length;
+  const silent = CONNECTORS.filter(function (c) { return c.state === "silent"; }).length;
+  const host = $("#banner");
+  host.replaceChildren();
+  if (!draft && !silent) return;
+  const parts = [];
+  if (draft) parts.push(draft + " 个数据源已创建但尚未启动");
+  if (silent) parts.push(silent + " 个数据源运行中但 15 分钟内没有收到流量");
+  host.append(el("div", { style:"margin-top:14px" },
+    el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }), parts.join("；") + "。")));
+}
 function renderRows() {
   const q = $("#search").value.trim().toLowerCase();
   const rows = CONNECTORS.filter(function (c) {
     const t = tpl(c.template);
-    const hay = (c.name + " " + t.vendor + " " + t.name + " " + c.id).toLowerCase();
-    return (channelFilter === "all" || c.channel === channelFilter) && (!q || hay.indexOf(q) >= 0);
+    const hay = (c.name + " " + t.vendor + " " + t.name + " cls" + t.classUid + " " + c.id).toLowerCase();
+    const okState = stateFilter === "all" || c.state === stateFilter;
+    return okState && (!q || hay.indexOf(q) >= 0);
   });
   const body = $("#rows");
   body.replaceChildren();
   if (!rows.length) {
-    body.append(el("tr", {}, el("td", { colspan: "6" }, el("div", { class: "empty" }, "没有匹配的数据源"))));
+    body.append(el("tr", {}, el("td", { colspan:"6" }, el("div", { class:"empty" }, "没有匹配的数据源"))));
     return;
   }
   rows.forEach(function (c) {
     const t = tpl(c.template);
-    const tr = el("tr", { onclick: function () { openDetail(c); } },
-      el("td", {}, el("div", { class: "cell-name" }, c.name), el("div", { class: "mono cell-sub" }, c.id)),
-      el("td", {}, channelBadge(c.channel)),
+    body.append(el("tr", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
+      el("td", {}, el("div", { class:"cell-name" }, c.name), el("div", { class:"mono cell-sub" }, c.id)),
+      el("td", {}, el("span", { class:"badge badge-outline" }, CHANNELS[c.channel].label)),
       el("td", {},
         el("div", {}, t.name),
-        el("div", { class: "cell-sub" }, t.vendor, t.experimental ? el("span", { class: "dim" }, " · 实验性") : null)),
-      el("td", {}, el("span", { class: "mono dim" }, c.binding)),
-      el("td", {}, c.status === "active" ? badge("ok", "启用") : badge("paused", "停用")),
-      el("td", { class: "mono dim" }, c.hourly.toLocaleString("zh-CN")));
-    body.append(tr);
+        el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.className +
+          (t.experimental ? " · 实验性" : ""))),
+      el("td", {}, el("span", { class:"mono dim" }, c.binding)),
+      el("td", {}, stateBadge(c.state)),
+      el("td", { class:"mono dim" }, c.hourly.toLocaleString("zh-CN"))));
   });
 }
 $("#search").addEventListener("input", renderRows);
-$("#filterChannel").addEventListener("click", function () {
-  const order = ["all", "http", "syslog", "kafka"];
-  channelFilter = order[(order.indexOf(channelFilter) + 1) % order.length];
-  $("#filterChannel").textContent = "通道：" + (channelFilter === "all" ? "全部" : CHANNELS[channelFilter].label);
+$("#filterState").addEventListener("click", function () {
+  const order = ["all", "running", "draft", "stopped", "silent"];
+  stateFilter = order[(order.indexOf(stateFilter) + 1) % order.length];
+  $("#filterState").textContent = "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label);
   renderRows();
 });
-renderRows();
 
 /* ---------- 抽屉 ---------- */
 let openSheet = null;
@@ -390,56 +609,31 @@ function show(sheet) {
 function hide() {
   $("#scrim").classList.remove("open");
   ["#wizard", "#detail"].forEach(function (s) {
-    const n = $(s);
-    n.classList.remove("open");
-    n.setAttribute("aria-hidden", "true");
+    const n = $(s); n.classList.remove("open"); n.setAttribute("aria-hidden", "true");
   });
   openSheet = null;
 }
 $("#scrim").addEventListener("click", hide);
 document.addEventListener("keydown", function (e) { if (e.key === "Escape" && openSheet) hide(); });
-document.querySelectorAll("[data-close]").forEach(function (b) { b.addEventListener("click", hide); });
+$$("[data-close]").forEach(function (b) { b.addEventListener("click", hide); });
 
 /* ---------- 向导 ---------- */
-const STEP_TITLES = ["通道", "模板", "绑定", "自检"];
+const STEP_TITLES = ["通道", "模板", "绑定", "样本验证", "启动与诊断"];
 let step = 0;
-let checkState = "idle";
-const draft = { channel: null, template: null, name: "", port: "5514", topic: "soc.raw", brokers: "kafka.internal:9092" };
+let verifyResult = null;
+const draft = { channel:null, template:null, name:"", port:"5514", topic:"soc.raw",
+                brokers:"kafka.internal:9092", sample:"", diagDone:false };
 
 function renderSteps() {
   const host = $("#steps");
   host.replaceChildren();
   STEP_TITLES.forEach(function (title, i) {
-    const cls = i === step ? "step active" : i < step ? "step done" : "step";
-    host.append(el("div", { class: cls },
-      el("span", { class: "step-num", html: i < step ? ICON.check : String(i + 1) }),
+    host.append(el("div", { class:"step" + (i === step ? " active" : i < step ? " done" : "") },
+      el("span", { class:"step-num", html:i < step ? ICON.check : String(i + 1) }),
       el("span", {}, title)));
-    if (i < STEP_TITLES.length - 1) host.append(el("div", { class: "step-line" }));
+    if (i < STEP_TITLES.length - 1) host.append(el("div", { class:"step-line" }));
   });
 }
-
-function jsonBlock(obj) {
-  const text = JSON.stringify(obj, null, 2)
-    .replace(/"([^"]+)":/g, '<span class="ev-key">"$1"</span>:')
-    .replace(/: "([^"]*)"/g, ': <span class="ev-str">"$1"</span>')
-    .replace(/: (\d+)/g, ': <span class="ev-num">$1</span>')
-    .replace(/: (true|false)/g, ': <span class="ev-num">$1</span>')
-    .replace(/: null/g, ': <span class="ev-null">null</span>');
-  return el("pre", { class: "event", html: text });
-}
-
-const SAMPLE_EVENT = {
-  class_uid: 2004, category_uid: 2, activity_id: 1,
-  severity_id: 4, is_alert: true,
-  time: 1762986541200, event_id: "3f9b2c1e-8a44-5d17-9e02-1c7a4b6f0d83",
-  message: "检测到 SQL 注入攻击",
-  src_endpoint: { ip: "10.20.3.44", port: 51824 },
-  dst_endpoint: { ip: "10.20.9.7", port: 443 },
-  device: { hostname: "FW-EDGE-01", type_id: 1 },
-  finding_info: { uid: "AF-20261112-0031", title: "SQL 注入" },
-  metadata: { product: { vendor_name: "深信服", name: "AF" }, version: "3.2.1" },
-  unmapped: { rule_level: "高危", policy_id: "pol_8821" }
-};
 
 function renderWizardBody() {
   const body = $("#wizardBody");
@@ -448,222 +642,360 @@ function renderWizardBody() {
 
   if (step === 0) {
     $("#wizardSub").textContent = "先决定设备如何把数据送进来";
-    const grid = el("div", { class: "option-grid" });
+    const grid = el("div", { class:"option-grid" });
     Object.keys(CHANNELS).forEach(function (key) {
       const c = CHANNELS[key];
-      grid.append(el("button", {
-        class: "option", "aria-pressed": String(draft.channel === key),
-        onclick: function () { draft.channel = key; renderWizardBody(); }
-      },
-        el("div", { class: "option-top" },
-          el("span", { class: "option-icon", html: ICON[c.icon] }),
-          el("span", { class: "option-title" }, c.label)),
-        el("span", { class: "option-desc" }, c.desc)));
+      grid.append(el("button", { class:"option", "aria-pressed":String(draft.channel === key),
+        onclick:function(){ draft.channel = key; renderWizardBody(); } },
+        el("div", { class:"option-top" }, el("span", { class:"option-icon", html:ICON[c.icon] }),
+          el("span", { class:"option-title" }, c.label)),
+        el("span", { class:"option-desc" }, c.desc)));
     });
-    body.append(el("div", { class: "fieldset" }, grid));
-    $("#wizNext").textContent = "下一步";
+    body.append(el("div", { class:"fieldset" }, grid));
   }
 
   if (step === 1) {
-    $("#wizardSub").textContent = "模板决定字段如何映射为 OCSF 事件";
-    const list = el("div", { class: "template-list" });
+    $("#wizardSub").textContent = "模板决定字段如何映射成 OCSF；版本决定映射规则集";
+    const list = el("div", { class:"template-list" });
     TEMPLATES.forEach(function (t) {
-      list.append(el("button", {
-        class: "template-row", "aria-pressed": String(draft.template === t.id),
-        onclick: function () { draft.template = t.id; renderWizardBody(); }
-      },
-        el("div", {},
-          el("div", { style: "font-weight:600;font-size:13px" }, t.name),
-          el("div", { class: "cell-sub" }, t.vendor + " · " + t.id + (t.experimental ? " · 实验性" : ""))),
-        el("span", { class: "badge badge-outline" }, t.kind),
-        el("span", { class: "dim mono" }, "class " + t.class),
-        el("span", { class: "tick", html: ICON.check })));
+      list.append(el("button", { class:"template-row", "aria-pressed":String(draft.template === t.id),
+        onclick:function(){ draft.template = t.id; draft.sample = t.sample; verifyResult = null; renderWizardBody(); } },
+        el("div", { style:"min-width:0" },
+          el("div", { style:"font-weight:600;font-size:13px" }, t.name),
+          el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.group)),
+        el("span", { class:"badge badge-outline" }, t.kind),
+        el("span", { class:"dim mono", style:"white-space:nowrap" }, "class " + t.classUid),
+        el("span", { class:"dim mono", style:"white-space:nowrap" }, Math.round(t.coverage * 100) + "%"),
+        el("span", { class:"tick", html:ICON.check })));
     });
     const warn = draft.template && tpl(draft.template).experimental
-      ? el("div", { class: "callout callout-warn" }, el("span", { html: ICON.warn }),
-          "该模板标记为实验性：厂商格式无公开规范，映射覆盖率可能偏低，失败样本会进入隔离区。")
+      ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+          "实验性模板：厂商格式无公开规范，映射覆盖率偏低；未映射字段会进 unused，失败样本进隔离区。")
       : null;
-    body.append(el("div", { class: "fieldset" }, el("div", { class: "legend" }, "模板"), list, warn));
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "模板（覆盖率来自最近 24 小时真实样本）"), list, warn));
   }
 
   if (step === 2) {
-    $("#wizardSub").textContent = "绑定接入方式并生成凭据";
-    body.append(el("div", { class: "field" },
-      el("label", { for: "cnName" }, "数据源名称"),
-      el("input", { id: "cnName", value: draft.name, placeholder: "例如 边界防火墙",
-        oninput: function (e) { draft.name = e.target.value; renderNextState(); } })));
+    $("#wizardSub").textContent = "绑定接入方式；通道类型与模板在创建后不可变";
+    body.append(el("div", { class:"field" },
+      el("label", { for:"cnName" }, "数据源名称"),
+      el("input", { id:"cnName", value:draft.name, placeholder:"例如 边界防火墙",
+        oninput:function(e){ draft.name = e.target.value; } })));
 
     if (draft.channel === "http") {
-      body.append(el("div", { class: "fieldset" },
-        el("div", { class: "legend" }, "接入令牌"),
-        codeBox("ing_live_9f2a4c8e71b3d650a4e2c19b7f8d3a6e"),
-        el("div", { class: "callout" }, el("span", { html: ICON.info }),
-          "令牌只在此处完整显示一次，之后只保留摘要。单个数据源限 50 次/秒、突发 200，单请求 10 MiB、单批 1000 条。")));
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "接入令牌"),
+        codeBox("ing_live_" + Math.random().toString(16).slice(2, 10) + "d47b2e96c1a8d3b70e5f294c"),
+        el("div", { class:"callout" }, el("span", { html:ICON.info }),
+          "令牌只在创建时完整显示一次，之后只留摘要；可随时轮换。单源 50 次/秒、突发 200，单请求 10 MiB、单批 1000 条。")));
     }
     if (draft.channel === "syslog") {
-      body.append(el("div", { class: "fieldset" },
-        el("div", { class: "legend" }, "监听端口"),
-        el("div", { class: "field" },
-          el("label", { for: "cnPort" }, "UDP 与 TCP 同端口"),
-          el("input", { id: "cnPort", value: draft.port,
-            oninput: function (e) { draft.port = e.target.value; renderNextState(); } }),
-          el("span", { class: "hint" }, "建议 1024 以上；绑定由服务端完成，报文内不读取任何身份字段。")),
-        el("div", { class: "callout" }, el("span", { html: ICON.info }),
-          "一个端口只对应一个数据源。端口变更通过热重载生效，不重启服务。")));
+      const listening = CONNECTORS.filter(function (c) { return c.channel === "syslog"; })
+        .map(function (c) { return c.binding.split(":").pop(); });
+      const conflict = listening.indexOf(draft.port) >= 0;
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "监听端口"),
+        el("div", { class:"field" },
+          el("label", { for:"cnPort" }, "UDP 与 TCP 同端口"),
+          el("input", { id:"cnPort", value:draft.port, oninput:function(e){ draft.port = e.target.value; },
+            onchange:function(){ renderWizardBody(); } }),
+          el("span", { class:"hint" }, "建议 1024 以上；绑定由服务端完成，报文内不读取任何身份字段")),
+        conflict
+          ? el("div", { class:"callout callout-err" }, el("span", { html:ICON.warn }),
+              "端口 " + draft.port + " 已被其他数据源占用。一个端口只能绑一个数据源。")
+          : el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
+              "端口 " + draft.port + " 可用（已探测本机监听与防火墙规则）。")));
     }
     if (draft.channel === "kafka") {
-      body.append(el("div", { class: "fieldset" },
-        el("div", { class: "legend" }, "消费来源"),
-        el("div", { class: "field" }, el("label", { for: "cnBrokers" }, "Brokers"),
-          el("input", { id: "cnBrokers", value: draft.brokers,
-            oninput: function (e) { draft.brokers = e.target.value; renderNextState(); } })),
-        el("div", { class: "field" }, el("label", { for: "cnTopic" }, "Topic"),
-          el("input", { id: "cnTopic", value: draft.topic,
-            oninput: function (e) { draft.topic = e.target.value; renderNextState(); } })),
-        el("div", { class: "callout" }, el("span", { html: ICON.info }),
-          "使用独立消费组，位移只在事件成功发布后才提交；重启会重放未确认的部分。")));
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "消费来源"),
+        el("div", { class:"field" }, el("label", { for:"cnBrokers" }, "Brokers"),
+          el("input", { id:"cnBrokers", value:draft.brokers, oninput:function(e){ draft.brokers = e.target.value; } })),
+        el("div", { class:"field" }, el("label", { for:"cnTopic" }, "Topic"),
+          el("input", { id:"cnTopic", value:draft.topic, oninput:function(e){ draft.topic = e.target.value; } })),
+        el("div", { class:"callout" }, el("span", { html:ICON.info }),
+          "独立消费组 spx-ingestor-" + "{connector_id}；位移只在事件成功发布后才提交，重启会重放未确认部分。")));
     }
   }
 
   if (step === 3) {
-    $("#wizardSub").textContent = "确认接入信息并做一次连通性自检";
+    $("#wizardSub").textContent = "用一条真实样本先验证映射，再决定是否启用";
     const t = tpl(draft.template);
-    const target = draft.channel === "syslog" ? "10.41.84.81:" + draft.port
-      : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
-      : "POST /api/v1/ingestor/ingest/{id}";
+    const area = el("textarea", { id:"cnSample", oninput:function(e){ draft.sample = e.target.value; } });
+    area.value = draft.sample || t.sample;
 
-    body.append(el("div", { class: "fieldset" },
-      el("div", { class: "legend" }, "接入信息"),
-      el("dl", { class: "kv" },
-        el("dt", {}, "名称"), el("dd", { style: "font-weight:600" }, draft.name || "未命名数据源"),
-        el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
-        el("dt", {}, "模板"), el("dd", {}, t.name + " · " + t.vendor),
-        el("dt", {}, "目标类"), el("dd", { class: "mono" }, "class_uid " + t.class),
-        el("dt", {}, "接入地址"), el("dd", {}, codeBox(target)))));
+    const resultHost = el("div", { id:"verifyHost" });
+    const btn = el("button", { id:"verifyBtn", class:"btn btn-outline btn-sm", onclick:function(){
+      verifyResult = mapSample(t, area.value);
+      renderWizardBody();
+    } }, "验证映射");
 
-    const result = el("div", { class: "fieldset" }, el("div", { class: "legend" }, "连通性自检"));
-    const list = el("div", {});
-    const steps = [
-      draft.channel === "syslog" ? "绑定端口 " + draft.port : "校验接入配置",
-      "发送样本并等待受理",
-      "按模板解析为 OCSF 事件",
-      "确认写入 spx.ingest.event"
-    ];
-    steps.forEach(function (label, i) {
-      const done = checkState === "ok";
-      list.append(el("div", { class: "check-step" + (done ? "" : " pending") },
-        el("span", { class: "check-icon", html: done ? ICON.ok : '<span class="spinner"></span>' }),
-        el("span", {}, label)));
-    });
-    result.append(list);
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "样本"),
+      area,
+      el("div", { style:"display:flex;gap:8px;align-items:center" }, btn,
+        el("span", { class:"hint" }, "贴一条设备真实日志；也可以从最近收到的消息里取一条"))
+    ));
 
-    if (checkState === "ok") {
-      result.append(el("div", { class: "callout callout-ok" }, el("span", { html: ICON.ok }),
-        "自检通过：样本已解析并写入事件主题，映射字段 9 / 未知字段 2。"));
-      result.append(el("div", { class: "fieldset" },
-        el("div", { class: "legend" }, "解析结果"), jsonBlock(SAMPLE_EVENT)));
+    if (verifyResult) {
+      if (verifyResult.error) {
+        body.append(el("div", { class:"callout callout-err" }, el("span", { html:ICON.warn }), verifyResult.error));
+      } else {
+        const r = verifyResult;
+        const mapTable = el("table", { class:"map-table" });
+        r.rows.forEach(function (row) {
+          mapTable.append(el("tr", {},
+            el("td", { class:"map-src mono" }, row.src),
+            el("td", { class:"mono" }, row.dst),
+            el("td", { class:row.ok ? "map-ok" : "map-miss", style:"text-align:right;white-space:nowrap" },
+              row.ok ? "✓ " : "! ", row.note)));
+        });
+        const unmapped = r.unmappedKeys.length
+          ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+              "未映射字段 " + r.unmappedKeys.length + " 个，会原样进 event.unmapped：" + r.unmappedKeys.join("、"))
+          : el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }), "全部源字段都已映射");
+
+        body.append(el("div", { class:"fieldset" },
+          el("div", { class:"legend" }, "验证结果 · 映射 " + r.mapped + "/" + r.total + " 字段"),
+          el("div", { class:"two-col" },
+            el("div", { class:"fieldset" }, el("span", { class:"hint" }, "解析出的 OCSF 事件"), jsonBlock(r.event)),
+            el("div", { class:"fieldset" }, el("span", { class:"hint" }, "字段映射"), mapTable)),
+          unmapped));
+      }
     }
-    body.append(result);
-    $("#wizNext").textContent = "完成接入";
   }
-  renderNextState();
+
+  if (step === 4) {
+    $("#wizardSub").textContent = "创建后默认不运行；确认诊断结论后再启动";
+    const t = tpl(draft.template);
+    const bindAddr = draft.channel === "syslog" ? "10.41.84.81:" + draft.port
+      : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
+      : "POST /api/v1/ingestor/ingest/{new}";
+    const ok = verifyResult && !verifyResult.error;
+
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "接入摘要"),
+      el("dl", { class:"kv" },
+        el("dt", {}, "名称"), el("dd", { style:"font-weight:600" }, draft.name || "未命名数据源"),
+        el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
+        el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version),
+        el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
+        el("dt", {}, "接入地址"), el("dd", {}, codeBox(bindAddr)))));
+
+    const diag = el("div", { class:"fieldset" }, el("div", { class:"legend" }, "启动前诊断"));
+    diag.append(el("dl", { class:"panel" },
+      el("div", { class:"panel-row" }, el("dt", {}, "绑定"), el("dd", {},
+        draft.channel === "syslog" ? "10.41.84.81:" + draft.port + " · UDP+TCP" :
+        draft.channel === "kafka" ? draft.brokers : "HTTP 路由已就绪")),
+      el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "1 个实例待启动")),
+      el("div", { class:"panel-row" }, el("dt", {}, "样本验证"), el("dd", {},
+        ok ? "通过 · 映射 " + verifyResult.mapped + "/" + verifyResult.total : "未验证（可返回上一步执行）")),
+      el("div", { class:"panel-row" }, el("dt", {}, "预期故障"), el("dd", { class:"dim" }, "未发现"))
+    ));
+
+    if (ok) {
+      diag.append(el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
+        "可以创建。创建后处于「待启动」，启动才会真正绑定端口并计入接收流量。"));
+    }
+    body.append(diag);
+    $("#wizNext").textContent = "创建（待启动）";
+  }
+  $("#wizNext").disabled = !stepReady();
 }
 
 function stepReady() {
   if (step === 0) return Boolean(draft.channel);
   if (step === 1) return Boolean(draft.template);
-  if (step === 2) return Boolean(draft.name.trim());
+  if (step === 2) {
+    if (!draft.name.trim()) return false;
+    if (draft.channel === "syslog") {
+      return !CONNECTORS.some(function (c) { return c.channel === "syslog" && c.binding.split(":").pop() === draft.port; });
+    }
+    return true;
+  }
+  if (step === 3) return Boolean(verifyResult && !verifyResult.error);
   return true;
 }
-function renderNextState() { $("#wizNext").disabled = !stepReady(); }
 
 $("#openWizard").addEventListener("click", function () {
   draft.channel = null; draft.template = null; draft.name = "";
   draft.port = "5514"; draft.topic = "soc.raw"; draft.brokers = "kafka.internal:9092";
-  step = 0; checkState = "idle";
-  renderSteps(); renderWizardBody(); show($("#wizard"));
+  draft.sample = ""; verifyResult = null;
+  step = 0; renderSteps(); renderWizardBody(); show($("#wizard"));
 });
 $("#wizCancel").addEventListener("click", hide);
-$("#wizPrev").addEventListener("click", function () {
-  if (step > 0) { step--; renderSteps(); renderWizardBody(); }
-});
+$("#wizPrev").addEventListener("click", function () { if (step > 0) { step--; renderSteps(); renderWizardBody(); } });
 $("#wizNext").addEventListener("click", function () {
-  if (step < 3) { step++; renderSteps(); renderWizardBody(); return; }
-  if (checkState !== "ok") {
-    checkState = "running";
-    renderWizardBody();
-    setTimeout(function () { checkState = "ok"; renderWizardBody(); }, 1500);
-    return;
-  }
+  if (!stepReady()) return;
+  if (step < 4) { step++; renderSteps(); renderWizardBody(); return; }
   const t = tpl(draft.template);
   const id = "cn_" + Math.random().toString(16).slice(2, 8);
-  const binding = draft.channel === "syslog" ? "10.41.84.81:" + draft.port
-    : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
-    : "/api/v1/ingestor/ingest/" + id;
-  CONNECTORS.unshift({ id: id, name: draft.name, channel: draft.channel, template: t.id,
-    binding: binding, status: "active", hourly: 0, fill: 1, quarantine: 0 });
-  renderRows(); hide();
+  CONNECTORS.unshift({
+    id:id, name:draft.name, channel:draft.channel, template:t.id,
+    binding: draft.channel === "syslog" ? "10.41.84.81:" + draft.port
+      : draft.channel === "kafka" ? draft.brokers + " · topic " + draft.topic
+      : "/api/v1/ingestor/ingest/" + id,
+    state:"draft", hourly:0, fill:t.coverage, quarantine:0, lastSeen:"从未", token:null
+  });
+  renderRows(); renderBanner(); hide();
 });
 
-/* ---------- 详情 ---------- */
+/* ---------- 诊断抽屉 ---------- */
 let current = null;
+let currentTab = "overview";
+const STREAM = [
+  { t:"20:31:04", ok:true,  msg:"检测到 SQL 注入攻击 · 10.20.3.44 → 10.20.9.7:443" },
+  { t:"20:31:02", ok:true,  msg:"Web 攻击被阻断 · 198.51.100.7 → 10.20.9.7:443" },
+  { t:"20:30:58", ok:false, msg:"parquet: 期望 JSON，收到非 UTF-8 字节序列（隔离）" },
+  { t:"20:30:55", ok:true,  msg:"域控账户非工作时段异常登录 · CN-SH-DC01" },
+  { t:"20:30:51", ok:true,  msg:"端口扫描 · 10.20.8.12 → 10.20.9.0/24" },
+  { t:"20:30:47", ok:false, msg:"severity 值「未知档位」无法识别，按 0 处理（隔离）" }
+];
+
 function openDetail(c) {
-  current = c;
-  const t = tpl(c.template);
+  current = c; currentTab = "overview";
   $("#detailTitle").textContent = c.name;
-  $("#detailSub").textContent = c.id + " · " + CHANNELS[c.channel].label + " · " + t.name;
-  $("#detailPause").textContent = c.status === "active" ? "停用" : "启用";
-
-  const body = $("#detailBody");
-  body.replaceChildren();
-
-  body.append(el("div", { class: "fieldset" },
-    el("div", { class: "legend" }, "接入信息"),
-    el("dl", { class: "kv" },
-      el("dt", {}, "接入地址"), el("dd", {}, codeBox(c.binding)),
-      el("dt", {}, "模板"), el("dd", {}, t.name + " · " + t.vendor),
-      el("dt", {}, "目标类"), el("dd", { class: "mono" }, "class_uid " + t.class + " · " + t.kind),
-      el("dt", {}, "状态"), el("dd", {}, c.status === "active" ? badge("ok", "启用") : badge("paused", "停用")))));
-
-  body.append(el("div", { class: "fieldset" },
-    el("div", { class: "legend" }, "解析质量"),
-    el("div", { class: "quality" },
-      el("div", { class: "stat" },
-        el("div", { class: "stat-label" }, "映射填充率"),
-        el("div", { class: "stat-value" }, (c.fill * 100).toFixed(1), el("small", {}, "%")),
-        el("div", { class: "bar" }, el("i", { style: "width:" + (c.fill * 100) + "%" }))),
-      el("div", { class: "stat" },
-        el("div", { class: "stat-label" }, "近 1 小时事件"),
-        el("div", { class: "stat-value" }, c.hourly.toLocaleString("zh-CN"))),
-      el("div", { class: "stat" },
-        el("div", { class: "stat-label" }, "隔离区占比"),
-        el("div", { class: "stat-value" }, c.quarantine.toFixed(1), el("small", {}, "%")),
-        el("div", { class: "bar" }, el("i", { style: "width:" + Math.min(c.quarantine * 8, 100) + "%;background:var(--chart-4)" }))))));
-
-  body.append(el("div", { class: "fieldset" },
-    el("div", { class: "legend" }, "最近样本"),
-    jsonBlock({ time: 1762986541200, severity_id: 4, class_uid: t.class,
-      src_endpoint: { ip: "10.20.3.44", port: 51824 },
-      message: "检测到 SQL 注入攻击",
-      metadata: { product: { vendor_name: t.vendor, name: t.name } },
-      unmapped: { rule_level: "高危" } })));
-
+  $("#detailSub").textContent = c.id + " · " + CHANNELS[c.channel].label + " · " + tpl(c.template).name;
+  $$("#detailTabs .tab").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === "overview")); });
+  renderDetail();
   show($("#detail"));
 }
-$("#detailPause").addEventListener("click", function () {
+$$("#detailTabs .tab").forEach(function (b) {
+  b.addEventListener("click", function () {
+    currentTab = b.dataset.tab;
+    $$("#detailTabs .tab").forEach(function (x) { x.setAttribute("aria-selected", String(x === b)); });
+    renderDetail();
+  });
+});
+
+function renderDetail() {
+  const c = current;
+  if (!c) return;
+  const t = tpl(c.template);
+  const body = $("#detailBody");
+  body.replaceChildren();
+  $("#detailToggle").style.display = c.state === "running" || c.state === "silent" ? "" : "none";
+  $("#detailStart").style.display = c.state === "running" || c.state === "silent" ? "none" : "";
+
+  if (currentTab === "overview") {
+    const rows = [["接入地址", codeBox(c.binding)], ["通道", CHANNELS[c.channel].label],
+      ["模板", t.name + " · v" + t.version + " · " + t.vendor],
+      ["目标类", "class_uid " + t.classUid + " (" + t.className + ") · " + t.kind],
+      ["状态", stateBadge(c.state)], ["最近收到", c.lastSeen]];
+    if (c.channel === "http" && c.token) {
+      const rotate = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
+        c.token = "ing_live_" + Math.random().toString(16).slice(2,10) + "c1a8d3b70e5f294c";
+        renderDetail();
+      } }, "轮换令牌");
+      rows.push(["令牌", el("div", { class:"fieldset", style:"gap:8px" }, codeBox(c.token), rotate)]);
+    }
+    const dl = el("dl", { class:"kv" });
+    rows.forEach(function (r) { dl.append(el("dt", {}, r[0]), el("dd", {}, r[1])); });
+    body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入信息"), dl));
+    if (c.channel === "http") {
+      body.append(el("div", { class:"callout" }, el("span", { html:ICON.info }),
+        "推送示例：curl -H \"Authorization: Bearer <令牌>\" -H \"Content-Type: application/json\" --data @sample.json " +
+        "https://<host>" + c.binding));
+    }
+  }
+
+  if (currentTab === "diagnose") {
+    const trafficOk = c.state === "running";
+    body.append(el("dl", { class:"panel" },
+      el("div", { class:"panel-row" }, el("dt", {}, "信息"), el("dd", {},
+        "type=" + CHANNELS[c.channel].label + " · bind=" + c.binding + " · node=ingestor-1")),
+      el("div", { class:"panel-row" }, el("dt", {}, "状态"), el("dd", {},
+        c.state === "draft" ? "尚未启动，未占用端口" :
+        c.state === "stopped" ? "已停止；端口已释放" :
+        c.state === "silent" ? "进程运行中，但 15 分钟内未观察到入站流量" : "运行中")),
+      el("div", { class:"panel-row" }, el("dt", {}, "收到流量"), el("dd", {},
+        trafficOk ? "18,432 条 / 小时 · 最近 2 秒前" : "0 条 · 最近 17 分钟前（异常）")),
+      el("div", { class:"panel-row" }, el("dt", {}, "处理错误"), el("dd", {},
+        c.quarantine > 0 ? c.quarantine.toFixed(1) + "% 进入隔离区（近 1 小时 3 条）" : "无")),
+      el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "ingestor-1：正常"))
+    ));
+
+    const fixes = [];
+    if (c.state === "silent") {
+      fixes.push("确认设备侧目标地址填的是 " + c.binding + "，不是前端代理地址");
+      fixes.push("若中间有 rsyslog 中继，源 IP 会变成中继地址；归属只按端口判定，不受影响");
+    }
+    if (c.quarantine > 2) fixes.push("隔离区占比 " + c.quarantine.toFixed(1) + "%，检查模板 severity_map 是否缺档位");
+    if (c.state === "draft") fixes.push("创建后需要手动启动，启动才会绑定端口");
+    if (!fixes.length) fixes.push("未发现需要处理的项");
+
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "建议"),
+      el("ul", { style:"margin:0;padding-left:18px;font-size:12.5px;color:var(--muted-foreground);line-height:1.7" },
+        fixes.map(function (f) { return el("li", {}, f); }))));
+  }
+
+  if (currentTab === "messages") {
+    const host = el("div", { class:"stream" });
+    if (c.state === "draft" || c.state === "stopped") {
+      host.append(el("div", { class:"empty" }, "未启动，暂无消息"));
+    } else {
+      STREAM.forEach(function (m) {
+        host.append(el("div", { class:"stream-row" + (m.ok ? "" : " bad") },
+          el("span", { class:"stream-time" }, m.t),
+          el("div", { style:"min-width:0" },
+            el("div", { class:"stream-msg" }, m.msg),
+            el("span", { class:"pill " + (m.ok ? "pill-ok" : "pill-bad") }, m.ok ? "已发布" : "隔离"))));
+      });
+    }
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "最近收到的消息（原始 → 解析结果）"), host));
+  }
+
+  if (currentTab === "quality") {
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "映射质量 · 最近 24 小时"),
+      el("div", { class:"quality" },
+        el("div", { class:"stat" },
+          el("div", { class:"stat-label" }, "填充率"),
+          el("div", { class:"stat-value" }, (c.fill * 100).toFixed(1), el("small", {}, "%")),
+          el("div", { class:"bar" }, el("i", { style:"width:" + (c.fill * 100) + "%" }))),
+        el("div", { class:"stat" },
+          el("div", { class:"stat-label" }, "事件量"),
+          el("div", { class:"stat-value" }, c.hourly.toLocaleString("zh-CN"))),
+        el("div", { class:"stat" },
+          el("div", { class:"stat-label" }, "隔离区"),
+          el("div", { class:"stat-value" }, c.quarantine.toFixed(1), el("small", {}, "%")),
+          el("div", { class:"bar" }, el("i", { style:"width:" + Math.min(c.quarantine * 8, 100) + "%;background:var(--chart-4)" }))),
+        el("div", { class:"stat" },
+          el("div", { class:"stat-label" }, "未映射字段"),
+          el("div", { class:"stat-value" }, "2")))));
+
+    body.append(el("div", { class:"fieldset" },
+      el("div", { class:"legend" }, "未映射最多的字段"),
+      el("table", { class:"map-table" },
+        el("tr", {}, el("td", { class:"map-src mono" }, "policy_id"), el("td", { style:"text-align:right" }, "100%")),
+        el("tr", {}, el("td", { class:"map-src mono" }, "rule_level"), el("td", { style:"text-align:right" }, "98%")),
+        el("tr", {}, el("td", { class:"map-src mono" }, "sessionid"), el("td", { style:"text-align:right" }, "42%"))),
+      el("div", { class:"callout" }, el("span", { html:ICON.info }),
+        "未映射字段不丢弃，原样写入 event.unmapped；下游可据此提出模板补充。")));
+  }
+}
+$("#detailToggle").addEventListener("click", function () {
   if (!current) return;
-  current.status = current.status === "active" ? "paused" : "active";
-  hide(); renderRows();
+  current.state = current.state === "running" ? "stopped" : "stopped";
+  current.lastSeen = "刚刚";
+  renderDetail(); renderRows(); renderBanner();
+});
+$("#detailStart").addEventListener("click", function () {
+  if (!current) return;
+  current.state = "running"; current.lastSeen = "2 秒前";
+  renderDetail(); renderRows(); renderBanner();
 });
 $("#detailDelete").addEventListener("click", function () {
   if (!current) return;
   CONNECTORS = CONNECTORS.filter(function (x) { return x.id !== current.id; });
-  hide(); renderRows();
+  hide(); renderRows(); renderBanner();
 });
-$("#detailRecheck").addEventListener("click", function () {
-  $("#detailSub").textContent = "正在自检…";
-  setTimeout(function () { if (current) $("#detailSub").textContent = current.id + " · 自检通过"; }, 1200);
-});
+
+renderRows();
+renderBanner();
 
 </script>
 </body>
