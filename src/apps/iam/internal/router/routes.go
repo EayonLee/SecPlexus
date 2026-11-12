@@ -45,7 +45,14 @@ func RegisterUserRoutes(engine gin.IRouter, server *handler.Server) {
 func Handler(server *handler.Server) http.Handler {
 	engine := middleware.NewEngine()
 	engine.RemoteIPHeaders = []string{"X-Forwarded-For"}
-	if err := engine.SetTrustedProxies(server.Service.Config.App.TrustedProxyCIDRs); err != nil {
+	// 未配置可信代理时必须显式关闭转发头解析：Gin 在未调用 SetTrustedProxies 时信任所有来源，
+	// 那样任何客户端都能用 X-Forwarded-For 伪造来源、绕过按 IP 的登录限流。
+	if trustedProxies := server.Service.Config.App.TrustedProxyCIDRs; len(trustedProxies) == 0 {
+		engine.ForwardedByClientIP = false
+		if err := engine.SetTrustedProxies(nil); err != nil {
+			panic("invalid trusted proxies")
+		}
+	} else if err := engine.SetTrustedProxies(trustedProxies); err != nil {
 		panic("invalid trusted proxies")
 	}
 	engine.POST("/api/v1/iam/authorize", server.Errors, middleware.InputBoundary(nil), server.AuthorizeRequest)

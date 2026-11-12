@@ -97,6 +97,14 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		MaxHeaderBytes:    16 * 1024,
 	}
 
+	if len(cfg.App.TrustedProxyCIDRs) == 0 {
+		// 不是错误，但部署形态很容易踩：反代之后所有请求的来源都是反代地址，
+		// 登录限流会退化成全站共用一个桶。启动时提示一次，让运维在日志里看到。
+		slog.Info("No trusted proxy configured; client address comes from the direct peer",
+			"event", "service.proxy_trust_disabled",
+			"hint", "Set SPX_IAM_TRUSTED_PROXY_CIDRS when a reverse proxy forwards client addresses")
+	}
+
 	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr())
 	if err := httpx.Serve(ctx, httpServer); err != nil {
 		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(err))

@@ -20,6 +20,8 @@ func NewEngine() *gin.Engine {
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
 	_ = router.SetTrustedProxies(nil)
+	// 安全头最先挂载：404/405、panic 恢复与鉴权拒绝的响应也必须带同一组头。
+	router.Use(SecurityHeaders())
 	router.Use(func(c *gin.Context) {
 		id := uuid.NewString()
 		ctx := logging.With(c.Request.Context(), "request_id", id, "method", c.Request.Method)
