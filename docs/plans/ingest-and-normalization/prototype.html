@@ -451,23 +451,42 @@ const TEMPLATES = [
     {eventName:"activity_name",sourceIPAddress:"src_endpoint.ip",userIdentity:"actor.user.name",region:"cloud.region"})
 ];
 
+/* 状态机对照 Graylog InputStateBadge（RUNNING/STARTING/FAILED/FAILING/STOPPED + 未运行）
+   与 Wazuh agent 状态（active/disconnected/never_connected/pending）：
+   draft 创建未启动；starting 端口绑定中；running 正常；pending 启动后从未收到事件（Wazuh never_connected）；
+   silent 曾有事件但 15 分钟无入站；degraded 有事件但质量降级（隔离/解析失败超阈值，Graylog FAILING）；
+   failed 启动失败（端口绑定冲突等，原始错误保留展示）；stopped 手动停止。 */
 const STATE = {
-  draft:{ label:"待启动", kind:"idle" },
-  running:{ label:"运行中", kind:"ok" },
-  stopped:{ label:"已停止", kind:"warn" },
-  silent:{ label:"运行中 · 无流量", kind:"err" }
+  draft:   { label:"待启动", kind:"idle" },
+  starting:{ label:"启动中", kind:"idle" },
+  running: { label:"运行中", kind:"ok" },
+  pending: { label:"运行中 · 从未收到", kind:"warn" },
+  silent:  { label:"运行中 · 无流量", kind:"err" },
+  degraded:{ label:"运行中 · 质量降级", kind:"err" },
+  failed:  { label:"启动失败", kind:"err" },
+  stopped: { label:"已停止", kind:"warn" }
 };
+const STATE_ORDER = ["all","running","pending","degraded","silent","failed","draft","stopped"];
+/* 从指标派生运行态的健康结论（OpenCTI IngestionHealth 的 status/status_since 模式）：阈值写死，防 抖动留给实施。 */
+function derivedHealth(c) {
+  if (c.state === "running" && c.quarantine > 2) return STATE.degraded.label;
+  return STATE[c.state] ? STATE[c.state].label : c.state;
+}
 
 let CONNECTORS = [
   { id:"cn_7f21a9", name:"边界防火墙", channel:"syslog", template:"sangfor-af",
     binding:"10.41.84.81:5514", state:"running", hourly:18432, fill:0.97, quarantine:0.4,
-    lastSeen:"2 秒前", createdAt:"2026-11-02 09:14",
+    lastSeen:"2 秒前", createdAt:"2026-11-02 09:14", statusSince:"2026-11-02 09:15",
+    description:"一期机房出口防火墙，rsyslog 中继转发",
+    createdBy:"eayonlee",
     cfg:{ port:"5514", protocol:"UDP+TCP", maxBytes:65536, reloadSec:10 },
     publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:38, backpressure:false } },
 
   { id:"cn_2b83c1", name:"终端 EDR", channel:"http", template:"qianxin-tianqing",
     binding:"/api/v1/ingestor/ingest/cn_2b83c1", state:"running", hourly:8421, fill:0.93, quarantine:1.2,
-    lastSeen:"8 秒前", createdAt:"2026-11-05 15:02",
+    lastSeen:"8 秒前", createdAt:"2026-11-05 15:02", statusSince:"2026-11-05 15:03",
+    description:"办公网终端 EDR 集群，厂商推送",
+    createdBy:"eayonlee", tokenUsedAt:"2026-11-13 10:41",
     token:"ing_live_example000000000000000000",
     cfg:{ ratePerSec:50, burst:200, maxBodyMiB:10, maxBatch:1000, contentTypes:["application/json","text/plain"],
           redisFailPolicy:"拒绝不放行" },
@@ -475,17 +494,36 @@ let CONNECTORS = [
 
   { id:"cn_5d90ee", name:"云审计推送", channel:"http", template:"aws-cloudtrail",
     binding:"/api/v1/ingestor/ingest/cn_5d90ee", state:"stopped", hourly:0, fill:0.99, quarantine:0,
-    lastSeen:"昨天 18:04", createdAt:"2026-10-28 11:40",
+    lastSeen:"昨天 18:04", createdAt:"2026-10-28 11:40", statusSince:"2026-11-12 18:04",
+    description:"云账号操作审计，等客户侧开通推送",
+    createdBy:"eayonlee",
     token:"ing_live_example111111111111111111",
     cfg:{ ratePerSec:50, burst:200, maxBodyMiB:10, maxBatch:1000, contentTypes:["application/json"],
           redisFailPolicy:"拒绝不放行" },
     publish:{ keyField:"actor.user.uid", batch:500, flushMs:2000, lagMs:0, backpressure:false } },
 
+  { id:"cn_3e77b0", name:"实验室 IDS", channel:"syslog", template:"nsfocus-ids",
+    binding:"10.41.84.81:5515", state:"running", hourly:2210, fill:0.74, quarantine:4.8,
+    lastSeen:"5 秒前", createdAt:"2026-11-08 10:02", statusSince:"2026-11-11 09:40",
+    description:"实验网绿盟 IDS，模板实验性，隔离区偏高",
+    createdBy:"wang_ops",
+    cfg:{ port:"5515", protocol:"UDP+TCP", maxBytes:65536, reloadSec:10 },
+    publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:52, backpressure:false } },
+
   { id:"cn_11c4a7", name:"SOC 总线", channel:"kafka", template:"paloalto-traffic",
-    binding:"kafka.internal:9092 · topic soc.raw", state:"silent", hourly:0, fill:0.88, quarantine:3.6,
-    lastSeen:"17 分钟前", createdAt:"2026-11-09 20:31",
+    binding:"kafka.internal:9092 · topic soc.raw", state:"pending", hourly:0, fill:0.88, quarantine:3.6,
+    lastSeen:"从未收到", createdAt:"2026-11-09 20:31",
     cfg:{ brokers:"kafka.internal:9092", topic:"soc.raw", group:"spx-ingestor-cn_11c4a7",
           offsetReset:"earliest", commit:"发布成功后提交" },
+    publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:0, backpressure:false } },
+
+  { id:"cn_9a02d5", name:"机房出口防火墙 2", channel:"syslog", template:"hillstone-ngfw",
+    binding:"10.41.84.81:5516", state:"failed", hourly:0, fill:0, quarantine:0,
+    lastSeen:"从未收到", createdAt:"2026-11-12 16:20",
+    description:"二期机房出口，等网络部开通防火墙到采集端的路由",
+    createdBy:"wang_ops",
+    bindError:"listen udp 0.0.0.0:5516: bind: address already in use",
+    cfg:{ port:"5516", protocol:"UDP+TCP", maxBytes:65536, reloadSec:10 },
     publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:0, backpressure:false } }
 ];
 
@@ -745,8 +783,7 @@ function renderConnectors(host) {
     page = 0; refreshTable();
   } }, "通道：" + (channelFilter === "all" ? "全部" : CHANNELS[channelFilter].label));
   const stateBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
-    const order = ["all","running","draft","stopped","silent"];
-    stateFilter = order[(order.indexOf(stateFilter)+1)%order.length];
+    stateFilter = STATE_ORDER[(STATE_ORDER.indexOf(stateFilter)+1)%STATE_ORDER.length];
     stateBtn.textContent = "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label);
     page = 0; refreshTable();
   } }, "状态：" + (stateFilter === "all" ? "全部" : STATE[stateFilter].label));
@@ -788,18 +825,35 @@ function filtered() {
         && (!q || hay.indexOf(q) >= 0);
   });
 }
+/* 横幅每个条目可点击：点击后把状态过滤器设为对应状态（Graylog InputsNotifications 的
+   runtime_status 过滤模式）。空列表给出「去接入」引导。 */
 function refreshBanner() {
   const host = $("#banner");
   if (!host) return;
   host.replaceChildren();
-  const draft = CONNECTORS.filter(function (c) { return c.state === "draft"; }).length;
-  const silent = CONNECTORS.filter(function (c) { return c.state === "silent"; }).length;
-  if (!draft && !silent) return;
-  const parts = [];
-  if (draft) parts.push(draft + " 个接入点已创建但尚未启动");
-  if (silent) parts.push(silent + " 个接入点运行中但 15 分钟无入站流量");
-  host.append(el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-    parts.join("；") + "。启动或排查后才会计入接收速率。"));
+  const groups = [
+    ["failed", CONNECTORS.filter(function (c) { return c.state === "failed"; }).length, "启动失败"],
+    ["degraded", CONNECTORS.filter(function (c) { return c.state === "degraded" || (c.state === "running" && c.quarantine > 2); }).length, "质量降级"],
+    ["silent", CONNECTORS.filter(function (c) { return c.state === "silent"; }).length, "15 分钟无入站流量"],
+    ["pending", CONNECTORS.filter(function (c) { return c.state === "pending"; }).length, "启动后从未收到"],
+    ["draft", CONNECTORS.filter(function (c) { return c.state === "draft"; }).length, "已创建未启动"]
+  ].filter(function (g) { return g[1] > 0; });
+  if (!CONNECTORS.length) {
+    host.append(el("div", { style:"margin-top:14px" },
+      el("div", { class:"callout" }, el("span", { html:ICON.info }),
+        "还没有接入点。点右上角「接入数据源」开始；向导会在启用前用真实样本验证模板映射。")));
+    return;
+  }
+  if (!groups.length) return;
+  const items = groups.map(function (g) {
+    return el("button", {
+      class:"chip", style:"border-color:var(--attention)",
+      onclick:function(){ stateFilter = g[0]; page = 0; refreshTable(); }
+    }, g[1] + " 个" + g[2] + " →");
+  });
+  host.append(el("div", { style:"margin-top:14px" },
+    el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+      el("div", { class:"chips" }, items))));
 }
 function refreshTable() {
   const body = $("#rows");
@@ -827,7 +881,9 @@ function refreshTable() {
           (t.experimental ? " · 实验性" : ""))),
       el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
         el("span", { class:"mono dim" }, c.binding)),
-      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" }, stateBadge(c.state)),
+      el("td", { onclick:function(){ openDetail(c); }, style:"cursor:pointer" },
+        stateBadge(c.state),
+        c.state === "running" && c.quarantine > 2 ? el("div", { class:"cell-sub" }, "隔离区 " + c.quarantine.toFixed(1) + "%") : null),
       el("td", {},
         readOnly
           ? el("span", { class:"dim", style:"font-size:12.5px" }, "只读")
@@ -1136,6 +1192,32 @@ function renderWizardBody() {
     }
   }
 
+    if (draft.channel) {
+      /* 接入指引：把设备侧需要的配置直接生成出来（Wazuh 向导的 command-output 模式：
+         用户不该自己拼 rsyslog 转发行）。 */
+      const guideMap = {
+        syslog: [
+          "rsyslog（TCP）", "*.err @@10.41.84.81:" + draft.port + ";RSYSLOG_SyslogProtocol23Format",
+          "rsyslog（UDP）", "*.* @10.41.84.81:" + draft.port,
+          "syslog-ng", 'destination d_spx { network("10.41.84.81" transport("tcp") port(' + draft.port + ')); };'
+        ],
+        http: [
+          "curl", "curl -X POST -H 'Authorization: Bearer <令牌>' -H 'Content-Type: application/json' --data @sample.json https://<host>/api/v1/ingestor/ingest/{new}"
+        ],
+        kafka: [
+          "producer（客户侧投递）", "bootstrap.servers=" + draft.brokers + "  topic=" + draft.topic + "  acks=all  retries=2147483647"
+        ]
+      };
+      const guide = el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "接入指引",
+          el("span", { class:"hint-inline" }, "把设备侧要做的配置复制给网络/设备管理员")));
+      for (let gi = 0; gi < guideMap[draft.channel].length; gi += 2) {
+        guide.append(el("div", { class:"field" },
+          el("label", {}, guideMap[draft.channel][gi]),
+          codeBox(guideMap[draft.channel][gi + 1])));
+      }
+      body.append(guide);
+    }
   if (step === 3) {
     $("#wizardSub").textContent = "先验证映射，再决定要不要启用";
     const t = tpl(draft.template);
@@ -1377,9 +1459,17 @@ function renderDetail() {
   const t = tpl(c.template);
   const body = $("#detailBody");
   body.replaceChildren();
-  const live = c.state === "running" || c.state === "silent";
+  const live = ["running","silent","pending","degraded"].indexOf(c.state) >= 0;
   $("#detailToggle").style.display = live && !readOnly ? "" : "none";
   $("#detailStart").style.display = live || readOnly ? "none" : "";
+  if (c.state === "failed") {
+    body.append(el("div", { class:"callout callout-err" }, el("span", { html:ICON.warn }),
+      el("div", {},
+        el("div", { style:"font-weight:600" }, "启动失败"),
+        el("div", { class:"mono", style:"margin-top:4px;word-break:break-all" }, c.bindError || "unknown error"),
+        el("div", { class:"dim", style:"margin-top:4px" },
+          "修正端口冲突后点「启动」重试；错误原文来自监听绑定，未截断。"))));
+  }
 
   if (currentTab === "overview") {
     const dl = el("dl", { class:"kv" },
@@ -1387,9 +1477,12 @@ function renderDetail() {
       el("dt", {}, "通道"), el("dd", {}, CHANNELS[c.channel].label),
       el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version + " · " + t.vendor),
       el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
-      el("dt", {}, "状态"), el("dd", {}, stateBadge(c.state)),
-      el("dt", {}, "创建时间"), el("dd", {}, c.createdAt),
+      el("dt", {}, "状态"), el("dd", {},
+        stateBadge(c.state),
+        c.statusSince ? el("span", { class:"dim", style:"font-size:11.5px;margin-left:6px" }, "自 " + c.statusSince) : null),
+      el("dt", {}, "创建时间"), el("dd", {}, c.createdAt + (c.createdBy ? " · " + c.createdBy : "")),
       el("dt", {}, "最近收到"), el("dd", {}, c.lastSeen));
+    if (c.description) dl.append(el("dt", {}, "描述"), el("dd", { style:"color:var(--muted-foreground)" }, c.description));
     if (c.channel === "http") {
       dl.append(el("dt", {}, "限流"), el("dd", {}, c.cfg.ratePerSec + " 请求/秒 · 突发 " + c.cfg.burst));
       dl.append(el("dt", {}, "上限"), el("dd", {}, c.cfg.maxBodyMiB + " MiB · 单批 " + c.cfg.maxBatch + " 条"));
@@ -1412,7 +1505,9 @@ function renderDetail() {
         c.token = "ing_live_example444444444444444444"; renderDetail();
       } }, "轮换令牌");
       body.append(el("div", { class:"fieldset" },
-        el("div", { class:"legend" }, "令牌", el("span", { class:"hint-inline" }, "轮换后旧令牌立即失效")),
+        el("div", { class:"legend" }, "令牌",
+          el("span", { class:"hint-inline" },
+            "摘要存储 · 最近使用 " + (c.tokenUsedAt || "从未") + " · 轮换后旧令牌立即失效")),
         codeBox(c.token), rotate));
       body.append(el("div", { class:"callout" }, el("span", { html:ICON.info }),
         "推送示例：curl -X POST -H \"Authorization: Bearer <令牌>\" -H \"Content-Type: application/json\" " +
@@ -1458,6 +1553,11 @@ function renderDetail() {
   }
 
   if (currentTab === "messages") {
+    const autoBtn = el("button", { class:"chip", "aria-pressed":"false", onclick:function () {
+      const on = this.getAttribute("aria-pressed") === "true";
+      this.setAttribute("aria-pressed", String(!on));
+      this.textContent = on ? "自动刷新：关" : "自动刷新：开（5 秒）";
+    } }, "自动刷新：关");
     const host = el("div", { class:"stream" });
     if (!live) host.append(el("div", { class:"empty" }, "未启动，暂无消息"));
     else STREAM.forEach(function (m) {
@@ -1471,7 +1571,8 @@ function renderDetail() {
           m.ok ? "已发布" : (m.reason || "隔离"))));
     });
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "最近收到的消息", el("span", { class:"hint-inline" }, "含探测到的格式、编码与失败原因码")),
+      el("div", { class:"legend" }, "最近收到的消息",
+        el("span", { class:"hint-inline" }, "含探测到的格式、编码与失败原因码"), autoBtn),
       host));
   }
 
@@ -1551,12 +1652,48 @@ $("#detailStart").addEventListener("click", function () {
   current.state = "running"; current.lastSeen = "2 秒前"; current.hourly = 1200;
   renderDetail(); refreshTable(); refreshBanner();
 });
+/* 删除是破坏性操作：必须确认（Graylog 的 ConfirmDialog 模式），确认文案写明后果。 */
+let confirmDelete = false;
 $("#detailDelete").style.display = readOnly ? "none" : "";
 $("#detailDelete").addEventListener("click", function () {
   if (!current) return;
+  if (!confirmDelete) {
+    confirmDelete = true;
+    $("#detailDelete").textContent = "确认删除？（该接入点的事件将从列表消失，历史事件保留）";
+    setTimeout(function () {
+      confirmDelete = false;
+      if ($("#detailDelete")) $("#detailDelete").textContent = "删除";
+    }, 4000);
+    return;
+  }
   CONNECTORS = CONNECTORS.filter(function (x) { return x.id !== current.id; });
   hideSheets(); refreshTable(); refreshBanner();
 });
+
+/* 克隆：同配置新 id（Wazuh/Graylog 均有），syslog 端口 +1 避免冲突，http 令牌重新生成。 */
+const cloneBtn = el("button", { class:"btn btn-outline btn-sm", id:"detailClone", onclick:function () {
+  if (!current) return;
+  const id = "cn_" + Math.random().toString(16).slice(2, 8);
+  const clone = JSON.parse(JSON.stringify(current));
+  clone.id = id;
+  clone.name = current.name + " (副本)";
+  clone.state = "draft";
+  clone.hourly = 0;
+  clone.lastSeen = "从未收到";
+  clone.createdAt = "刚刚";
+  clone.statusSince = undefined;
+  if (clone.channel === "syslog") {
+    clone.cfg.port = String(Number(clone.cfg.port) + 1);
+    clone.binding = "10.41.84.81:" + clone.cfg.port;
+  }
+  if (clone.channel === "http") {
+    clone.token = "ing_live_example555555555555555555";
+    clone.binding = "/api/v1/ingestor/ingest/" + id;
+  }
+  CONNECTORS.unshift(clone);
+  hideSheets(); refreshTable(); refreshBanner();
+} }, "克隆");
+$("#detailDelete").parentNode.insertBefore(cloneBtn, $("#detailDelete"));
 
 /* ---------- 模板详情 ---------- */
 function openTemplate(t) {
