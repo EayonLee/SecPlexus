@@ -260,7 +260,7 @@
       <button class="nav-item" type="button">角色与权限</button>
       <button class="nav-item" type="button" aria-current="page">数据源</button>
       <button class="nav-item nav-sub" type="button" data-view="connectors">接入点</button>
-      <button class="nav-item nav-sub" type="button" data-view="templates">模板目录</button>
+      <button class="nav-item nav-sub" type="button" data-view="templates">解析规则目录</button>
       <button class="nav-item nav-sub" type="button" data-view="metrics">运行指标</button>
     </nav>
   </aside>
@@ -314,19 +314,19 @@
 
 <section class="sheet" id="tplSheet" role="dialog" aria-modal="true" aria-labelledby="tplTitle" aria-hidden="true">
   <div class="sheet-head">
-    <div><h2 id="tplTitle">模板</h2><p id="tplSub"></p></div>
+    <div><h2 id="tplTitle">解析规则</h2><p id="tplSub"></p></div>
     <button class="icon-btn" data-close aria-label="关闭"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   </div>
   <div class="sheet-body" id="tplBody"></div>
   <div class="sheet-foot">
-    <span class="dim" style="font-size:12px">内置模板随二进制分发，只读；要改请提模板变更请求</span>
+    <span class="dim" style="font-size:12px">内置解析规则随二进制分发，只读；要改请提解析规则变更请求</span>
   </div>
 </section>
 
 <script>
 
 /* ==========================================================================
-   原型数据：与 spec 的 connectors 表、模板契约、发布契约一一对应
+   原型数据：与 spec 的 connectors 表、解析规则契约、发布契约一一对应
    ========================================================================== */
 const CHANNELS = {
   http:   { label:"HTTP",   icon:"cloud",  desc:"设备主动推送 JSON／纯文本，Bearer 令牌鉴权，202 表示已受理" },
@@ -334,7 +334,7 @@ const CHANNELS = {
   kafka:  { label:"Kafka",  icon:"layers", desc:"消费客户已有总线，位移只在发布成功后提交" }
 };
 
-/* 18 家内置模板。字段顺序：id,厂商,名称,分组,kind,class_uid,类名,版本,覆盖率,实验性,继承自,
+/* 18 家内置解析规则。字段顺序：id,厂商,名称,分组,kind,class_uid,类名,版本,覆盖率,实验性,继承自,
    severity 字段,severity 表,时间字段,时间格式,常量,disposition */
 function T(id, vendor, name, group, kind, classUid, className, version, coverage, experimental, extendsId,
            severityField, severityMap, timeField, timeFormat, constants, disposition, fields) {
@@ -505,7 +505,7 @@ let CONNECTORS = [
   { id:"cn_3e77b0", name:"实验室 IDS", channel:"syslog", template:"nsfocus-ids",
     binding:"10.41.84.81:5515", state:"running", hourly:2210, fill:0.74, quarantine:4.8,
     lastSeen:"5 秒前", createdAt:"2026-11-08 10:02", statusSince:"2026-11-11 09:40",
-    description:"实验网绿盟 IDS，模板实验性，隔离区偏高",
+    description:"实验网绿盟 IDS，解析规则实验性，隔离区偏高",
     createdBy:"wang_ops",
     cfg:{ port:"5515", protocol:"UDP+TCP", maxBytes:65536, reloadSec:10 },
     publish:{ keyField:"src_endpoint.ip", batch:500, flushMs:2000, lagMs:52, backpressure:false } },
@@ -529,7 +529,7 @@ let CONNECTORS = [
 
 const ISOLATION_REASONS = [
   { code:"parse_error", label:"解析失败", count:147 },
-  { code:"template_missing", label:"找不到模板", count:23 },
+  { code:"template_missing", label:"找不到解析规则", count:23 },
   { code:"oversize_truncated", label:"超限截断", count:11 },
   { code:"encoding_lossy", label:"编码有损替换", count:6 }
 ];
@@ -664,7 +664,7 @@ function parseTime(raw, t) {
   return { value:d.toISOString(), ok:true, note:"RFC3339 → ISO" };
 }
 function parseSeverity(raw, t) {
-  if (!t.severityField) return { value:0, ok:true, note:"模板未声明 severity 字段，0 (Unknown)" };
+  if (!t.severityField) return { value:0, ok:true, note:"解析规则未声明 severity 字段，0 (Unknown)" };
   const v = raw[t.severityField];
   if (v === undefined || v === null) return { value:0, ok:false, note:"源字段缺失，0 (Unknown)" };
   const key = String(v).trim();
@@ -679,7 +679,7 @@ function mapSample(t, rawText) {
   const fmt = detectFormat(rawText);
   const enc = detectEncoding(rawText);
   if (fmt.format !== "JSON") {
-    return { error:"该模板要求 JSON；探测到 " + fmt.format + "（" + fmt.note + "）", fmt:fmt, enc:enc };
+    return { error:"该解析规则要求 JSON；探测到 " + fmt.format + "（" + fmt.note + "）", fmt:fmt, enc:enc };
   }
   let raw;
   try { raw = JSON.parse(rawText); } catch (e) { return { error:"样本不是合法 JSON", fmt:fmt, enc:enc }; }
@@ -745,7 +745,7 @@ function inheritanceChain(t) {
    路由
    ========================================================================== */
 let view = "connectors";
-const VIEW_LABEL = { connectors:"接入点", templates:"模板目录", metrics:"运行指标" };
+const VIEW_LABEL = { connectors:"接入点", templates:"解析规则目录", metrics:"运行指标" };
 function navigate(next) {
   view = next;
   $$(".nav-sub").forEach(function (b) { b.setAttribute("aria-current", b.dataset.view === view ? "page" : "false"); });
@@ -773,8 +773,8 @@ function renderConnectors(host) {
   host.append(el("h1", {}, "接入点"));
   host.append(el("div", { style:"margin-top:14px", id:"banner" }));
 
-  const search = el("input", { type:"search", value:query, placeholder:"搜索名称、模板或 OCSF 类",
-    "aria-label":"搜索名称、模板或 OCSF 类",
+  const search = el("input", { type:"search", value:query, placeholder:"搜索名称、解析规则或 OCSF 类",
+    "aria-label":"搜索名称、解析规则或 OCSF 类",
     oninput:function(e){ query = e.target.value; page = 0; refreshTable(); } });
   const channelBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
     const order = ["all","http","syslog","kafka"];
@@ -806,7 +806,7 @@ function renderConnectors(host) {
     el("table", {},
       el("thead", {}, el("tr", {},
         el("th", { style:"width:23%" }, "名称"), el("th", { style:"width:9%" }, "通道"),
-        el("th", { style:"width:21%" }, "模板"), el("th", { style:"width:22%" }, "接入地址"),
+        el("th", { style:"width:21%" }, "解析规则"), el("th", { style:"width:22%" }, "接入地址"),
         el("th", { style:"width:13%" }, "状态"), el("th", { style:"width:12%" }, "操作"))),
       el("tbody", { id:"rows" }))));
   host.append(el("div", { id:"pager", style:"margin-top:12px" }));
@@ -841,7 +841,7 @@ function refreshBanner() {
   if (!CONNECTORS.length) {
     host.append(el("div", { style:"margin-top:14px" },
       el("div", { class:"callout" }, el("span", { html:ICON.info }),
-        "还没有接入点。点右上角「接入数据源」开始；向导会在启用前用真实样本验证模板映射。")));
+        "还没有接入点。点右上角「接入数据源」开始；向导会在启用前用真实样本验证解析规则映射。")));
     return;
   }
   if (!groups.length) return;
@@ -905,11 +905,11 @@ function refreshTable() {
       onclick:function(){ page++; refreshTable(); } }, "下一页")));
 }
 
-/* ---------- 视图：模板目录 ---------- */
+/* ---------- 视图：解析规则目录 ---------- */
 let tplGroup = "全部";
 let tplKind = "全部";
 function renderTemplates(host) {
-  host.append(el("h1", {}, "模板目录"));
+  host.append(el("h1", {}, "解析规则目录"));
   host.append(el("div", { class:"dim", style:"margin-top:4px;font-size:12.5px" },
     "内置 " + TEMPLATES.length + " 家，随二进制分发、只读。覆盖率来自最近 24 小时真实样本的字段填充率。"));
 
@@ -1015,10 +1015,10 @@ function renderMetrics(host) {
 }
 
 /* ==========================================================================
-   向导：通道 → 模板 → 绑定(限流/上限/热重载/消费组) → 样本验证 → 启动与诊断
+   向导：通道 → 解析规则 → 绑定(限流/上限/热重载/消费组) → 样本验证 → 启动与诊断
    ========================================================================== */
-/* 顺序依据 Splunk Add Data：Set Source Type（带预览验证）在 Input Settings 之前，解析确认发生在基础设施配置之前，模板不匹配时还没白做任何配置。 */
-const STEP_TITLES = ["模板", "样本验证", "通道", "绑定与凭据", "启动与诊断"];
+/* 顺序依据 Splunk Add Data：Set Source Type（带预览验证）在 Input Settings 之前，解析确认发生在基础设施配置之前，解析规则不匹配时还没白做任何配置。 */
+const STEP_TITLES = ["解析规则", "样本验证", "通道", "绑定与凭据", "启动与诊断"];
 let step = 0;
 let verifyResult = null;
 let openSheetRef = null;
@@ -1076,7 +1076,7 @@ function renderWizardBody() {
   body.replaceChildren();
 
   if (step === 2) {
-    $("#wizardSub").textContent = "通道决定数据怎么到达；模板决定内容怎么解析，两者独立";
+    $("#wizardSub").textContent = "通道决定数据怎么到达；解析规则决定内容怎么解析，两者独立";
     const grid = el("div", { class:"option-grid" });
     Object.keys(CHANNELS).forEach(function (key) {
       const c = CHANNELS[key];
@@ -1091,7 +1091,7 @@ function renderWizardBody() {
   }
 
   if (step === 0) {
-    $("#wizardSub").textContent = "先选厂商模板；下一步用真实样本验证，不通过可换或走通用回退";
+    $("#wizardSub").textContent = "先选厂商解析规则；下一步用真实样本验证，不通过可换或走通用回退";
     const list = el("div", { class:"template-list" });
     TEMPLATES.forEach(function (t) {
       list.append(el("button", { class:"template-row", "aria-pressed":String(draft.template === t.id),
@@ -1107,16 +1107,16 @@ function renderWizardBody() {
     });
     const tr = draft.template ? tpl(draft.template) : null;
     body.append(el("div", { class:"fieldset" },
-      el("div", { class:"legend" }, "模板"), list,
+      el("div", { class:"legend" }, "解析规则"), list,
       tr && tr.experimental
         ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-            "实验性模板：厂商格式无公开规范，覆盖率 " + Math.round(tr.coverage * 100) +
+            "实验性解析规则：厂商格式无公开规范，覆盖率 " + Math.round(tr.coverage * 100) +
             "%。未映射字段进 event.unmapped，解析失败进隔离区并计原因码。")
         : null));
   }
 
   if (step === 3) {
-    $("#wizardSub").textContent = "绑定接入方式与限额；通道创建后不可变，模板可换";
+    $("#wizardSub").textContent = "绑定接入方式与限额；通道创建后不可变，解析规则可换";
     body.append(el("div", { class:"field", style:"max-width:340px" },
       el("label", { for:"cnName" }, "数据源名称"),
       el("input", { id:"cnName", value:draft.name, placeholder:"例如 边界防火墙",
@@ -1235,7 +1235,7 @@ function renderWizardBody() {
 
     if (draft.genericFallback) {
       body.append(el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-        "通用回退：原文进 message、不做字段映射（class_uid 6003）。接入不会被堵死；后续可在详情里换成正式模板，从下一条消息起生效。"));
+        "通用回退：原文进 message、不做字段映射（class_uid 6003）。接入不会被堵死；后续可在详情里换成正式解析规则，从下一条消息起生效。"));
     } else if (verifyResult) {
       const r = verifyResult;
       const detect = el("dl", { class:"panel" },
@@ -1243,7 +1243,7 @@ function renderWizardBody() {
           el("dd", {}, r.fmt.format + "（" + r.fmt.note + "）")),
         el("div", { class:"panel-row" }, el("dt", {}, "编码"),
           el("dd", {}, r.enc.encoding + (r.enc.lossy ? " · 有损，metadata.encoding 会记录" : ""))),
-        el("div", { class:"panel-row" }, el("dt", {}, "模板"),
+        el("div", { class:"panel-row" }, el("dt", {}, "解析规则"),
           el("dd", {}, t.id + " v" + t.version)),
         el("div", { class:"panel-row" }, el("dt", {}, "继承链"),
           el("dd", { class:"mono" }, inheritanceChain(t).map(function (x) { return x.id; }).join(" → "))));
@@ -1260,7 +1260,7 @@ function renderWizardBody() {
         body.append(el("div", { style:"display:flex;gap:8px;flex-wrap:wrap" },
           el("button", { class:"btn btn-outline btn-sm", onclick:function(){
             step = 0; renderSteps(); renderWizardBody();
-          } }, "← 换一个模板"),
+          } }, "← 换一个解析规则"),
           el("button", { class:"btn btn-sm", onclick:function(){
             draft.genericFallback = true; renderWizardBody();
           } }, "改用通用接入（原文透传）")));
@@ -1340,7 +1340,7 @@ function renderWizardBody() {
     const dl = el("dl", { class:"kv" },
       el("dt", {}, "名称"), el("dd", { style:"font-weight:600" }, draft.name || "未命名接入点"),
       el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
-      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version + (draft.genericFallback ? "（通用回退生效中）" : "")),
+      el("dt", {}, "解析规则"), el("dd", {}, t.name + " · v" + t.version + (draft.genericFallback ? "（通用回退生效中）" : "")),
       el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
       el("dt", {}, "接入地址"), el("dd", {}, codeBox(bindAddr)));
     cfgRows.forEach(function (r) { dl.append(el("dt", {}, r[0]), el("dd", {}, r[1])); });
@@ -1362,7 +1362,7 @@ function renderWizardBody() {
             "可以创建。创建后处于「待启动」，启动才会绑定端口并开始计入接收速率。")
         : draft.genericFallback
           ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-              "通用回退模式：原文透传 message，不做字段映射。可以创建；后续在详情里换正式模板。")
+              "通用回退模式：原文透传 message，不做字段映射。可以创建；后续在详情里换正式解析规则。")
           : el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
               "尚未通过样本验证，建议返回上一步确认映射后再创建。")));
 
@@ -1386,7 +1386,7 @@ function defaultSample(t) {
     const dst = t.fieldMap[k];
     s[k] = /\.port$/.test(dst) ? 443 + i : (i === 0 ? "10.20.3.44" : "值-" + (i + 1));
   });
-  s["extra_field"] = "该厂商独有，模板未映射";
+  s["extra_field"] = "该厂商独有，解析规则未映射";
   return JSON.stringify(s, null, 2);
 }
 
@@ -1448,7 +1448,7 @@ let currentTab = "overview";
 const STREAM = [
   { t:"20:31:04", ok:true, fmt:"JSON", enc:"UTF-8", msg:"检测到 SQL 注入攻击 · 10.20.3.44 → 10.20.9.7:443" },
   { t:"20:31:02", ok:true, fmt:"JSON", enc:"UTF-8", msg:"Web 攻击被阻断 · 198.51.100.7 → 10.20.9.7:443" },
-  { t:"20:30:58", ok:false, fmt:"CEF", enc:"GB18030", reason:"parse_error", msg:"CEF 扩展键未转义，模板无法匹配" },
+  { t:"20:30:58", ok:false, fmt:"CEF", enc:"GB18030", reason:"parse_error", msg:"CEF 扩展键未转义，解析规则无法匹配" },
   { t:"20:30:55", ok:true, fmt:"JSON", enc:"UTF-8", msg:"域控账户非工作时段异常登录 · CN-SH-DC01" },
   { t:"20:30:51", ok:false, fmt:"JSON", enc:"UTF-8", reason:"oversize_truncated", msg:"单条 71 KiB，截断到 64 KiB" },
   { t:"20:30:47", ok:true, fmt:"JSON", enc:"UTF-8", msg:"端口扫描 · 10.20.8.12 → 10.20.9.0/24" }
@@ -1491,7 +1491,7 @@ function renderDetail() {
     const dl = el("dl", { class:"kv" },
       el("dt", {}, "接入地址"), el("dd", {}, codeBox(c.binding)),
       el("dt", {}, "通道"), el("dd", {}, CHANNELS[c.channel].label),
-      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version + " · " + t.vendor),
+      el("dt", {}, "解析规则"), el("dd", {}, t.name + " · v" + t.version + " · " + t.vendor),
       el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
       el("dt", {}, "状态"), el("dd", {},
         stateBadge(c.state),
@@ -1515,7 +1515,7 @@ function renderDetail() {
       dl.append(el("dt", {}, "提交"), el("dd", {}, c.cfg.commit));
     }
     body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入信息"), dl));
-    /* 更换模板：解析规则可在运行中的接入点上换——Graylog 在运行 input 上管理
+    /* 更换解析规则：解析规则可在运行中的接入点上换——Graylog 在运行 input 上管理
        extractors/pipelines，下一条消息起生效；Splunk 覆盖只影响新数据。
        通道不可换：端口/令牌/消费组是基础设施绑定。 */
     if (!readOnly) {
@@ -1536,9 +1536,9 @@ function renderDetail() {
       });
       const swapBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function () {
         swapList.style.display = swapList.style.display === "none" ? "" : "none";
-      } }, "更换模板");
+      } }, "更换解析规则");
       body.append(el("div", { class:"fieldset" },
-        el("div", { class:"legend" }, "解析模板",
+        el("div", { class:"legend" }, "解析解析规则",
           el("span", { class:"hint-inline" }, "可更换 · 从下一条消息起生效，已发布事件不变")),
         swapBtn, swapList));
     }
@@ -1586,7 +1586,7 @@ function renderDetail() {
       fixes.push("确认设备侧填写的是 " + c.binding + "，不是前端代理地址。");
       fixes.push("若中间有 rsyslog 中继，源 IP 会变成中继地址；归属只按端口判定，不受影响。");
     }
-    if (c.quarantine > 2) fixes.push("隔离区 " + c.quarantine.toFixed(1) + "%，检查模板 severity_map 是否缺档位。");
+    if (c.quarantine > 2) fixes.push("隔离区 " + c.quarantine.toFixed(1) + "%，检查解析规则 severity_map 是否缺档位。");
     if (c.channel === "syslog" && Number(c.cfg.port) < 1024) fixes.push("端口低于 1024 需要特权或 cap_net_bind_service。");
     if (!fixes.length) fixes.push("未发现需要处理的项。");
     body.append(el("div", { class:"fieldset" },
@@ -1738,7 +1738,7 @@ const cloneBtn = el("button", { class:"btn btn-outline btn-sm", id:"detailClone"
 } }, "克隆");
 $("#detailDelete").parentNode.insertBefore(cloneBtn, $("#detailDelete"));
 
-/* ---------- 模板详情 ---------- */
+/* ---------- 解析规则详情 ---------- */
 function openTemplate(t) {
   $("#tplTitle").textContent = t.name;
   $("#tplSub").textContent = t.vendor + " · v" + t.version + " · " + t.group +

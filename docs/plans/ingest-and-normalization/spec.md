@@ -8,7 +8,7 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 
 - **通道与格式是两个维度**。通道 = syslog / HTTP / Kafka；格式 = JSON / CEF / LEEF / KV / 厂商私有。行业命名一致：Vector `http_server`、Fluent Bit `http`、Logstash `http`；webhook 是用法不是协议，对外文档与配置一律叫 HTTP。
 - **映射层没有行业标准 DSL**。`ocsf/examples` 原文 "by no means a 'gold standard'"，按各自 DSL 分目录；`ocsf-java-tools` 的 `@move/@copy` JSON 规则文档仍标 DRAFT。各项目的实际形态是「声明式内核 + 表达式逃生舱」：Elastic processors + Painless、Fluent Bit modify + Lua、Logstash filters + ruby、Cribl Eval + Code。纯声明式（Splunk props/transforms、Wazuh XML）也存在，但 Wazuh 是 GPLv2 不能抄。
-- **OCSF 字段命名是标准，提升规则不是**。`severity_id`/`class_uid` 是 OCSF required 字段（枚举 0–6 + 99 Other）；但 OCSF 官方在 1.4 专门加了 `is_alert`（recommended）让**生产者声明**「这条要人看」，并明确反对从 severity 推断（原文反例：恶意软件被拦截，severity 可以很低但仍是可告警信号）。AiSOC 的 `class_uid//1000==2 || severity_id>=4` 是其本地策略，且其 17 个模板中 12 个把 `class_uid` 写死为已废弃的 2001——「类别」实际是模板作者手写的常量，不是从数据推导的。结论：告警性声明放数据源配置，不放在接入层猜。本计划不实现提升，只保证事件携带可供 correlator 使用的字段。
+- **OCSF 字段命名是标准，提升规则不是**。`severity_id`/`class_uid` 是 OCSF required 字段（枚举 0–6 + 99 Other）；但 OCSF 官方在 1.4 专门加了 `is_alert`（recommended）让**生产者声明**「这条要人看」，并明确反对从 severity 推断（原文反例：恶意软件被拦截，severity 可以很低但仍是可告警信号）。AiSOC 的 `class_uid//1000==2 || severity_id>=4` 是其本地策略，且其 17 个模板（AiSOC 自己的叫法）中 12 个把 `class_uid` 写死为已废弃的 2001——「类别」实际是模板作者手写的常量，不是从数据推导的。结论：告警性声明放数据源配置，不放在接入层猜。本计划不实现提升，只保证事件携带可供 correlator 使用的字段。
 - **接收路径不写库**。ClickHouse 官方文档明确 Kafka 表引擎存在静默丢行窗口（offset 先于 fsync 提交，"rows are lost with no error"），且 `kafka_handle_error_mode=default` 下一条坏消息可阻塞消费者引发 rebalance 风暴。因此 ingestor 只做「收 → 解析 → 发 Kafka」，不碰任何数据库；ClickHouse 由下游消费方写入。
 - **syslog 无身份，绑定必须来自服务端**。syslog 没有认证与 header，报文内任何 tenant 字段都是可伪造的（AiSOC `syslog/sink.go` 注释：tenant 只能来自预配置 token）。绑定方式 = 一个监听端口绑一个数据源，与「接入时由用户选择/登记接入点」的交互一致，不需要独立组件，也不依赖 SO_REUSEPORT（跨 OS/内核不可控，已否决）。
 - **解析库用现成的，不自研**：`leodido/go-syslog/v4`（MIT，RFC5424/3164 + RFC6587 两种分帧）、`ubyte-source/go-cef`（Apache 2.0，零分配，35+ 厂商样本）、`golang.org/x/text`（已在依赖树，GBK/GB18030/Big5/Shift-JIS）。Kafka 客户端 `segmentio/kafka-go`（AiSOC 同款，纯 Go）。
@@ -19,9 +19,9 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 
 1. `ingestor` 服务骨架：`src/apps/ingestor`，Go + Gin，模块自有 `config.yaml`、迁移与启动，经 `iamclient` 接入 IAM。
 2. 三种通道：HTTP 接收、syslog 监听（UDP+TCP）、Kafka 消费转发，全部产出 OCSF 事件。
-3. 解析层：格式探测（JSON/CEF/LEEF/KV/纯文本）+ 厂商 YAML 模板映射（dot-path、severity 值表、常量、时间/消息字段、`kind` 声明），未映射字段进 `unmapped`。
+3. 解析层：格式探测（JSON/CEF/LEEF/KV/纯文本）+ 厂商 YAML 解析规则映射（dot-path、severity 值表、常量、时间/消息字段、`kind` 声明），未映射字段进 `unmapped`。
 4. 发布层：批量写 Kafka topic `spx.ingest.event`，分区键为实体标识，背压阻塞不丢数据。
-5. 数据源注册（connectors）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与模板在注册时落定。
+5. 数据源注册（connectors）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与解析规则在注册时落定。
 6. 可观测：结构化日志 + 指标（接收速率、解析失败、映射告警、发布延迟/失败）。
 
 明确不做：
@@ -29,7 +29,7 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 - 告警提升、去重、合并、攻击链——correlator 的职责。
 - 写 ClickHouse / PostgreSQL 业务数据——ingestor 不碰业务库；connector 注册表属自身模块表。
 - OTLP 通道、客户侧 agent/采集器、API 主动拉取（poll/fetch）——后续需求。
-- 面向客户的脚本引擎（Lua/JS）或图灵完备 DSL——声明式模板 + Go 内置解析器覆盖第一版全部 18 家厂商；模板语言的表达力边界见行为契约。
+- 面向客户的脚本引擎（Lua/JS）或图灵完备 DSL——声明式解析规则 + Go 内置解析器覆盖第一版全部 18 家厂商；解析规则语言的表达力边界见行为契约。
 - SO_REUSEPORT、syslog-relay 组件——多实例由部署侧 LB 解决。
 - raw payload 落对象存储——第一版仅在事件上带 `raw_data` 摘要字段，完整 raw 归档与对象存储对接另立计划。
 
@@ -61,14 +61,20 @@ ingestor 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、
 
 ### 通道三：Kafka 消费
 
-- 从已注册的 Kafka 接入点消费外部 topic（客户已有总线场景）；一条接入点 = 一组 brokers + topic + 反序列化模板。
+- 从已注册的 Kafka 接入点消费外部 topic（客户已有总线场景）；一条接入点 = 一组 brokers + topic + 反序列化解析规则。
 - 消费组 `spx-ingestor-<connector_id>`，`offset_reset=earliest`，手动提交：仅当该批事件**已成功发布**到 `spx.ingest.event` 才提交位移。
-- 无消息身份，模板与接入方式完全来自接入点注册（与 syslog 同语义）。
+- 无消息身份，解析规则与接入方式完全来自接入点注册（与 syslog 同语义）。
 
 ### 解析与映射
 
-- 格式探测顺序：JSON → CEF → LEEF → KV（`k=v` 多分隔符）→ 纯文本（整体作 message）。
-- 厂商模板（YAML，仓库内置、随二进制分发）：
+解析分两部分，职责不重叠：
+
+- **解析引擎 = 代码**（`internal/normalizer` 包，随二进制发布）：格式探测、dot-path 求值、severity 归一、时间解析、`unmapped` 收集。引擎不含有任何厂商知识。
+- **解析规则 = 数据**（per-vendor YAML，`go:embed` 内置，加载即 schema 校验）：描述某家厂商的字段怎么映射。换规则不动代码；引擎升级，全部规则受益。
+
+引擎的格式探测顺序：JSON → CEF → LEEF → KV（`k=v` 多分隔符）→ 纯文本（整体作 message）。「通用接入」= 不挂规则运行引擎：只做格式探测与原文透传，字段映射留空。
+
+厂商解析规则（YAML，仓库内置、随二进制分发）：
 
 ```yaml
 id: sangfor-af
@@ -89,11 +95,11 @@ constants:
 ```
 
 - `field_map` 值为字符串（直映射）或对象（`set` 目标 + `type` 转换 + 可选 `default`）；两侧 dot-path，数组下标 `x[0]`。
-- 模板可 `extends: base-json` 继承公共映射，逐键覆盖。
+- 解析规则可 `extends: base-json` 继承公共映射，逐键覆盖。
 - 未知字段收集进 OCSF `unmapped`，一条不丢。
 - `kind: detection` 的源若携带厂商自有告警语义，映射目标类为 `detection_finding (2004)` 并保留源告警字段到 `finding_info`；**不使用已废弃的 2001**。厂商自带阻断/放行类事件按官方建议带 `security_control` profile 语义（`disposition` 字段），是否成告警由 correlator 决定。
-- 模板加载即校验（schema + class_uid/severity 值域），非法模板启动失败，不静默降级。
-- 18 家内置模板（10 国产 + 5 国外 + 3 云）作为交付物；每家配 5–10 条真实样本的回归测试。
+- 解析规则加载即校验（schema + class_uid/severity 值域），非法解析规则启动失败，不静默降级。
+- 18 家内置解析规则（10 国产 + 5 国外 + 3 云）作为交付物；每家配 5–10 条真实样本的回归测试。
 
 ### 发布
 
@@ -104,19 +110,19 @@ constants:
 
 ### 隔离区
 
-- 解析失败、模板缺失、超限截断的事件进入 `spx.ingest.quarantine` topic（附失败原因码）；不阻塞主流程，有计数指标。
+- 解析失败、解析规则缺失、超限截断的事件进入 `spx.ingest.quarantine` topic（附失败原因码）；不阻塞主流程，有计数指标。
 
 ### 数据源注册（connectors）
 
-- 模块自有表 `ingestor.connectors`：`id, name, kind(http|syslog|kafka), template_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
-- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/换模板），用户会话鉴权走 IAM；通道类型创建后不可变（端口/令牌/消费组是基础设施绑定），模板可更换——换后从下一条消息起生效，已发布事件不变（依据 Graylog 在运行中的 input 上管理 extractors/pipelines；Splunk 覆盖只影响新数据）。
+- 模块自有表 `ingestor.connectors`：`id, name, kind(http|syslog|kafka), rule_set_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
+- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/），用户会话鉴权走 IAM；通道类型创建后不可变（端口/令牌/消费组是基础设施绑定），解析规则可更换——换后从下一条消息起生效，已发布事件不变（依据 Graylog 在运行中的 input 上管理 extractors/pipelines；Splunk 覆盖只影响新数据）。
 - 权限点：`ingestor.connectors.read` / `ingestor.connectors.manage`，进 IAM 扁平权限目录（delegable 集中评审）。
 
 ## 验收
 
-- 单元（表驱动）：格式探测边界；dot-path 读写含数组；severity 值表（含中文档位、数字 0–10 档、大小写归一）；时间解析（unix_ms/rfc3339/失败置 null）；模板继承与覆盖；`unmapped` 收集；`event_id` 确定性。
+- 单元（表驱动）：格式探测边界；dot-path 读写含数组；severity 值表（含中文档位、数字 0–10 档、大小写归一）；时间解析（unix_ms/rfc3339/失败置 null）；解析规则继承与覆盖；`unmapped` 收集；`event_id` 确定性。
 - 集成（真实组件）：HTTP token 鉴权允许/拒绝两侧；限流触发 429 与 Redis 故障拒绝；syslog UDP/TCP 收包→发布（真实端口绑定、两种分帧）；Kafka 消费位移只在发布成功后提交；`spx.ingest.event` 分区键保序；connector 注册→监听热重载。
-- 模板回归：18 家模板各 5–10 条样本，断言关键字段映射与 severity；映射填充率报表生成。
+- 解析规则回归：18 家解析规则各 5–10 条样本，断言关键字段映射与 severity；映射填充率报表生成。
 - 不以 mock Kafka/mock Redis 证明发布与限流语义。
 
 ## 原型
@@ -132,7 +138,7 @@ constants:
 | 创建 ≠ 运行 | Graylog [Set Up an Input](https://go2docs.graylog.org/current/getting_in_log_data/setup_an_input.htm)："not in a running state until after you complete the Input Setup Wizard" | 创建后为「待启动」；启动才绑端口、才计速率 |
 | 诊断页的固定结构 | Graylog [Input Diagnosis](https://go2docs.graylog.org/current/getting_in_log_data/input_diagnosis.htm)：Information / State（含 bind 失败原文）/ Received Traffic / Errors / 内建排障建议 | 抽屉「诊断」页签 + 状态相关的「建议」 |
 | 能看原始 → 解析的对照 | Graylog Show received messages | 抽屉「收到的消息」：时间、摘要、格式、编码、已发布/隔离+原因码 |
-| 模板按版本管理 | Elastic [Agent policies](https://www.elastic.co/docs/reference/fleet/agent-policy)："settings depend on the version of the integration"；Graylog Illuminate packs | 模板目录显示 `v3.2.1`、覆盖率、继承链 |
+| 解析规则按版本管理 | Elastic [Agent policies](https://www.elastic.co/docs/reference/fleet/agent-policy)："settings depend on the version of the integration"；Graylog Illuminate packs | 解析规则目录显示 `v3.2.1`、覆盖率、继承链 |
 | 绑定错误提前暴露 | Graylog 把 bind 失败与 <1024 端口列为头号故障 | 绑定步骤即时校验端口占用并禁用下一步 |
 
 ### 二、契约 → 界面 对照
@@ -142,9 +148,9 @@ constants:
 | 统一响应 `{code,message,data,request_id}` | 验证失败提示带 `code=… request_id=…` |
 | 权限点 `connectors.read` / `manage` | 工具栏身份切换；只读时隐藏「接入数据源」与行内启停，并提示缺少 manage |
 | 通道 = HTTP／syslog／Kafka | 向导第 3 步三张卡 |
-| 向导顺序：解析验证在基础设施配置之前 | Splunk Add Data：Set Source Type（预览）→ Input Settings → Review | 向导第 1→5 步：模板→验证→通道→绑定→启动 |
-| 验证失败有出路，不堵死 | Splunk："If none of the existing source types fits…create a new one" | 验证失败出现「换模板」「通用接入（原文透传）」两个按钮 |
-| 模板创建后可换 | Graylog extractors 在运行 input 上增删改，下一条消息起生效 | 详情概览「更换模板」；通道不可换 |
+| 向导顺序：解析验证在基础设施配置之前 | Splunk Add Data：Set Source Type（预览）→ Input Settings → Review | 向导第 1→5 步：解析规则→验证→通道→绑定→启动 |
+| 验证失败有出路，不堵死 | Splunk："If none of the existing source types fits…create a new one" | 验证失败出现「」「通用接入（原文透传）」两个按钮 |
+| 解析规则创建后可换 | Graylog extractors 在运行 input 上增删改，下一条消息起生效 | 详情概览「更」；通道不可换 |
 | HTTP：Bearer 令牌、摘要存储、只显示一次 | 第 4 步令牌区（带说明）；详情「概览」可轮换，轮换后旧令牌失效 |
 | HTTP：限流 50/s、突发 200、Redis 故障拒绝 | 第 4 步两个输入 + 固定策略说明（不提供开关） |
 | HTTP：10 MiB、单批 1000、415、202 | 第 4 步上限输入 + Content-Type 多选；说明 413/415/202/异步语义 |
@@ -154,11 +160,11 @@ constants:
 | Kafka：消费组、earliest、发布成功才提交 | 第 4 步只读面板三条；详情「概览」与「发布·消费位移」 |
 | 格式探测 JSON→CEF→LEEF→KV→文本 | 第 2 步「探测结果」面板显示探测到哪种格式及依据 |
 | 编码 UTF-8 → GB18030 → replace | 同面板显示编码结论；有损时提示会被 `metadata.encoding` 记录 |
-| 模板 `extends` 继承逐键覆盖 | 第 2 步「继承链」；模板详情「契约」行 |
-| 模板 `kind` / `class_uid` / 不用废弃 2001 | 模板目录与详情显示 `class_uid`+`className`+`kind`（detection → 2004） |
+| 解析规则 `extends` 继承逐键覆盖 | 第 2 步「继承链」；解析规则详情「契约」行 |
+| 解析规则 `kind` / `class_uid` / 不用废弃 2001 | 解析规则目录与详情显示 `class_uid`+`className`+`kind`（detection → 2004） |
 | `severity_map`、`time_formats` 失败置 null/0 | 第 2 步映射表逐行给出"未识别档位→0 + warning""时间字段缺失→null" |
-| `constants` | 模板详情「常量」表 |
-| security_control `disposition` | 模板详情「disposition」行；模板声明时映射表出现 `disposition` 行 |
+| `constants` | 解析规则详情「常量」表 |
+| security_control `disposition` | 解析规则详情「disposition」行；解析规则声明时映射表出现 `disposition` 行 |
 | 未知字段进 `unmapped` | 第 2 步未映射提示并列名；「映射质量」页签统计未映射 Top |
 | 发布：单一出口 topic | 「运行指标」出口卡 + 详情「发布」 |
 | 发布：分区键优先级与保序 | 第 2 步「分区键」行（实体值或回退链）；「发布」页签分区键 + 最近批次分区 |
@@ -168,7 +174,7 @@ constants:
 | 隔离区 + 原因码 | 「运行指标」原因码表；「收到的消息」行内原因码 |
 | 可观测：接收速率／解析失败／隔离积压／发布延迟 | 「运行指标」五个 KPI + 按通道表 + 分区键分布 |
 | connectors 列表/启停/换令牌/换绑定 | 列表行内启停；详情概览可轮换令牌、重载绑定 |
-| 模板加载即校验，非法模板启动失败 | 模板详情「校验：通过」并注明校验范围 |
+| 解析规则加载即校验，非法解析规则启动失败 | 解析规则详情「校验：通过」并注明校验范围 |
 
 ### 三、界面不表达的（与理由）
 
@@ -181,7 +187,7 @@ constants:
 
 - Elastic 的 agent policy：我们的接入对象是通道不是主机，没有 agent，多一层空 policy。
 - Cribl 的 devnull pipeline 抓样：依赖 pipeline 概念，本计划没有。
-- 图灵完备的映射编辑器：模板保持声明式 YAML，原型只让人看见映射结果。
+- 图灵完备的映射编辑器：解析规则保持声明式 YAML，原型只让人看见映射结果。
 
 ### 五、第二轮源码对照（Wazuh / Graylog / OpenCTI）
 
@@ -200,24 +206,24 @@ constants:
 
 不采纳的：Wazuh 的 enrollment token 有效期/次数（我们的 HTTP token 是长期凭证，轮换即撤销，模型不同）；Graylog 的多节点状态矩阵（v1 单实例）；OpenCTI 的 notification_delay 防抖（后端指标聚合才有意义，界面层不做）。
 
-### 六、第三轮对照：向导链路与模板可换（用户质疑驱动）
+### 六、第三轮对照：向导链路与解析规则可换（用户质疑驱动）
 
-用户质疑原链路「通道→模板→绑定→验证」：选了模板但样本验证不通过怎么办？没匹配模板是不是就接不进来了？核对三家后的修正：
+用户质疑原链路「通道→解析规则→绑定→验证」：选了解析规则但样本验证不通过怎么办？没匹配解析规则是不是就接不进来了？核对三家后的修正：
 
 | 问题 | 出处 | 修正 |
 |---|---|---|
-| 验证放在最后，模板不匹配时基础设施配置已白做 | Splunk Add Data 步骤顺序（Select Source → Set Source Type 预览验证 → Input Settings → Review），原文 "If you're satisfied with the results, click Next to proceed to the Inputs Settings page" | 向导重排：模板 → 样本验证 → 通道 → 绑定 → 启动 |
-| 验证硬挡，18 家不匹配即死路 | Splunk："If none of the existing source types fits the needs of your data, create a new one" | 验证失败给出路：换模板，或「通用接入」回退——原文透传 message、不做字段映射（class_uid 6003），接入永不被堵死 |
-| 模板绑定创建后不可变，选错只能删了重建 | Graylog [Extractors](https://docs.graylog.org/docs/extractors)：在运行中的 input 上管理，"The next messages coming in should already include the extracted fields"；Splunk 覆盖只影响新数据 | 通道不可变（基础设施绑定）；模板可换，从下一条消息起生效，已发布事件不变 |
-| 模板能否替代通道 | Elastic 的 integration 捆绑采集与解析，但那依赖发 agent；我们无 agent，传输必须人选（Vector/Splunk/Graylog 均两维度分离） | 模板与通道保持两个独立维度；模板决定解析，通道决定传输 |
+| 验证放在最后，解析规则不匹配时基础设施配置已白做 | Splunk Add Data 步骤顺序（Select Source → Set Source Type 预览验证 → Input Settings → Review），原文 "If you're satisfied with the results, click Next to proceed to the Inputs Settings page" | 向导重排：解析规则 → 样本验证 → 通道 → 绑定 → 启动 |
+| 验证硬挡，18 家不匹配即死路 | Splunk："If none of the existing source types fits the needs of your data, create a new one" | 验证失败给出路：，或「通用接入」回退——原文透传 message、不做字段映射（class_uid 6003），接入永不被堵死 |
+| 解析规则绑定创建后不可变，选错只能删了重建 | Graylog [Extractors](https://docs.graylog.org/docs/extractors)：在运行中的 input 上管理，"The next messages coming in should already include the extracted fields"；Splunk 覆盖只影响新数据 | 通道不可变（基础设施绑定）；解析规则可换，从下一条消息起生效，已发布事件不变 |
+| 解析规则能否替代通道 | Elastic 的 integration 捆绑采集与解析，但那依赖发 agent；我们无 agent，传输必须人选（Vector/Splunk/Graylog 均两维度分离） | 解析规则与通道保持两个独立维度；解析规则决定解析，通道决定传输 |
 
 ### 七、验收口径
 
-原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断模板能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
+原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断解析规则能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
 
 ## 后续（不在本计划）
 
 - raw payload 完整归档到对象存储与 `raw_uri`/`raw_hash` 引用。
 - correlator：消费 `spx.ingest.event` → 写 ClickHouse（批量 fail-soft）→ D1/D2/D3 → 告警进 PG。
-- Console 页面：数据源接入向导（选通道 → 选模板 → 出地址/token → 连通性自检）。
-- AI 辅助生成模板：给定样本日志产出候选 YAML，人工评审入库；表达式逃生舱（CEL）在出现真实需求时评估。
+- Console 页面实施：接入向导已定稿为五步（选解析规则 → 样本验证 → 选通道 → 绑定 → 启动与诊断），按 prototype.html 落地。
+- AI 辅助生成解析规则：给定样本日志产出候选 YAML，人工评审入库；表达式逃生舱（CEL）在出现真实需求时评估。
