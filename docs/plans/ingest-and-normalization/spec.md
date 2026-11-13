@@ -180,6 +180,23 @@ constants:
 - Cribl 的 devnull pipeline 抓样：依赖 pipeline 概念，本计划没有。
 - 图灵完备的映射编辑器：模板保持声明式 YAML，原型只让人看见映射结果。
 
+### 四点五、第二轮源码对照（Wazuh / Graylog / OpenCTI）
+
+对三家开源实现的前端源码逐文件核对后补齐的交互：
+
+| 缺口 | 出处（源码/文档证据） | 落成 |
+|---|---|---|
+| 状态机过于简单（4 态） | Graylog `InputStateBadge.tsx`：RUNNING/STARTING/FAILED/FAILING/STOPPED+未运行；Wazuh agent：never_connected/pending | 扩到 8 态：draft/starting/running/pending（从未收到）/silent/degraded（隔离率超阈）/failed（保留 bind 原文）/stopped |
+| 横幅只是提示，不可操作 | Graylog `InputsNotifications.tsx`：横幅条目点击即给表格加 `runtime_status` 过滤 | 横幅每个条目可点，点击即设状态过滤器 |
+| 设备侧配置靠人拼 | Wazuh `agent-deploy-one-liner.md`：向导生成可直接复制的部署命令 | 向导第 3 步按通道生成 rsyslog/syslog-ng/curl/producer 配置片段，带复制按钮 |
+| 缺接入点元数据 | OpenCTI `ingestion-types.ts`：每个源带 description/user_id/last_execution_date+status | 概览页显示描述、创建人、状态持续时间；token 显示最近使用时间 |
+| 删除无确认 | Graylog `InputsActions.tsx`：DeleteMenuItem + ConfirmDialog | 删除需二次确认，文案写明后果（历史事件保留） |
+| 无克隆 | Graylog/Wazuh 均有同配置复制 | 克隆按钮：syslog 端口 +1 避冲突、http 令牌重生成、状态回待启动 |
+| 消息流无自动刷新 | Graylog Show received messages 轮询 | 「收到的消息」页签加自动刷新开关（5 秒） |
+| 健康结论没有派生 | OpenCTI `ingestionHealth-types.ts`：status/status_since/health_checks/notification_delay | 概览显示派生结论（隔离率 >2% → 质量降级）+ 状态起始时间 |
+
+不采纳的：Wazuh 的 enrollment token 有效期/次数（我们的 HTTP token 是长期凭证，轮换即撤销，模型不同）；Graylog 的多节点状态矩阵（v1 单实例）；OpenCTI 的 notification_delay 防抖（后端指标聚合才有意义，界面层不做）。
+
 ### 五、验收口径
 
 原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断模板能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
