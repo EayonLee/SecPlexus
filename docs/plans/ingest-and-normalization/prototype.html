@@ -1017,12 +1017,13 @@ function renderMetrics(host) {
 /* ==========================================================================
    向导：通道 → 模板 → 绑定(限流/上限/热重载/消费组) → 样本验证 → 启动与诊断
    ========================================================================== */
-const STEP_TITLES = ["通道", "模板", "绑定与凭据", "样本验证", "启动与诊断"];
+/* 顺序依据 Splunk Add Data：Set Source Type（带预览验证）在 Input Settings 之前，解析确认发生在基础设施配置之前，模板不匹配时还没白做任何配置。 */
+const STEP_TITLES = ["模板", "样本验证", "通道", "绑定与凭据", "启动与诊断"];
 let step = 0;
 let verifyResult = null;
 let openSheetRef = null;
 const draft = {
-  channel:null, template:null, name:"",
+  channel:null, template:null, name:"", genericFallback:false,
   port:"5515", brokers:"kafka.internal:9092", topic:"soc.raw",
   ratePerSec:"50", burst:"200", maxBodyMiB:"10", maxBatch:"1000",
   contentTypes:["application/json"], reloadSec:"10",
@@ -1074,8 +1075,8 @@ function renderWizardBody() {
   const body = $("#wizardBody");
   body.replaceChildren();
 
-  if (step === 0) {
-    $("#wizardSub").textContent = "通道决定传输与鉴权方式；格式与模板无关";
+  if (step === 2) {
+    $("#wizardSub").textContent = "通道决定数据怎么到达；模板决定内容怎么解析，两者独立";
     const grid = el("div", { class:"option-grid" });
     Object.keys(CHANNELS).forEach(function (key) {
       const c = CHANNELS[key];
@@ -1089,12 +1090,12 @@ function renderWizardBody() {
     body.append(el("div", { class:"fieldset" }, grid));
   }
 
-  if (step === 1) {
-    $("#wizardSub").textContent = "模板决定字段映射；版本决定规则集，创建后绑定不可变";
+  if (step === 0) {
+    $("#wizardSub").textContent = "先选厂商模板；下一步用真实样本验证，不通过可换或走通用回退";
     const list = el("div", { class:"template-list" });
     TEMPLATES.forEach(function (t) {
       list.append(el("button", { class:"template-row", "aria-pressed":String(draft.template === t.id),
-        onclick:function(){ draft.template = t.id; draft.sample = defaultSample(t); verifyResult = null; renderWizardBody(); } },
+        onclick:function(){ draft.template = t.id; draft.sample = defaultSample(t); verifyResult = null; draft.genericFallback = false; renderWizardBody(); } },
         el("div", { style:"min-width:0;flex:1" },
           el("div", { style:"font-weight:600;font-size:13px" }, t.name),
           el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · " + t.group +
@@ -1114,8 +1115,8 @@ function renderWizardBody() {
         : null));
   }
 
-  if (step === 2) {
-    $("#wizardSub").textContent = "绑定接入方式与限额；通道与模板在创建后不可变";
+  if (step === 3) {
+    $("#wizardSub").textContent = "绑定接入方式与限额；通道创建后不可变，模板可换";
     body.append(el("div", { class:"field", style:"max-width:340px" },
       el("label", { for:"cnName" }, "数据源名称"),
       el("input", { id:"cnName", value:draft.name, placeholder:"例如 边界防火墙",
@@ -1218,8 +1219,8 @@ function renderWizardBody() {
       }
       body.append(guide);
     }
-  if (step === 3) {
-    $("#wizardSub").textContent = "先验证映射，再决定要不要启用";
+  if (step === 1) {
+    $("#wizardSub").textContent = "先验证映射，再配置基础设施；验证不过有出路，不会被堵死";
     const t = tpl(draft.template);
     const area = el("textarea", { id:"cnSample", oninput:function(e){ draft.sample = e.target.value; } });
     area.value = draft.sample || defaultSample(t);
@@ -1229,10 +1230,13 @@ function renderWizardBody() {
       area,
       el("div", { style:"display:flex;gap:8px" },
         el("button", { id:"verifyBtn", class:"btn btn-outline btn-sm", onclick:function(){
-          verifyResult = mapSample(t, area.value); renderWizardBody();
+          verifyResult = mapSample(t, area.value); draft.genericFallback = false; renderWizardBody();
         } }, "验证映射"))));
 
-    if (verifyResult) {
+    if (draft.genericFallback) {
+      body.append(el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+        "通用回退：原文进 message、不做字段映射（class_uid 6003）。接入不会被堵死；后续可在详情里换成正式模板，从下一条消息起生效。"));
+    } else if (verifyResult) {
       const r = verifyResult;
       const detect = el("dl", { class:"panel" },
         el("div", { class:"panel-row" }, el("dt", {}, "格式"),
@@ -1252,6 +1256,14 @@ function renderWizardBody() {
           el("span", { html:ICON.warn }),
           el("span", {}, r.error + " "),
           el("span", { class:"mono dim" }, "code=ingest.parse_failed · request_id=req_8f21c4a0")));
+        /* 验证失败不是死路（Splunk：没有匹配的 sourcetype 也不堵死用户）。 */
+        body.append(el("div", { style:"display:flex;gap:8px;flex-wrap:wrap" },
+          el("button", { class:"btn btn-outline btn-sm", onclick:function(){
+            step = 0; renderSteps(); renderWizardBody();
+          } }, "← 换一个模板"),
+          el("button", { class:"btn btn-sm", onclick:function(){
+            draft.genericFallback = true; renderWizardBody();
+          } }, "改用通用接入（原文透传）")));
         $("#wizNext").disabled = !stepReady();
         return;
       }
@@ -1328,7 +1340,7 @@ function renderWizardBody() {
     const dl = el("dl", { class:"kv" },
       el("dt", {}, "名称"), el("dd", { style:"font-weight:600" }, draft.name || "未命名接入点"),
       el("dt", {}, "通道"), el("dd", {}, CHANNELS[draft.channel].label),
-      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version),
+      el("dt", {}, "模板"), el("dd", {}, t.name + " · v" + t.version + (draft.genericFallback ? "（通用回退生效中）" : "")),
       el("dt", {}, "目标类"), el("dd", { class:"mono" }, "class_uid " + t.classUid + " (" + t.className + ")"),
       el("dt", {}, "接入地址"), el("dd", {}, codeBox(bindAddr)));
     cfgRows.forEach(function (r) { dl.append(el("dt", {}, r[0]), el("dd", {}, r[1])); });
@@ -1343,13 +1355,16 @@ function renderWizardBody() {
             : draft.channel === "kafka" ? draft.brokers : "HTTP 路由已就绪")),
         el("div", { class:"panel-row" }, el("dt", {}, "实例"), el("dd", {}, "1 个实例待启动")),
         el("div", { class:"panel-row" }, el("dt", {}, "样本验证"),
-          el("dd", {}, ok ? "通过 · 映射 " + verifyResult.mapped + "/" + verifyResult.total + " 字段" : "未验证")),
+          el("dd", {}, ok ? "通过 · 映射 " + verifyResult.mapped + "/" + verifyResult.total + " 字段" : (draft.genericFallback ? "通用回退（原文透传）" : "未验证"))),
         el("div", { class:"panel-row" }, el("dt", {}, "预期故障"), el("dd", { class:"dim" }, "未发现"))),
       ok
         ? el("div", { class:"callout callout-ok" }, el("span", { html:ICON.ok }),
             "可以创建。创建后处于「待启动」，启动才会绑定端口并开始计入接收速率。")
-        : el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
-            "尚未通过样本验证，建议返回上一步确认映射后再创建。")));
+        : draft.genericFallback
+          ? el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+              "通用回退模式：原文透传 message，不做字段映射。可以创建；后续在详情里换正式模板。")
+          : el("div", { class:"callout callout-warn" }, el("span", { html:ICON.warn }),
+              "尚未通过样本验证，建议返回上一步确认映射后再创建。")));
 
     $("#wizNext").textContent = "创建（待启动）";
   }
@@ -1376,16 +1391,17 @@ function defaultSample(t) {
 }
 
 function stepReady() {
-  if (step === 0) return Boolean(draft.channel);
-  if (step === 1) return Boolean(draft.template);
-  if (step === 2) {
+  if (step === 0) return Boolean(draft.template);
+  /* 验证通过，或显式选择通用回退（原文透传），两者其一即可前进。 */
+  if (step === 1) return Boolean(draft.genericFallback || (verifyResult && !verifyResult.error));
+  if (step === 2) return Boolean(draft.channel);
+  if (step === 3) {
     if (!draft.name.trim()) return false;
     if (draft.channel === "syslog") {
       return !CONNECTORS.some(function (c) { return c.channel === "syslog" && c.cfg.port === draft.port; });
     }
     return true;
   }
-  if (step === 3) return Boolean(verifyResult && !verifyResult.error);
   return true;
 }
 
@@ -1394,7 +1410,7 @@ function openWizard() {
   draft.port = "5515"; draft.brokers = "kafka.internal:9092"; draft.topic = "soc.raw";
   draft.ratePerSec = "50"; draft.burst = "200"; draft.maxBodyMiB = "10"; draft.maxBatch = "1000";
   draft.contentTypes = ["application/json"]; draft.reloadSec = "10"; draft.sample = "";
-  verifyResult = null; step = 0;
+  draft.genericFallback = false; verifyResult = null; step = 0;
   renderSteps(); renderWizardBody(); showSheet($("#wizard"));
 }
 
@@ -1499,6 +1515,33 @@ function renderDetail() {
       dl.append(el("dt", {}, "提交"), el("dd", {}, c.cfg.commit));
     }
     body.append(el("div", { class:"fieldset" }, el("div", { class:"legend" }, "接入信息"), dl));
+    /* 更换模板：解析规则可在运行中的接入点上换——Graylog 在运行 input 上管理
+       extractors/pipelines，下一条消息起生效；Splunk 覆盖只影响新数据。
+       通道不可换：端口/令牌/消费组是基础设施绑定。 */
+    if (!readOnly) {
+      const swapList = el("div", { class:"template-list" });
+      swapList.style.display = "none";
+      TEMPLATES.forEach(function (t) {
+        swapList.append(el("button", { class:"template-row", "aria-pressed":String(current.template === t.id),
+          onclick:function () {
+            current.template = t.id;
+            current.fill = t.coverage;
+            swapList.style.display = "none";
+            renderDetail();
+          } },
+          el("div", { style:"min-width:0;flex:1" },
+            el("div", { style:"font-weight:600;font-size:13px" }, t.name),
+            el("div", { class:"cell-sub" }, t.vendor + " · v" + t.version + " · class " + t.classUid)),
+          el("span", { class:"tick", html:ICON.check })));
+      });
+      const swapBtn = el("button", { class:"btn btn-outline btn-sm", onclick:function () {
+        swapList.style.display = swapList.style.display === "none" ? "" : "none";
+      } }, "更换模板");
+      body.append(el("div", { class:"fieldset" },
+        el("div", { class:"legend" }, "解析模板",
+          el("span", { class:"hint-inline" }, "可更换 · 从下一条消息起生效，已发布事件不变")),
+        swapBtn, swapList));
+    }
 
     if (c.channel === "http" && c.token) {
       const rotate = el("button", { class:"btn btn-outline btn-sm", onclick:function(){
