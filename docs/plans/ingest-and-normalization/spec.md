@@ -109,7 +109,7 @@ constants:
 ### 数据源注册（connectors）
 
 - 模块自有表 `ingestor.connectors`：`id, name, kind(http|syslog|kafka), template_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
-- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/换绑定），用户会话鉴权走 IAM；通道类型与模板绑定在创建时落定，之后不可变。
+- 管理 API 归 ingestor 自有路由（创建/列表/启停/换 token/换模板），用户会话鉴权走 IAM；通道类型创建后不可变（端口/令牌/消费组是基础设施绑定），模板可更换——换后从下一条消息起生效，已发布事件不变（依据 Graylog 在运行中的 input 上管理 extractors/pipelines；Splunk 覆盖只影响新数据）。
 - 权限点：`ingestor.connectors.read` / `ingestor.connectors.manage`，进 IAM 扁平权限目录（delegable 集中评审）。
 
 ## 验收
@@ -127,8 +127,8 @@ constants:
 
 | 采纳的做法 | 出处（原文要点） | 落成位置 |
 |---|---|---|
-| 启用前先用样本验证映射 | Cribl [Data Onboarding](https://docs.cribl.io/stream/data-onboarding)：`Create settings → Verify that settings do the right thing → Iterate`，"before it starts flowing" | 向导第 4 步；未通过验证不能前进 |
-| 保存前预览数据形态 | Splunk [Set Source Type](https://help.splunk.com/en/splunk-enterprise/get-started/get-data-in/10.2/how-to-get-data-into-your-splunk-deployment/assign-the-correct-source-types-to-your-data)："you can see how Splunk Enterprise will index the data" | 同第 4 步：事件 + 逐字段映射 + 未映射 |
+| 启用前先用样本验证映射 | Cribl [Data Onboarding](https://docs.cribl.io/stream/data-onboarding)：`Create settings → Verify that settings do the right thing → Iterate`，"before it starts flowing" | 向导第 2 步；未通过验证不能前进 |
+| 保存前预览数据形态 | Splunk [Set Source Type](https://help.splunk.com/en/splunk-enterprise/get-started/get-data-in/10.2/how-to-get-data-into-your-splunk-deployment/assign-the-correct-source-types-to-your-data)："you can see how Splunk Enterprise will index the data" | 同第 2 步：事件 + 逐字段映射 + 未映射 |
 | 创建 ≠ 运行 | Graylog [Set Up an Input](https://go2docs.graylog.org/current/getting_in_log_data/setup_an_input.htm)："not in a running state until after you complete the Input Setup Wizard" | 创建后为「待启动」；启动才绑端口、才计速率 |
 | 诊断页的固定结构 | Graylog [Input Diagnosis](https://go2docs.graylog.org/current/getting_in_log_data/input_diagnosis.htm)：Information / State（含 bind 失败原文）/ Received Traffic / Errors / 内建排障建议 | 抽屉「诊断」页签 + 状态相关的「建议」 |
 | 能看原始 → 解析的对照 | Graylog Show received messages | 抽屉「收到的消息」：时间、摘要、格式、编码、已发布/隔离+原因码 |
@@ -141,27 +141,30 @@ constants:
 |---|---|
 | 统一响应 `{code,message,data,request_id}` | 验证失败提示带 `code=… request_id=…` |
 | 权限点 `connectors.read` / `manage` | 工具栏身份切换；只读时隐藏「接入数据源」与行内启停，并提示缺少 manage |
-| 通道 = HTTP／syslog／Kafka | 向导第 1 步三张卡 |
-| HTTP：Bearer 令牌、摘要存储、只显示一次 | 第 3 步令牌区（带说明）；详情「概览」可轮换，轮换后旧令牌失效 |
-| HTTP：限流 50/s、突发 200、Redis 故障拒绝 | 第 3 步两个输入 + 固定策略说明（不提供开关） |
-| HTTP：10 MiB、单批 1000、415、202 | 第 3 步上限输入 + Content-Type 多选；说明 413/415/202/异步语义 |
-| syslog：UDP+TCP 同端口、一端口一接入点 | 第 3 步端口校验（冲突即错误并禁用下一步） |
-| syslog：64 KiB 截断、特权端口 | 第 3 步上限只读说明；<1024 时诊断建议里点名 |
-| syslog：周期刷新 + SIGHUP | 第 3 步刷新间隔输入；详情「概览」有「立即重载绑定」 |
-| Kafka：消费组、earliest、发布成功才提交 | 第 3 步只读面板三条；详情「概览」与「发布·消费位移」 |
-| 格式探测 JSON→CEF→LEEF→KV→文本 | 第 4 步「探测结果」面板显示探测到哪种格式及依据 |
+| 通道 = HTTP／syslog／Kafka | 向导第 3 步三张卡 |
+| 向导顺序：解析验证在基础设施配置之前 | Splunk Add Data：Set Source Type（预览）→ Input Settings → Review | 向导第 1→5 步：模板→验证→通道→绑定→启动 |
+| 验证失败有出路，不堵死 | Splunk："If none of the existing source types fits…create a new one" | 验证失败出现「换模板」「通用接入（原文透传）」两个按钮 |
+| 模板创建后可换 | Graylog extractors 在运行 input 上增删改，下一条消息起生效 | 详情概览「更换模板」；通道不可换 |
+| HTTP：Bearer 令牌、摘要存储、只显示一次 | 第 4 步令牌区（带说明）；详情「概览」可轮换，轮换后旧令牌失效 |
+| HTTP：限流 50/s、突发 200、Redis 故障拒绝 | 第 4 步两个输入 + 固定策略说明（不提供开关） |
+| HTTP：10 MiB、单批 1000、415、202 | 第 4 步上限输入 + Content-Type 多选；说明 413/415/202/异步语义 |
+| syslog：UDP+TCP 同端口、一端口一接入点 | 第 4 步端口校验（冲突即错误并禁用下一步） |
+| syslog：64 KiB 截断、特权端口 | 第 4 步上限只读说明；<1024 时诊断建议里点名 |
+| syslog：周期刷新 + SIGHUP | 第 4 步刷新间隔输入；详情「概览」有「立即重载绑定」 |
+| Kafka：消费组、earliest、发布成功才提交 | 第 4 步只读面板三条；详情「概览」与「发布·消费位移」 |
+| 格式探测 JSON→CEF→LEEF→KV→文本 | 第 2 步「探测结果」面板显示探测到哪种格式及依据 |
 | 编码 UTF-8 → GB18030 → replace | 同面板显示编码结论；有损时提示会被 `metadata.encoding` 记录 |
-| 模板 `extends` 继承逐键覆盖 | 第 4 步「继承链」；模板详情「契约」行 |
+| 模板 `extends` 继承逐键覆盖 | 第 2 步「继承链」；模板详情「契约」行 |
 | 模板 `kind` / `class_uid` / 不用废弃 2001 | 模板目录与详情显示 `class_uid`+`className`+`kind`（detection → 2004） |
-| `severity_map`、`time_formats` 失败置 null/0 | 第 4 步映射表逐行给出"未识别档位→0 + warning""时间字段缺失→null" |
+| `severity_map`、`time_formats` 失败置 null/0 | 第 2 步映射表逐行给出"未识别档位→0 + warning""时间字段缺失→null" |
 | `constants` | 模板详情「常量」表 |
 | security_control `disposition` | 模板详情「disposition」行；模板声明时映射表出现 `disposition` 行 |
-| 未知字段进 `unmapped` | 第 4 步未映射提示并列名；「映射质量」页签统计未映射 Top |
+| 未知字段进 `unmapped` | 第 2 步未映射提示并列名；「映射质量」页签统计未映射 Top |
 | 发布：单一出口 topic | 「运行指标」出口卡 + 详情「发布」 |
-| 发布：分区键优先级与保序 | 第 4 步「分区键」行（实体值或回退链）；「发布」页签分区键 + 最近批次分区 |
+| 发布：分区键优先级与保序 | 第 2 步「分区键」行（实体值或回退链）；「发布」页签分区键 + 最近批次分区 |
 | 发布：500 条 / 2s 批量 | 「运行指标·发布策略」与详情「发布」 |
 | 发布：Kafka 不可用则背压不丢 | 「运行指标」出口状态与说明；「发布」页签背压行 |
-| 确定性 `event_id`（UUIDv5） | 第 4 步与「发布」页签均标注来源 |
+| 确定性 `event_id`（UUIDv5） | 第 2 步与「发布」页签均标注来源 |
 | 隔离区 + 原因码 | 「运行指标」原因码表；「收到的消息」行内原因码 |
 | 可观测：接收速率／解析失败／隔离积压／发布延迟 | 「运行指标」五个 KPI + 按通道表 + 分区键分布 |
 | connectors 列表/启停/换令牌/换绑定 | 列表行内启停；详情概览可轮换令牌、重载绑定 |
@@ -180,7 +183,7 @@ constants:
 - Cribl 的 devnull pipeline 抓样：依赖 pipeline 概念，本计划没有。
 - 图灵完备的映射编辑器：模板保持声明式 YAML，原型只让人看见映射结果。
 
-### 四点五、第二轮源码对照（Wazuh / Graylog / OpenCTI）
+### 五、第二轮源码对照（Wazuh / Graylog / OpenCTI）
 
 对三家开源实现的前端源码逐文件核对后补齐的交互：
 
@@ -188,7 +191,7 @@ constants:
 |---|---|---|
 | 状态机过于简单（4 态） | Graylog `InputStateBadge.tsx`：RUNNING/STARTING/FAILED/FAILING/STOPPED+未运行；Wazuh agent：never_connected/pending | 扩到 8 态：draft/starting/running/pending（从未收到）/silent/degraded（隔离率超阈）/failed（保留 bind 原文）/stopped |
 | 横幅只是提示，不可操作 | Graylog `InputsNotifications.tsx`：横幅条目点击即给表格加 `runtime_status` 过滤 | 横幅每个条目可点，点击即设状态过滤器 |
-| 设备侧配置靠人拼 | Wazuh `agent-deploy-one-liner.md`：向导生成可直接复制的部署命令 | 向导第 3 步按通道生成 rsyslog/syslog-ng/curl/producer 配置片段，带复制按钮 |
+| 设备侧配置靠人拼 | Wazuh `agent-deploy-one-liner.md`：向导生成可直接复制的部署命令 | 向导第 4 步按通道生成 rsyslog/syslog-ng/curl/producer 配置片段，带复制按钮 |
 | 缺接入点元数据 | OpenCTI `ingestion-types.ts`：每个源带 description/user_id/last_execution_date+status | 概览页显示描述、创建人、状态持续时间；token 显示最近使用时间 |
 | 删除无确认 | Graylog `InputsActions.tsx`：DeleteMenuItem + ConfirmDialog | 删除需二次确认，文案写明后果（历史事件保留） |
 | 无克隆 | Graylog/Wazuh 均有同配置复制 | 克隆按钮：syslog 端口 +1 避冲突、http 令牌重生成、状态回待启动 |
@@ -197,7 +200,18 @@ constants:
 
 不采纳的：Wazuh 的 enrollment token 有效期/次数（我们的 HTTP token 是长期凭证，轮换即撤销，模型不同）；Graylog 的多节点状态矩阵（v1 单实例）；OpenCTI 的 notification_delay 防抖（后端指标聚合才有意义，界面层不做）。
 
-### 五、验收口径
+### 六、第三轮对照：向导链路与模板可换（用户质疑驱动）
+
+用户质疑原链路「通道→模板→绑定→验证」：选了模板但样本验证不通过怎么办？没匹配模板是不是就接不进来了？核对三家后的修正：
+
+| 问题 | 出处 | 修正 |
+|---|---|---|
+| 验证放在最后，模板不匹配时基础设施配置已白做 | Splunk Add Data 步骤顺序（Select Source → Set Source Type 预览验证 → Input Settings → Review），原文 "If you're satisfied with the results, click Next to proceed to the Inputs Settings page" | 向导重排：模板 → 样本验证 → 通道 → 绑定 → 启动 |
+| 验证硬挡，18 家不匹配即死路 | Splunk："If none of the existing source types fits the needs of your data, create a new one" | 验证失败给出路：换模板，或「通用接入」回退——原文透传 message、不做字段映射（class_uid 6003），接入永不被堵死 |
+| 模板绑定创建后不可变，选错只能删了重建 | Graylog [Extractors](https://docs.graylog.org/docs/extractors)：在运行中的 input 上管理，"The next messages coming in should already include the extracted fields"；Splunk 覆盖只影响新数据 | 通道不可变（基础设施绑定）；模板可换，从下一条消息起生效，已发布事件不变 |
+| 模板能否替代通道 | Elastic 的 integration 捆绑采集与解析，但那依赖发 agent；我们无 agent，传输必须人选（Vector/Splunk/Graylog 均两维度分离） | 模板与通道保持两个独立维度；模板决定解析，通道决定传输 |
+
+### 七、验收口径
 
 原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断模板能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
 
