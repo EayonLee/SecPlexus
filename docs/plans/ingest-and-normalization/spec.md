@@ -217,7 +217,33 @@ constants:
 | 解析规则绑定创建后不可变，选错只能删了重建 | Graylog [Extractors](https://docs.graylog.org/docs/extractors)：在运行中的 input 上管理，"The next messages coming in should already include the extracted fields"；Splunk 覆盖只影响新数据 | 通道不可变（基础设施绑定）；解析规则可换，从下一条消息起生效，已发布事件不变 |
 | 解析规则能否替代通道 | Elastic 的 integration 捆绑采集与解析，但那依赖发 agent；我们无 agent，传输必须人选（Vector/Splunk/Graylog 均两维度分离） | 解析规则与通道保持两个独立维度；解析规则决定解析，通道决定传输 |
 
-### 七、验收口径
+### 七、导航与模板基线（第四轮：用户指出）
+
+**数据源在主导航，不进设置。** 设置导航（/settings/*：个人资料、用户管理、角色与权限、审计日志）属于系统管理页面；数据源是业务功能，与「工作台」并列放在主导航：
+
+```
+主导航（shell.tsx，非设置页时）
+├─ 工作台
+│   └─ 安全智驾工作台（/dashboard）
+└─ 数据（本计划新增分组）
+    ├─ 数据源（接入点列表/向导/详情）
+    ├─ 解析规则
+    └─ 运行指标
+```
+
+**原型对齐 Web 模板基线**（此前手搓了一套与平台不一致的 Shell）：
+
+| 基线项 | 依据文件 | 原型落点 |
+|---|---|---|
+| 侧栏 17rem / 图标收起 3rem，SidebarMenuButton h-7 | `src/components/ui/sidebar.tsx`（SIDEBAR_WIDTH 常量与 menu-button 变体） | 可收起侧栏，收起后仅图标 |
+| 顶栏 h-12：Trigger + 竖分隔线 + 语言/主题/头像菜单 | `src/spx/components/shell.tsx` header 结构 | 同构顶栏，主题按钮真实切换明暗 |
+| 侧栏令牌（sidebar 与画布同色、发丝线分隔） | `src/app/globals.css` --sidebar-* | 令牌同名同值 |
+| PageHeader：text-3xl tracking-tight | `src/spx/components/page-header.tsx` | 页面标题同字号 |
+| Card：rounded-xl + ring-1 ring-foreground/10 | `src/components/ui/card.tsx` | 表格卡/面板/指标卡全部改 ring |
+| Button：rounded-full、hover:bg-primary/80 | `src/components/ui/button.tsx` default 变体 | 按钮行为一致 |
+| 主题切换走 .dark 类 | ThemeSwitcher 行为 | 初始值取系统偏好，可手动切换 |
+
+### 八、验收口径
 
 原型定死一条验收标准：**自检必须显示样本被解析成什么**——映射到哪些 OCSF 字段、哪些没映射上、severity 判成几、分区键取到哪个实体。只显示"连通成功"不足以判断解析规则能否用，这也是 Cribl 与 Splunk 都把预览放在保存之前的原因。
 
