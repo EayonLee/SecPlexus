@@ -31,16 +31,23 @@
 
 ### 第二组：解析层（无外部依赖）
 
-- [ ] 失败测试先行：格式探测表驱动用例（JSON/CEF/KV/纯文本/畸形输入）。
-- [ ] 分层接口：`Parser interface { Parse(raw []byte) (map[string]any, error) }` + `map[string]Parser` 注册表（O(1) 分发）；线格式解析与规则映射两层职责分离（AiSOC 同构）。
-- [ ] 五个 Parser 实现：json（encoding/json，单对象/数组/NDJSON 按首字节分发+降级）、regex（regexp 命名捕获组，加载时预编译缓存；复杂场景 elastic/go-grok）、kv（状态机，键值/条目/引号分隔符可配）、delimiter（encoding/csv 自定义分隔符+列名）、cef（ubyte-source/go-cef 或 AiSOC 式解析器）；引入 `leodido/go-syslog/v4`。
-- [ ] 工程约束落地（5w EPS 容量目标）：固定 worker 池（默认=CPU 核数）从 channel 消费，无 per-event goroutine；批处理贯穿全链（500 条/批或 2s）；sync.Pool 复用扁平 map 与 OCSF map；NDJSON 流式解码；每批 panic recover + worker 自动重启；worker/buffer 可配（SPX_INGEST_WORKERS/BUFFER）；优雅停机（停接收→排空→发布→提交位移→退出）。
-- [ ] 容量基准测试：5 万 EPS sustained 压测（go test -bench 或独立 bench 工具），断言 P99 端到端延迟 < 2s、GC CPU < 10%、无 OOM；结果记录进 spec 容量模型节作为实测校准。
-- [ ] 失败测试先行：五模式表驱动用例——regex 命名分组提取、KV 多分隔符与引号内分隔符、delimiter 列名对齐、多条样本全部命中才通过。
-- [ ] 失败测试先行：解析引擎——加载校验（非法 class_uid、severity 越界拒绝启动）、dot-path 读写（含 `x[0]`）、`type: int` 转换失败置 null+warning、`extends` 继承与逐键覆盖、`constants`、`unmapped` 收集、`time_formats` 失败置 null。
-- [ ] 失败测试先行：severity 归一——中文档位（高危/中危/低危）、CEF 0–10 数字档、大小写/空白归一、未映射 → 0 + warning。
-- [ ] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、connector 维度隔离（UUID 命名空间））。
-- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。
+- [x] 失败测试先行：格式探测表驱动用例（JSON/CEF/KV/纯文本/畸形输入）。
+- [x] 分层接口：`Parser interface` + `Factory` 注册表（构造期预编译、运行期零准备）；线格式解析与规则映射两层职责分离。
+  - 与计划的偏差：注册表登记的是**构造函数**而不是现成实例——regex/kv/delimiter 需要规则参数，且正则必须在构造期编译，裸 `map[string]Parser` 无法表达这一点。
+- [x] 五个 Parser 实现：json、regex、kv、delimiter、cef。全部标准库实现，**未引入任何新依赖**。
+  - json：单对象/数组/NDJSON 统一流式解码（`{` 开头既可能是单对象也可能是 NDJSON，只按首字节判断会漏）。
+  - cef：手写（spec 允许的 AiSOC 式方案）；头部 7 段只切 7 次以免截断含 `|` 的扩展值；扩展区条目边界按「后面是否紧跟 key=」判定，否则含空格的值（msg、cmd）会被截断。
+  - kv：状态机；默认支持双引号（logfmt 主流写法），转义只对 CEF 开启（Windows 路径里的 `\t` 不能被吃掉）。
+  - 延后：`leodido/go-syslog/v4` 与 go-grok 随 syslog 通道（第三组）引入，当前无消费方。
+- [x] 工程约束落地（解析层部分）：正则预编译缓存、NDJSON 流式解码、构造期校验。
+  - 延后到第三组（通道层）：worker 池、批处理、sync.Pool、panic recover、优雅停机——这些只有在有接收端与发布端之后才成立，现在写是空转。基准显示 56 allocs/op，池化收益需要结合真实管线测，不先猜。
+- [x] 容量基准测试：单核实测 CEF 3135 ns/op（319k 条/秒）、JSON 2238 ns/op（447k 条/秒）；5 万 EPS 仅占 0.16 核。端到端 P99 与 GC 指标待第三组有完整管线后测。
+- [x] 失败测试先行：五模式表驱动用例——regex 命名分组提取、KV 多分隔符与引号内分隔符、delimiter 列名对齐、多条样本全部命中才通过。
+- [x] 失败测试先行：解析引擎——加载校验（severity 越界拒绝加载）、dot-path 读写、`constants` 最后盖章、`unmapped` 收集、`time_formats` 失败记 warning 不写时间。
+  - 延后：`extends` 继承与逐键覆盖（只有内置规则用得上，等 18 条规则一起做）；`type: int` 转换（真实样本里暂未出现需要强转的字段，等规则回归时按需加）；数组下标 `x[0]`（无规则需要逐元素映射，整值写入已足够）。
+- [x] 失败测试先行：severity 归一——大小写/空白归一、未映射 → 0 + warning。值表由规则声明，中文档位在具体规则里配置。
+- [x] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、connector 维度隔离）。用原始字节而非归一化结构做指纹：少一次序列化，字节相同就是同一条事件。
+- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。**等用户提供真实设备日志样本**：没有样本的规则按样本驱动校验必然失败，写出来是假的。
 
 ### 第三组：通道
 
@@ -64,6 +71,24 @@
 - [ ] 失败测试先行（集成）：向导样本验证失败时提供「换解析规则」与「通用接入（原文透传 message，class_uid 6003）」两条出路；通用回退创建的接入点后续可换成正式解析规则。
 - [ ] 迁移 `ingest.connectors` 表（goose，对齐 iam 的 repository.Migrate 模式）并落地 `cmd migrate` 命令；管理路由挂 `/api/v1/ingest/connectors`，IAM 用户会话 + 权限点校验。
 - [ ] 解析规则回归：18 家解析规则 × 5–10 条真实样本，断言关键字段与 severity；填充率报表脚本。
+
+## 代码审查修复（批次 2 完成后）
+
+对解析与映射做过一轮 P0/P1/P2 审查（10 个探针验证 + 对照测试），以下问题已全部修复并有回归测试钉住：
+
+- **P0**：event_id 只按内容指纹会吞掉内容相同的真实事件 → 改为（接入点, 接收序号, 字节）三元指纹；unmapped 明文承载凭证 → 敏感名单脱敏（[REDACTED]）。
+- **P1**：无时区时间串按 UTC 解析导致时间线偏移 → 规则级 time.location；/health/ready 恒真 → Ready 钩子 + 503（依赖探活随批次补入）；channels 死配置 → 删除（端口绑定属 connectors 注册表）；产出缺 class_uid/severity_id/time 的伪 OCSF → class_uid 加载必填 + 引擎恒写级别与时间；常量与映射目标前缀冲突静默覆盖 → 加载拒绝；注册表一致性弱测试 → 真断言。
+- **P2**：CEF 头部转义还原、JSON 数组尾随垃圾拒绝、错误信息指引 Split、json.Number 保数字精度（>2^53 不截断）、Modes 返回副本、删除未消费的 Server.IAM 与 serve 期 token 强制（管理 API 批次随路由启用）、JSON 10MiB 解码上限、纯空白输入全模式一致拒绝。
+- 已知延后：\-race 本机无 gcc 跑不了（CI Linux runner 会跑）；64KiB/10MiB 边界与超长字段的规模测试随通道层一起做。
+
+### 二轮审查（修复回归审查）
+
+对一轮修复再做一轮探针审查，发现 4 个由修复本身引入的问题，已修复并有回归测试：
+
+- **P1**：恒写保障静默覆盖 field_map 对 severity_id/time 的直接映射（探针：映射值 4 → 实际 0）→ 加载期拒绝这两个目标并指路（TimeSpec/SeveritySpec 是唯一声明方式）；常量路径保留——常量最后盖章，是固定级别源的唯一写法（测试钉住）。
+- **P2**：值表键不做归一化，"HIGH" 永远匹配不到 "high" → Compile 时归一化一次 + 归一后冲突检测（迭代顺序不定，必须拒绝）。
+- **P2（性能）**：isSensitiveKey 每次调用构造 Replacer（热路径按字段分配）→ 包级构造一次。
+- **P3**：class_uid 显式 nil 通过编译 → 值非空校验（缺键与 nil 同判）。
 
 ## 验证入口
 
