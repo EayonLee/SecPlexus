@@ -89,7 +89,8 @@ async function main() {
   const command = process.argv[2] ?? 'dev';
   if (!['dev', 'preview', 'check-config'].includes(command)) throw new Error('Supported application commands: dev, preview, check-config.');
   const selected = process.argv.slice(3);
-  const modules = selected.length ? selected : ['iam','console','ingest','web'];
+  const modules = selected.length ? selected : ['iam','console','web'];
+// ingest 需要 Kafka 与 IAM token，在通道落地前不进默认栈；显式传入模块名启动。
   if (new Set(modules).size !== modules.length || modules.some(module => !['iam','console','ingest','web'].includes(module))) throw new Error('Select web, iam, ingest or console once each.');
   const env = loadEnvironment(root);
   const configs = Object.fromEntries(['iam', 'console', 'ingest'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
