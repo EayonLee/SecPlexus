@@ -41,6 +41,10 @@ type Pipeline struct {
 
 // Syslog 描述 syslog 通道参数。
 type Syslog struct {
+	// BindHost 是 syslog 监听地址。默认跟随 app.host：
+	// 前面有反向代理、只允许本机接收时，这个值必须与 app.host 一致，
+	// 否则 syslog 端口会意外暴露到所有网卡。
+	BindHost string `yaml:"bind_host"`
 	// ReloadInterval 是端口绑定关系的刷新间隔；SIGHUP 可立即重载。
 	ReloadInterval time.Duration `yaml:"reload_interval"`
 }
@@ -97,6 +101,11 @@ func Load(filename string) (Config, error) {
 
 	c.Cache.URL = c.Cache.ResolveURL()
 
+	if c.Syslog.BindHost == "" {
+		// 默认跟随 app.host：syslog 端口不能比主监听更宽松。
+		c.Syslog.BindHost = c.App.Host
+	}
+
 	return c, c.Validate()
 }
 
@@ -111,6 +120,9 @@ func (c Config) Validate() error {
 	}
 	if c.HTTP.MaxBodyBytes < 0 || c.HTTP.RatePerSec < 0 || c.HTTP.RateBurst < 0 {
 		return errors.New("http_channel limits must not be negative")
+	}
+	if c.Syslog.BindHost == "" {
+		c.Syslog.BindHost = c.App.Host
 	}
 	return c.Logging.Validate()
 }

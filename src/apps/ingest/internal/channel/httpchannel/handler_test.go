@@ -153,7 +153,7 @@ func TestAcceptedPushReturns202AndPublishes(t *testing.T) {
 		t.Fatalf("accepted = %d, want 1", body.Accepted)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	events := publisher.snapshot()
 	if len(events) != 1 {
 		t.Fatalf("published %d events, want 1", len(events))
@@ -176,7 +176,7 @@ func TestArrayPayloadSplitsIntoEvents(t *testing.T) {
 		t.Fatalf("status = %d, want 202", response.StatusCode)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	if events := publisher.snapshot(); len(events) != 3 {
 		t.Fatalf("published %d events, want 3", len(events))
 	}
@@ -302,7 +302,7 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 		t.Logf("status = %d", response.StatusCode)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	for _, event := range publisher.snapshot() {
 		if event.Outcome.Status == pipeline.StatusError && event.Outcome.Reason == "" {
 			t.Fatal("error event without a reason code")
@@ -338,9 +338,39 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 		t.Fatalf("status = %d, want 202", response.StatusCode)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	events := publisher.snapshot()
 	if len(events) != 1 || events[0].Outcome.Status != pipeline.StatusError {
 		t.Fatalf("passthrough events = %#v", events)
+	}
+}
+
+// 回归（P1-2）：管道关停/队列满导致一条都没受理时必须返回 503，
+// 而不是用 202 假装成功——设备看到 202 就不会重推，数据真丢。
+func TestNoAcceptedReturns503(t *testing.T) {
+	registry := connector.NewMemory()
+	registry.Replace([]connector.Snapshot{{
+		ID: "conn-1", Channel: connector.ChannelHTTP, Engine: newRule(t),
+		Token: connector.DigestToken(testToken),
+	}})
+
+	publisher := &fakePublisher{}
+	line := pipeline.New(pipeline.Options{Workers: 1}, publisher)
+
+	// 不启动 Start：再关停管道，Submit 必然被拒。
+	line.Close()
+
+	channel := httpchannel.New(registry, &fakeLimiter{}, line)
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/v1/ingest/events/{connector_id}", channel)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	response := post(t, server, "conn-1", testToken, "application/json", `{"src":"10.0.0.1"}`)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.StatusCode)
+	}
+	if response.Header.Get("Retry-After") == "" {
+		t.Fatal("缺少 Retry-After，设备不知道要重推")
 	}
 }

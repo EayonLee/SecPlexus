@@ -32,6 +32,7 @@ type Channel struct {
 	listeners map[string]*binding // 接入点 ID → 监听器。
 
 	reloadInterval time.Duration
+	bindHost       string // 监听地址；空值表示所有网卡。
 }
 
 // binding 是一个接入点的 UDP 与 TCP 监听器。
@@ -43,7 +44,7 @@ type binding struct {
 }
 
 // New 创建 syslog 通道。reloadInterval 为零时用 10 秒。
-func New(registry connector.Registry, line *pipeline.Pipeline, reloadInterval time.Duration) *Channel {
+func New(registry connector.Registry, line *pipeline.Pipeline, reloadInterval time.Duration, bindHost string) *Channel {
 	if reloadInterval <= 0 {
 		reloadInterval = 10 * time.Second
 	}
@@ -53,6 +54,7 @@ func New(registry connector.Registry, line *pipeline.Pipeline, reloadInterval ti
 		pipeline:       line,
 		listeners:      make(map[string]*binding),
 		reloadInterval: reloadInterval,
+		bindHost:       bindHost,
 	}
 }
 
@@ -135,7 +137,9 @@ func (c *Channel) Reload(ctx context.Context) error {
 
 // bind 绑定一个接入点的 UDP 与 TCP 监听器并启动读取循环。
 func (c *Channel) bind(ctx context.Context, snapshot connector.Snapshot) (*binding, error) {
-	address := ":" + strconv.Itoa(snapshot.Port)
+	// 监听地址跟随配置，不再写死所有网卡：
+	// 部署在反向代理后面时，syslog 也不该绕过代理直接暴露。
+	address := net.JoinHostPort(c.bindHost, strconv.Itoa(snapshot.Port))
 
 	// ListenConfig 带 context：取消时绑定立刻中断，不会卡在慢启动的地址解析上。
 	var listenConfig net.ListenConfig

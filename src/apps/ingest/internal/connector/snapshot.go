@@ -73,6 +73,7 @@ type Memory struct {
 	mu      sync.RWMutex
 	byID    map[string]Snapshot
 	byToken map[[sha256.Size]byte]string
+	loaded  bool
 }
 
 // NewMemory 创建空注册表。
@@ -102,6 +103,16 @@ func (m *Memory) Replace(snapshots []Snapshot) {
 
 	m.byID = byID
 	m.byToken = byToken
+	m.loaded = true
+}
+
+// Loaded 报告注册表是否至少被加载过一次。
+// 与"当前是否为空"不同：加载完成但确实没有接入点，也算已加载。
+func (m *Memory) Loaded() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.loaded
 }
 
 // ByID 按标识查找接入点。

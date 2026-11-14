@@ -7,6 +7,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -66,6 +67,10 @@ func (o Outcome) OK() bool { return o.Status == StatusOK }
 // 目的是让未挂规则的报文仍然可查询、可统计，而不是被丢弃。
 const ClassUIDGeneric = 6003
 
+// ErrClosed 表示管道已进入关停，不再受理新报文。
+// 调用方应把报文退回上游（HTTP 返回 503 让设备重推），而不是当作已受理。
+var ErrClosed = errors.New("pipeline is closed")
+
 // Event 是一条待发布的事件。
 type Event struct {
 	ConnectorID  string  // 来源接入点。
@@ -113,6 +118,7 @@ type Stats struct {
 	ParseFailed  uint64 // 解析失败的事件数（仍会发布）。
 	Published    uint64 // 已发布的事件数。
 	PublishRetry uint64 // 发布重试次数。
+	Dropped      uint64 // 排空超时被丢弃的事件数；正常应恒为 0。
 	Panics       uint64 // 被 recover 兜住的引擎 panic 次数。
 	QueueDepth   int    // 当前待解析队列长度。
 }
@@ -123,6 +129,10 @@ type Options struct {
 	QueueDepth    int           // 待解析队列长度；默认 10000（约 0.2 秒的 5w EPS）。
 	BatchSize     int           // 每批事件数；默认 500。
 	FlushInterval time.Duration // 批量最长等待；默认 2 秒。
+	// DrainTimeout 是关停时排空与最后一批发布的预算；默认 15 秒。
+	// 有界是刻意的：无界排空会让进程永远退不出（Fluent Bit 的 Flush 丢数据事故正是反面教材），
+	// 超时后丢弃并记 Error，让运维看得见，而不是静默卡住。
+	DrainTimeout time.Duration
 }
 
 // defaults 填齐零值参数，让调用方只关心想改的那几个。
@@ -139,6 +149,9 @@ func (o Options) defaults() Options {
 	if o.FlushInterval <= 0 {
 		o.FlushInterval = 2 * time.Second
 	}
+	if o.DrainTimeout <= 0 {
+		o.DrainTimeout = 15 * time.Second
+	}
 
 	return o
 }
@@ -149,9 +162,16 @@ type Pipeline struct {
 	options   Options
 	publisher Publisher
 
+	// jobs 永不关闭：关闭一个生产者可能仍在写的通道会 panic（send on closed channel），
+	// 而该 panic 不可 recover。关停改用 done 信号 + worker 主动排空。
 	jobs   chan Job
 	events chan Event
 	flush  chan chan struct{}
+
+	done      chan struct{} // 关闭表示不再受理新报文
+	closeOnce sync.Once
+	workers   sync.WaitGroup
+	batcher   chan struct{} // batchLoop 退出信号
 
 	sequence atomic.Uint64
 
@@ -165,8 +185,7 @@ type Pipeline struct {
 	published    atomic.Uint64
 	publishRetry atomic.Uint64
 	panics       atomic.Uint64
-
-	closeOnce sync.Once
+	dropped      atomic.Uint64
 }
 
 // New 创建管道；Start 才会启动 worker。
@@ -179,6 +198,8 @@ func New(options Options, publisher Publisher) *Pipeline {
 		jobs:      make(chan Job, options.QueueDepth),
 		events:    make(chan Event, options.BatchSize*2),
 		flush:     make(chan chan struct{}),
+		done:      make(chan struct{}),
+		batcher:   make(chan struct{}),
 	}
 }
 
@@ -189,10 +210,24 @@ func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot
 
 	p.inflight.Add(1)
 
+	// 先确定性地判断是否已关停：select 在 jobs 有缓冲空间时会与 done 同时就绪，
+	// 随机选中发送分支，导致"已关停却报告受理成功"（随后被关停排空逻辑丢弃）。
+	select {
+	case <-p.done:
+		p.inflight.Done()
+
+		return ErrClosed
+	default:
+	}
+
 	select {
 	case p.jobs <- job:
 		p.accepted.Add(1)
 		return nil
+	case <-p.done:
+		p.inflight.Done()
+
+		return ErrClosed
 	case <-ctx.Done():
 		p.inflight.Done()
 
@@ -209,6 +244,16 @@ func (p *Pipeline) Submit(ctx context.Context, snapshot connector.Snapshot, raw 
 	// 先登记再入队：Flush 看到计数为零才是真的全空。
 	p.inflight.Add(1)
 
+	// 先确定性地判断是否已关停：select 在 jobs 有缓冲空间时会与 done 同时就绪，
+	// 随机选中发送分支，导致"已关停却报告受理成功"（随后被关停排空逻辑丢弃）。
+	select {
+	case <-p.done:
+		p.inflight.Done()
+
+		return ErrClosed
+	default:
+	}
+
 	select {
 	case p.jobs <- job:
 		p.accepted.Add(1)
@@ -220,36 +265,68 @@ func (p *Pipeline) Submit(ctx context.Context, snapshot connector.Snapshot, raw 
 	}
 }
 
-// Start 启动解析 worker 与批处理器，直到 ctx 取消后按停机顺序退出：
-// 停接收 → 排空在途解析 → 发布剩余批次。
+// Start 启动解析 worker 与批处理器，阻塞到 ctx 取消或 Close 被调用，然后按顺序关停：
+// 拒绝新提交 → 排空在途解析 → 用独立预算发布最后一批。
 func (p *Pipeline) Start(ctx context.Context) error {
-	var workers sync.WaitGroup
 	for worker := 0; worker < p.options.Workers; worker++ {
-		workers.Add(1)
+		p.workers.Add(1)
 
 		go func() {
-			defer workers.Done()
-			p.parseLoop(ctx)
+			defer p.workers.Done()
+			p.parseLoop()
 		}()
 	}
 
-	batcherDone := make(chan error, 1)
-	go func() { batcherDone <- p.batchLoop(ctx) }()
+	go func() {
+		p.batchLoop()
+		close(p.batcher)
+	}()
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case <-p.done:
+	}
 
-	// 停接收：关掉队列让 worker 把剩余任务跑完后退出。
-	p.closeOnce.Do(func() { close(p.jobs) })
-	workers.Wait()
+	return p.shutdown()
+}
+
+// Close 让管道进入关停：不再受理新报文，已在途的继续处理。
+// 幂等，可在信号处理器里直接调用。
+func (p *Pipeline) Close() {
+	p.closeOnce.Do(func() { close(p.done) })
+}
+
+// shutdown 执行有序关停，返回最后一批的发布错误。
+func (p *Pipeline) shutdown() error {
+	p.Close()
+
+	// worker 见 done 之后会先把队列掏空再退出。
+	p.workers.Wait()
+
+	// 极端竞态兜底：某个 Submit 在 done 关闭的同一瞬间塞进了任务，
+	// 而 worker 已经退出。这些任务不能再处理，记为丢弃并结清在途计数，
+	// 否则 Flush 会永远等下去。
+	for {
+		select {
+		case <-p.jobs:
+			p.inflight.Done()
+			p.dropped.Add(1)
+		default:
+			goto drained
+		}
+	}
+
+drained:
 	close(p.events)
+	<-p.batcher
 
-	return <-batcherDone
+	return nil
 }
 
 // Flush 等待在途报文全部解析完，再让批处理器立刻发送当前批次。
 // 只冲刷批处理缓冲区是不够的：解析队列里的事件还没变成事件，
 // 调用方会看到"零事件"而误判为丢数据。
-func (p *Pipeline) Flush(ctx context.Context) {
+func (p *Pipeline) Flush(ctx context.Context) error {
 	drained := make(chan struct{})
 	go func() {
 		p.inflight.Wait()
@@ -259,14 +336,16 @@ func (p *Pipeline) Flush(ctx context.Context) {
 	select {
 	case <-drained:
 	case <-ctx.Done():
-		return
+		return ctx.Err()
 	}
 
 	done := make(chan struct{})
 	select {
 	case p.flush <- done:
 		<-done
+		return nil
 	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -279,35 +358,44 @@ func (p *Pipeline) Stats() Stats {
 		Published:    p.published.Load(),
 		PublishRetry: p.publishRetry.Load(),
 		Panics:       p.panics.Load(),
+		Dropped:      p.dropped.Load(),
 		QueueDepth:   len(p.jobs),
 	}
 }
 
-// parseLoop 消费队列直到队列关闭。
-func (p *Pipeline) parseLoop(ctx context.Context) {
-	for job := range p.jobs {
-		event := p.parse(job)
-
+// parseLoop 消费队列；关停时先把剩余任务处理完再退出——
+// 提前退出会让已受理的报文凭空消失。
+func (p *Pipeline) parseLoop() {
+	for {
 		select {
-		case p.events <- event:
-			p.inflight.Done()
-		case <-ctx.Done():
-			p.inflight.Done()
-
-			return
+		case job := <-p.jobs:
+			p.handle(job)
+		case <-p.done:
+			// 排空剩余后再退出。
+			for {
+				select {
+				case job := <-p.jobs:
+					p.handle(job)
+				default:
+					return
+				}
+			}
 		}
 	}
+}
+
+// handle 解析一条报文并投给批处理器。
+func (p *Pipeline) handle(job Job) {
+	event := p.parse(job)
+
+	p.events <- event
+	p.inflight.Done()
 }
 
 // Parse 只做解析与信封构造，不发布。
 // Kafka 消费需要"确认发布成功后再提交位移"，因此由它自己掌控发布与提交的顺序。
 func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.Time) Event {
 	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received})
-}
-
-// ParseWithMeta 同 Parse，但带上通道提供的截断信息。
-func (p *Pipeline) ParseWithMeta(snapshot connector.Snapshot, raw []byte, received time.Time, meta Meta) Event {
-	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received, Meta: meta})
 }
 
 // parse 把一条报文解析成事件。
@@ -551,8 +639,8 @@ func splitPath(path string) []string {
 	return append(segments, path[start:])
 }
 
-// batchLoop 累积事件并在满批或超时时发布；只在 events 关闭后退出。
-func (p *Pipeline) batchLoop(ctx context.Context) error {
+// batchLoop 累积事件并在满批或超时时发布；events 关闭后发布最后一批再退出。
+func (p *Pipeline) batchLoop() {
 	batch := make([]Event, 0, p.options.BatchSize)
 	ticker := time.NewTicker(p.options.FlushInterval)
 	defer ticker.Stop()
@@ -561,26 +649,25 @@ func (p *Pipeline) batchLoop(ctx context.Context) error {
 		select {
 		case event, ok := <-p.events:
 			if !ok {
-				p.publish(ctx, batch)
-				return nil
+				p.publish(batch)
+				return
 			}
 
 			batch = append(batch, event)
 			if len(batch) >= p.options.BatchSize {
-				p.publish(ctx, batch)
+				p.publish(batch)
 				batch = batch[:0]
 			}
 		case <-ticker.C:
 			if len(batch) > 0 {
-				p.publish(ctx, batch)
+				p.publish(batch)
 				batch = batch[:0]
 			}
 		case done := <-p.flush:
-			// Flush 保证在途任务都已投递到 events，但这些事件可能还在通道缓冲里，
-			// 而 select 可能先选中 flush 分支。先非阻塞排空缓冲，再发布，
-			// 否则最后一个事件会留到下一批，调用方看到的计数偏少。
+			// Flush 保证在途任务都已投递到 events，但可能还在缓冲里；
+			// select 可能先选中 flush，所以先非阻塞排空再发布。
 			batch = drain(p.events, batch)
-			p.publish(ctx, batch)
+			p.publish(batch)
 			batch = batch[:0]
 
 			close(done)
@@ -589,7 +676,6 @@ func (p *Pipeline) batchLoop(ctx context.Context) error {
 }
 
 // drain 非阻塞地把事件通道里已就绪的事件并入当前批次。
-// 通道关闭时返回已合并的批次，由调用方按停机路径处理。
 func drain(events <-chan Event, batch []Event) []Event {
 	for {
 		select {
@@ -605,36 +691,58 @@ func drain(events <-chan Event, batch []Event) []Event {
 	}
 }
 
-// publish 发送一批事件；失败重试直到成功或进程退出。
-// 不丢弃：发布失败意味着下游会缺数据，而重试的成本远低于丢事件。
-func (p *Pipeline) publish(ctx context.Context, batch []Event) {
+// publish 发送一批事件。
+//
+// 稳态下无限重试：发布失败意味着下游缺数据，背压继续往上游传。
+// 关停时改为有界——从进入关停起 DrainTimeout 内还发不出去就丢弃并记 Error，
+// 因为无界等待会让进程永远退不出（Kubernetes 会 SIGKILL，反而更糟）。
+func (p *Pipeline) publish(batch []Event) {
 	if len(batch) == 0 {
 		return
 	}
 
+	var deadline time.Time
 	backoff := 100 * time.Millisecond
+
 	for {
+		// 发布用独立 ctx：关停信号已由 done 表达，不能把"该退出了"
+		// 和"这批发不出去"混成同一个取消信号——那正是丢批的根因。
+		ctx := context.Background()
+		cancel := context.CancelFunc(func() {})
+		if !deadline.IsZero() {
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+		}
+
 		err := p.publisher.Publish(ctx, batch)
+		cancel()
+
 		if err == nil {
 			p.published.Add(uint64(len(batch)))
 			return
 		}
 
-		if ctx.Err() != nil {
-			logging.From(ctx).Warn("Dropping batch at shutdown", "event", "publish.aborted",
-				"events", len(batch), "error", logging.Error(err))
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			p.dropped.Add(uint64(len(batch)))
+			logging.From(context.Background()).Error("Dropping batch after drain timeout",
+				"event", "publish.dropped", "events", len(batch), "error", logging.Error(err))
+
 			return
 		}
 
 		p.publishRetry.Add(1)
-		logging.From(ctx).Warn("Publish failed; retrying", "event", "publish.retry",
+		logging.From(context.Background()).Warn("Publish failed; retrying", "event", "publish.retry",
 			"events", len(batch), "backoff_ms", backoff.Milliseconds(), "error", logging.Error(err))
 
-		select {
-		case <-time.After(backoff):
-		case <-ctx.Done():
+		// 首次失败时若已进入关停，开始计排空预算。
+		if deadline.IsZero() {
+			select {
+			case <-p.done:
+				deadline = time.Now().Add(p.options.DrainTimeout)
+			default:
+			}
 		}
 
+		time.Sleep(backoff)
 		if backoff < 5*time.Second {
 			backoff *= 2
 		}

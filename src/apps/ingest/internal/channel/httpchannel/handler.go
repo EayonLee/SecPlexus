@@ -107,18 +107,36 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, connectorID str
 	}
 
 	received := time.Now()
+	accepted := 0
+
 	for _, message := range messages {
 		// 队列满时此处阻塞，背压直接传到设备：不丢数据。
 		if err = c.pipeline.Submit(r.Context(), snapshot, message, received, pipeline.Meta{}); err != nil {
 			logging.From(r.Context()).Warn("Submit aborted", "event", "ingest.submit_aborted",
-				"connector_id", snapshot.ID, "error", logging.Error(err))
+				"connector_id", snapshot.ID, "accepted", accepted, "rejected", len(messages)-accepted,
+				"error", logging.Error(err))
 
-			// 已受理的部分仍然有效；客户端可重推，去重层按 event_id 兜底。
 			break
 		}
+
+		accepted++
 	}
 
-	writeAccepted(w, len(messages))
+	// 一条都没受理：这是"现在收不了"，不是"收下了"。返回 503 让设备重推，
+	// 而不是用 202 假装成功——后者会让设备不重试，数据真丢。
+	if accepted == 0 {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "pipeline unavailable")
+		return
+	}
+
+	// 部分受理：如实报数并给出重试提示。已受理的部分不可撤销，
+	// 但设备据此知道还有没送进去的。
+	if accepted < len(messages) {
+		w.Header().Set("Retry-After", "1")
+	}
+
+	writeAccepted(w, accepted, len(messages)-accepted)
 }
 
 // splitMode 决定用什么线格式拆分请求体。
@@ -132,7 +150,7 @@ func splitMode(snapshot connector.Snapshot, contentType string) string {
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err == nil && mediaType == "text/plain" {
 		// 行模式：Split 对非 JSON 模式按行拆分。
-		return ""
+		return parser.ModeLines
 	}
 
 	return parser.ModeJSON
@@ -212,15 +230,17 @@ func (c *Channel) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool
 }
 
 // response 是设备侧看到的响应体。
+// rejected 显式给出：设备据此判断是否需要重推剩余部分。
 type response struct {
 	Accepted int `json:"accepted"`
+	Rejected int `json:"rejected,omitempty"`
 }
 
-// writeAccepted 返回 202 与受理计数。
-func writeAccepted(w http.ResponseWriter, accepted int) {
+// writeAccepted 返回 202 与真实受理计数。
+func writeAccepted(w http.ResponseWriter, accepted, rejected int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(response{Accepted: accepted})
+	_ = json.NewEncoder(w).Encode(response{Accepted: accepted, Rejected: rejected})
 }
 
 // writeError 返回统一的错误体；不泄露内部细节。

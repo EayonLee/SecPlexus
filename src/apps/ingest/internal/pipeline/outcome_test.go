@@ -39,7 +39,7 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	event := publisher.events()[0]
 	if event.Outcome.Stage != pipeline.StageDecode {
@@ -73,7 +73,7 @@ func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	event := publisher.events()[0]
 	if event.Outcome.Reason != pipeline.ReasonNoRule {
@@ -107,7 +107,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	event := publisher.events()[0]
 	if event.Outcome.Reason != pipeline.ReasonTruncated {
@@ -153,7 +153,7 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	detail := publisher.events()[0].Outcome.Detail
 	if detail == "" {
