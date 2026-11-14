@@ -19,7 +19,7 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/nope", nil)
-	router.Handler(&handler.Server{}).ServeHTTP(recorder, request)
+	router.Handler(&handler.Server{}, router.Channels{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", recorder.Code)
@@ -37,7 +37,7 @@ func TestReadyReportsUnavailableWhenCheckFails(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(server).ServeHTTP(recorder, request)
+	router.Handler(server, router.Channels{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", recorder.Code)
@@ -54,7 +54,7 @@ func TestReadySucceedsWhenCheckPasses(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(server).ServeHTTP(recorder, request)
+	router.Handler(server, router.Channels{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
@@ -67,7 +67,7 @@ func TestReadyWithoutCheckIsOK(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(&handler.Server{}).ServeHTTP(recorder, request)
+	router.Handler(&handler.Server{}, router.Channels{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
@@ -29,6 +30,21 @@ type Kafka struct {
 	Topic   string   `yaml:"topic" validate:"required"`             // 唯一发布 topic；解析失败事件也发这里（parse_status 区分）。
 }
 
+// Pipeline 描述解析流水线的容量参数；零值由管道填默认值，配置里只写想改的。',
+type Pipeline struct {
+	Workers       int           `yaml:"workers"`        // 解析 worker 数；0 表示按 CPU 核数。
+	QueueDepth    int           `yaml:"queue_depth"`    // 待解析队列长度；0 表示 10000，队列满时阻塞接收。
+	BatchSize     int           `yaml:"batch_size"`     // 每批事件数；0 表示 500。
+	FlushInterval time.Duration `yaml:"flush_interval"` // 批量最长等待；0 表示 2 秒。
+}
+
+// HTTPChannel 描述设备推送通道的参数。
+type HTTPChannel struct {
+	MaxBodyBytes int64   `yaml:"max_body_bytes"` // 请求体上限，超出返回 413；0 表示 10 MiB。
+	RatePerSec   float64 `yaml:"rate_per_sec"`   // 每接入点每秒请求配额；0 表示 50。
+	RateBurst    int     `yaml:"rate_burst"`     // 每接入点突发额度；0 表示 200。
+}
+
 // IAM 描述授权上游；Ingest 的管理 API 每个受保护请求都向 IAM 换取授权结论。
 type IAM struct {
 	Host    string `yaml:"host" validate:"required,hostname|ip"` // IAM 连接目标，IP 或域名。
@@ -39,11 +55,13 @@ type IAM struct {
 
 // Config 包含 Ingest 启动和运行所需的配置。
 type Config struct {
-	App     App            `yaml:"app"`     // 服务监听配置。
-	Kafka   Kafka          `yaml:"kafka"`   // 事件发布总线。
-	Cache   cache.Config   `yaml:"cache"`   // 令牌限流用的 Redis。
-	IAM     IAM            `yaml:"iam"`     // 管理 API 的授权上游。
-	Logging logging.Config `yaml:"logging"` // 日志输出与轮转配置。
+	App      App            `yaml:"app"`          // 服务监听配置。
+	Pipeline Pipeline       `yaml:"pipeline"`     // 解析流水线容量。
+	HTTP     HTTPChannel    `yaml:"http_channel"` // 设备推送通道参数。
+	Kafka    Kafka          `yaml:"kafka"`        // 事件发布总线。
+	Cache    cache.Config   `yaml:"cache"`        // 令牌限流用的 Redis。
+	IAM      IAM            `yaml:"iam"`          // 管理 API 的授权上游。
+	Logging  logging.Config `yaml:"logging"`      // 日志输出与轮转配置。
 }
 
 // Load 加载并校验配置文件；文件名为空时读取当前目录的 config.yaml。
@@ -82,6 +100,9 @@ func (c Config) Validate() error {
 
 	if err := c.Cache.Validate(); err != nil {
 		return err
+	}
+	if c.HTTP.MaxBodyBytes < 0 || c.HTTP.RatePerSec < 0 || c.HTTP.RateBurst < 0 {
+		return errors.New("http_channel limits must not be negative")
 	}
 	return c.Logging.Validate()
 }
