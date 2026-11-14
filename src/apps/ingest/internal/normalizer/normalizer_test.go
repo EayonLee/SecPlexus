@@ -282,20 +282,20 @@ func TestApplyReportsParseFailure(t *testing.T) {
 func TestEventIDIsDeterministicPerConnector(t *testing.T) {
 	message := []byte("CEF:0|F|P|1|1|n|3|src=1.1.1.1")
 
-	first := normalizer.EventID("connector-a", 0, message)
-	if again := normalizer.EventID("connector-a", 0, message); again != first {
+	first := normalizer.EventID("connector-a", [16]byte{1}, 0, message)
+	if again := normalizer.EventID("connector-a", [16]byte{1}, 0, message); again != first {
 		t.Fatalf("same input produced different ids: %s vs %s", first, again)
 	}
 
-	if other := normalizer.EventID("connector-b", 0, message); other == first {
+	if other := normalizer.EventID("connector-b", [16]byte{1}, 0, message); other == first {
 		t.Fatal("event ids must differ across connectors")
 	}
 
-	if changed := normalizer.EventID("connector-a", 0, []byte("CEF:0|F|P|1|2|n|3|src=1.1.1.1")); changed == first {
+	if changed := normalizer.EventID("connector-a", [16]byte{1}, 0, []byte("CEF:0|F|P|1|2|n|3|src=1.1.1.1")); changed == first {
 		t.Fatal("event ids must differ across content")
 	}
 
-	if later := normalizer.EventID("connector-a", 1, message); later == first {
+	if later := normalizer.EventID("connector-a", [16]byte{1}, 1, message); later == first {
 		t.Fatal("repeated identical events must get distinct ids")
 	}
 }
@@ -519,5 +519,30 @@ func TestCompileRejectsNilClassUID(t *testing.T) {
 
 	if _, err := normalizer.Compile(rule); !errors.Is(err, normalizer.ErrInvalidRule) {
 		t.Fatalf("nil class_uid accepted: %v", err)
+	}
+}
+
+// 回归（P1）：event_id 曾只由"接入点 + 进程内序号 + 原文"生成，
+// syslog 路径原文为空，于是重启后序号从 1 重新开始 → 不同事件得到同一 ID。
+// 修复方式是让进程启动期（epoch）参与命名：同一进程内稳定，跨重启不同。
+func TestEventIDIsUniqueAcrossRestarts(t *testing.T) {
+	epochA := [16]byte{1, 2, 3}
+	epochB := [16]byte{9, 9, 9}
+
+	first := normalizer.EventID("conn-1", epochA, 1, nil)
+	second := normalizer.EventID("conn-1", epochB, 1, nil)
+
+	if first == second {
+		t.Fatalf("不同启动批次得到同一 event_id: %s", first)
+	}
+
+	// 同一进程内必须稳定：同一输入重复计算得到同一 ID。
+	if again := normalizer.EventID("conn-1", epochA, 1, nil); again != first {
+		t.Fatal("同一进程内 event_id 不稳定")
+	}
+
+	// 序号不同仍然要区分开（同内容不同事件不能被合并）。
+	if other := normalizer.EventID("conn-1", epochA, 2, nil); other == first {
+		t.Fatal("不同序号得到同一 event_id")
 	}
 }

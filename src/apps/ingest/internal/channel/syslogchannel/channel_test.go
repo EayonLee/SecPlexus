@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,19 +65,44 @@ func syslogRule(t *testing.T) *normalizer.Engine {
 	return engine
 }
 
-// freePort 取一个当前可用的端口。
+// portSeq 给本包分配互不相同的端口。
+//
+// 之前的做法是"绑 0 取系统端口再关掉"，但关闭与真正绑定之间有窗口，
+// 并行跑的其他包可能抢走同一端口，导致通道绑定失败、测试超时。
+// 改为在固定区间内顺序分配并当场验证可用性，避免这个竞争。
+var portSeq atomic.Int32
+
+// freePort 返回一个当前可绑定的端口。
 func freePort(t *testing.T) int {
 	t.Helper()
 
-	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	if portSeq.Load() == 0 {
+		// 起始点固定但区间靠上，避开常用服务端口；同包内顺序递增不会重复。
+		portSeq.Store(43000)
 	}
 
-	port := listener.LocalAddr().(*net.UDPAddr).Port
-	_ = listener.Close()
+	for attempt := 0; attempt < 200; attempt++ {
+		port := int(portSeq.Add(1))
 
-	return port
+		// 同时验证 TCP 与 UDP 都能绑：通道两者都要用。
+		tcp, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		_ = tcp.Close()
+
+		udp, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		_ = udp.Close()
+
+		return port
+	}
+
+	t.Fatal("找不到可用端口")
+
+	return 0
 }
 
 // harness 启动一个绑定端口的 syslog 通道。
