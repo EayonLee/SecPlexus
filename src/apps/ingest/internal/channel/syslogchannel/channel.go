@@ -235,11 +235,15 @@ func (c *Channel) serveTCPConnection(ctx context.Context, snapshot connector.Sna
 
 // deliver 把一条报文交给流水线；失败只记日志，不影响连接。
 func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, frame []byte) {
+	original := len(frame)
 	trimmed, truncated := truncate(frame)
 	if truncated {
 		logging.From(ctx).Warn("Syslog message truncated", "event", "syslog.truncated",
-			"connector_id", snapshot.ID, "limit", MaxMessageBytes)
+			"connector_id", snapshot.ID, "limit", MaxMessageBytes, "original_bytes", original)
 	}
+
+	// 截断信息随事件落库：分析师必须能看出这条数据不完整。
+	meta := pipeline.Meta{Truncated: truncated, OriginalBytes: original}
 
 	if len(trimmed) == 0 {
 		return
@@ -251,7 +255,7 @@ func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, fram
 			"connector_id", snapshot.ID, "bytes", len(trimmed))
 
 		// 信封解析不了仍然受理：按原文透传，事件带 parse_status=error 可查。
-		if submitErr := c.pipeline.Submit(ctx, snapshot, trimmed, time.Now()); submitErr != nil {
+		if submitErr := c.pipeline.Submit(ctx, snapshot, trimmed, time.Now(), meta); submitErr != nil {
 			logging.From(ctx).Warn("Submit aborted", "event", "syslog.submit_aborted",
 				"connector_id", snapshot.ID, "error", logging.Error(submitErr))
 		}
@@ -259,7 +263,7 @@ func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, fram
 		return
 	}
 
-	if err = c.pipeline.SubmitFields(ctx, snapshot, fields, time.Now()); err != nil {
+	if err = c.pipeline.SubmitFields(ctx, snapshot, fields, time.Now(), meta); err != nil {
 		logging.From(ctx).Warn("Submit aborted", "event", "syslog.submit_aborted",
 			"connector_id", snapshot.ID, "error", logging.Error(err))
 	}

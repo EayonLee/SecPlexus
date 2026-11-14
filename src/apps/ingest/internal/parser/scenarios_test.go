@@ -296,3 +296,23 @@ func TestWhitespaceOnlyMessagesAreRejectedEverywhere(t *testing.T) {
 		})
 	}
 }
+
+// 回归（模糊测试发现）：空对象与空键对象不携带数据，必须按格式不符拒绝。
+// 与 KV、分隔符保持同一契约——零字段的"成功"会产出只有常量的空事件。
+func TestJSONRejectsObjectsWithoutFields(t *testing.T) {
+	instance, err := parser.New(parser.Spec{Mode: parser.ModeJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, payload := range []string{`{}`, `{ }`, `{"nested":{}}`} {
+		if _, err = instance.Parse([]byte(payload)); !errors.Is(err, parser.ErrMalformed) {
+			t.Fatalf("%q 被接受: %v", payload, err)
+		}
+	}
+
+	// null 值也算字段：它表达"该字段存在且为空"，与"没有字段"不同。
+	if _, err = instance.Parse([]byte(`{"a":null}`)); err != nil {
+		t.Fatalf("含 null 字段的对象被拒绝: %v", err)
+	}
+}
