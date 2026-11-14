@@ -90,9 +90,10 @@ async function main() {
   if (!['dev', 'preview', 'check-config'].includes(command)) throw new Error('Supported application commands: dev, preview, check-config.');
   const selected = process.argv.slice(3);
   const modules = selected.length ? selected : ['iam','console','web'];
-  if (new Set(modules).size !== modules.length || modules.some(module => !['iam','console','web'].includes(module))) throw new Error('Select web, iam or console once each.');
+// ingest 需要 Kafka 与 IAM token，在通道落地前不进默认栈；显式传入模块名启动。
+  if (new Set(modules).size !== modules.length || modules.some(module => !['iam','console','ingest','web'].includes(module))) throw new Error('Select web, iam, ingest or console once each.');
   const env = loadEnvironment(root);
-  const configs = Object.fromEntries(['iam', 'console'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
+  const configs = Object.fromEntries(['iam', 'console', 'ingest'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
   for (const module of modules.filter(module => module !== 'web')) if (!existsSync(configs[module])) throw new Error(`Missing module config.yaml (src/apps/${module}/config.yaml); restore the module configuration before starting.`);
   if (modules.includes('iam')) env.SPX_WEB_ORIGIN = webOrigin(env);
   if (modules.includes('web')) webListener(env);
@@ -109,10 +110,10 @@ async function main() {
   const buildDirectory = mkdtempSync(path.join(tmpdir(), 'spx-dev-'));
   try {
     const prepared = {};
-    for (const module of ['iam', 'console'].filter(module => modules.includes(module))) {
+    for (const module of ['iam', 'console', 'ingest'].filter(module => modules.includes(module))) {
       const output = path.join(buildDirectory, module + executableSuffix);
       run('go', ['build', '-o', output, `./src/apps/${module}/cmd`]);
-      const moduleEnv = moduleEnvironment(module === 'console' && services.iam ? {...env,...serviceConnection(env,'iam',services.iam)} : env, module);
+      const moduleEnv = moduleEnvironment((module === 'console' || module === 'ingest') && services.iam ? {...env,...serviceConnection(env,'iam',services.iam)} : env, module);
       const inspected = spawnSync(output, ['check-config', '--config', configs[module], '--print-endpoints'], { cwd: root, env: moduleEnv, encoding: 'utf8' });
       if (inspected.error || inspected.status !== 0) {
         if (inspected.stderr) process.stderr.write(`${module}: ${inspected.stderr}`);

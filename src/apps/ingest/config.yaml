@@ -1,0 +1,66 @@
+# Ingest 数据接入模块配置。
+#
+# 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
+# 每项写作 ${环境变量名-默认值}：环境变量未设置时用默认值。
+# 密钥类（token、密码）只通过环境变量或私有 .env 注入，不写进本文件的默认值。
+
+# ---- HTTP 监听 ----
+# HTTPS 由反向代理终止，本服务只监听明文 HTTP。
+app:
+  # 监听地址。0.0.0.0 = 所有网卡；127.0.0.1 = 只允许本机（前面有反向代理时用这个）。
+  host: "${SPX_INGEST_BIND_HOST-0.0.0.0}"
+  # 监听端口。BIND_PORT 是本进程实际绑定的端口；未设置时回退到 SPX_INGEST_PORT（调用方连接的目标端口）。
+  port: "${SPX_INGEST_BIND_PORT-${SPX_INGEST_PORT-8082}}"
+
+# ---- Kafka（事件发布总线） ----
+# Kafka 是第一版唯一缓冲层：解析失败的事件照常发布（parse_status=error），没有隔离区 topic，也不落盘。
+# Kafka 不可用时接收阻塞（背压），不丢数据。
+kafka:
+  # broker 地址列表，逗号分隔。必填：没有 broker 服务无法启动（check-config 与 serve 都会失败）。
+  brokers: "${SPX_KAFKA_BROKERS-}"
+  # 唯一发布 topic。所有事件（含解析失败）都进这一个 topic，用 metadata.parse_status 区分。
+  topic: "${SPX_INGEST_KAFKA_TOPIC-spx.ingest.event}"
+
+# ---- Redis（HTTP 通道令牌限流） ----
+# 全平台共用一个 Redis，用 key 前缀（spx:ingest:...）区分模块。
+# 令牌限流计数丢了会让暴力推送防护短暂失效，所以 Redis 挂了 HTTP 通道要拒绝（不是放行）。
+cache:
+  host: "${SPX_REDIS_HOST-127.0.0.1}"
+  port: "${SPX_REDIS_PORT-6379}"
+  user: "${SPX_REDIS_USER-default}"
+  password: "${SPX_REDIS_PASSWORD-secplexus}"
+  db: "${SPX_REDIS_DB-0}"
+  # 完整 Redis 连接串（redis://用户:密码@主机:端口/库号）。填了就替代上面的分项字段。
+  url: "${SPX_REDIS_URL-}"
+
+# ---- 通道开关 ----
+# 端口绑定由 connectors 注册表决定（每个接入点独立端口），不在这里配置。
+channels:
+  # 设备主动推送：HTTP + Bearer 令牌，202 表示已受理。
+  http: "${SPX_INGEST_CHANNEL_HTTP-true}"
+  # UDP/TCP syslog：RFC5424/3164/6587 自动识别，CEF 前缀自动路由。
+  syslog: "${SPX_INGEST_CHANNEL_SYSLOG-true}"
+  # 消费客户已有 Kafka 总线：位移只在发布成功后提交。
+  kafka: "${SPX_INGEST_CHANNEL_KAFKA-true}"
+
+# ---- 上游 IAM ----
+# 管理 API 不新增权限点（全员可见决策）；每个受保护请求向 IAM 换取会话与授权结论。
+# IAM 不可用时管理 API 返回 503，绝不放行。
+iam:
+  # IAM 服务地址。注意不能填 0.0.0.0——那是监听地址，不是可连接的地址。
+  host: "${SPX_IAM_HOST-127.0.0.1}"
+  # IAM 服务端口，必须与 IAM 实际监听端口一致。
+  port: "${SPX_IAM_PORT-8081}"
+  # 调用 IAM 的服务凭证，32-512 字节。必须与 IAM config.yaml 里 service_clients.ingest.token 完全相同。
+  token: "${SPX_INGEST_IAM_TOKEN-}"
+
+# ---- 日志 ----
+# 结构化 JSON 日志。容器部署建议 file 留空、只走 stdout，由容器运行时做轮转。
+logging:
+  level: "${SPX_INGEST_LOG_LEVEL-info}"
+  stdout: "${SPX_INGEST_LOG_STDOUT-true}"
+  file: "${SPX_INGEST_LOG_FILE-logs/ingest.log}"
+  max_size_mb: "${SPX_INGEST_LOG_MAX_SIZE_MB-50}"
+  max_backups: "${SPX_INGEST_LOG_MAX_BACKUPS-5}"
+  max_age_days: "${SPX_INGEST_LOG_MAX_AGE_DAYS-14}"
+  compress: "${SPX_INGEST_LOG_COMPRESS-true}"

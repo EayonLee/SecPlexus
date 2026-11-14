@@ -1,0 +1,110 @@
+// Package config 只负责 Ingest 配置加载和校验，不创建运行资源。
+package config
+
+import (
+	"errors"
+	"net"
+	"net/url"
+	"strconv"
+
+	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
+	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+)
+
+// App 描述 Ingest 的统一监听配置。
+// 可信代理网段在 HTTP 通道（按来源 IP 限流）落地时随路由布线一起增加，对齐 iam 的消费方式。
+type App struct {
+	Host string `yaml:"host" validate:"required,ip|eq=localhost"` // HTTP 监听地址。
+	Port int    `yaml:"port" validate:"gte=1,lte=65535"`          // HTTP 监听端口。
+}
+
+// Addr 返回 HTTP 服务的监听地址。
+func (a App) Addr() string { return net.JoinHostPort(a.Host, strconv.Itoa(a.Port)) }
+
+// Kafka 描述事件发布总线；Kafka 是第一版唯一缓冲层（不落盘原则）。
+type Kafka struct {
+	Brokers []string `yaml:"brokers" validate:"dive,hostname_port"` // broker 地址列表；serve 必填。
+	Topic   string   `yaml:"topic" validate:"required"`             // 唯一发布 topic；解析失败事件也发这里（parse_status 区分）。
+}
+
+// Channels 描述三种接入通道的开关；端口绑定由 connectors 注册表决定，不在这里配置。
+type Channels struct {
+	HTTP   bool `yaml:"http"`   // 设备主动推送（Bearer 令牌）。
+	Syslog bool `yaml:"syslog"` // UDP/TCP syslog（RFC5424/3164/6587 自动识别）。
+	Kafka  bool `yaml:"kafka"`  // 消费客户已有总线。
+}
+
+// IAM 描述授权上游；Ingest 的管理 API 每个受保护请求都向 IAM 换取授权结论。
+type IAM struct {
+	Host    string `yaml:"host" validate:"required,hostname|ip"` // IAM 连接目标，IP 或域名。
+	Port    int    `yaml:"port" validate:"gte=1,lte=65535"`      // IAM 连接端口。
+	BaseURL string `yaml:"-"`                                    // 由结构化连接字段派生，不接受另一份 URL 配置。
+	Token   string `yaml:"token"`                                // 调用 IAM 的服务凭证。
+}
+
+// Config 包含 Ingest 启动和运行所需的配置。
+type Config struct {
+	App      App            `yaml:"app"`      // 服务监听配置。
+	Kafka    Kafka          `yaml:"kafka"`    // 事件发布总线。
+	Cache    cache.Config   `yaml:"cache"`    // 令牌限流用的 Redis。
+	Channels Channels       `yaml:"channels"` // 通道开关。
+	IAM      IAM            `yaml:"iam"`      // 管理 API 的授权上游。
+	Logging  logging.Config `yaml:"logging"`  // 日志输出与轮转配置。
+}
+
+// Load 加载并校验配置文件；文件名为空时读取当前目录的 config.yaml。
+func Load(filename string) (Config, error) {
+	if filename == "" {
+		filename = "config.yaml"
+	}
+
+	var c Config
+	settings, err := configuration.Read(filename)
+	if err != nil {
+		return c, err
+	}
+	if err := configuration.Decode(settings, &c); err != nil {
+		return c, err
+	}
+
+	if c.IAM.Host == "0.0.0.0" || c.IAM.Host == "::" {
+		return c, errors.New("iam.host (SPX_IAM_HOST) cannot be a wildcard")
+	}
+	c.IAM.BaseURL = (&url.URL{Scheme: "http", Host: net.JoinHostPort(c.IAM.Host, strconv.Itoa(c.IAM.Port))}).String()
+	if err := iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, false); err != nil {
+		return c, errors.New("iam.token (SPX_INGEST_IAM_TOKEN) must contain 32–512 bytes")
+	}
+
+	c.Cache.URL = c.Cache.ResolveURL()
+
+	return c, c.Validate()
+}
+
+// Validate 校验监听地址、依赖连接与代理网段。
+func (c Config) Validate() error {
+	if err := configuration.Validate(c); err != nil {
+		return err
+	}
+
+	if err := c.Cache.Validate(); err != nil {
+		return err
+	}
+	return c.Logging.Validate()
+}
+
+// ValidateServe 在创建运行资源前校验服务专用前置条件：
+// Kafka 是唯一缓冲层，没有 broker 地址服务无法履行"不丢数据"承诺，启动即失败。
+func (c Config) ValidateServe() error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if len(c.Kafka.Brokers) == 0 {
+		return errors.New("kafka.brokers (SPX_KAFKA_BROKERS) is required to serve")
+	}
+	if err := iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, true); err != nil {
+		return errors.New("iam.token (SPX_INGEST_IAM_TOKEN) must contain 32–512 bytes")
+	}
+	return nil
+}

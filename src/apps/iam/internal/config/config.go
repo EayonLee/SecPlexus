@@ -11,13 +11,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	"github.com/jackc/pgx/v5"
 )
 
 // App 描述 IAM 的统一监听和反向代理配置。
@@ -52,16 +51,6 @@ func (d Database) connection(user, password string) string {
 	q := url.Values{"sslmode": {d.SSLMode}}
 	u.RawQuery = q.Encode()
 	return u.String()
-}
-
-// Cache 描述 Redis 连接及 ACL 用户；URL 非空时优先使用 URL。
-type Cache struct {
-	Host     string `yaml:"host" validate:"required"`        // 监听或连接地址。
-	Port     int    `yaml:"port" validate:"gte=1,lte=65535"` // 监听或连接端口。
-	User     string `yaml:"user"`                            // Redis ACL 用户名；默认使用 default。
-	Password string `yaml:"password"`                        // Redis 连接密码。
-	DB       int    `yaml:"db"`                              // Redis 逻辑数据库编号。
-	URL      string `yaml:"url"`                             // 可选的完整连接地址。
 }
 
 // ServiceClient 描述允许请求鉴权的服务及其权限。
@@ -99,7 +88,7 @@ type Retention struct {
 type Config struct {
 	App            App                      `yaml:"app"`             // 公开服务配置。
 	DB             Database                 `yaml:"db"`              // PostgreSQL 连接配置。
-	Cache          Cache                    `yaml:"cache"`           // Redis 连接配置。
+	Cache          cache.Config             `yaml:"cache"`           // Redis 连接配置。
 	ServiceClients map[string]ServiceClient `yaml:"service_clients"` // 服务调用方及允许的操作。
 	Auth           Auth                     `yaml:"auth"`            // 认证策略配置。
 	Bootstrap      Bootstrap                `yaml:"bootstrap"`       // 配置托管管理员的权威来源。
@@ -126,18 +115,7 @@ func Load(filename string) (Config, error) {
 		c.DB.URL = c.DB.connection(c.DB.User, c.DB.Password)
 	}
 
-	if c.Cache.URL == "" {
-		u := url.URL{
-			Scheme: "redis",
-			Host:   net.JoinHostPort(c.Cache.Host, strconv.Itoa(c.Cache.Port)),
-			Path:   "/" + strconv.Itoa(c.Cache.DB),
-		}
-		if c.Cache.User != "" || c.Cache.Password != "" {
-			u.User = url.UserPassword(c.Cache.User, c.Cache.Password)
-		}
-
-		c.Cache.URL = u.String()
-	}
+	c.Cache.URL = c.Cache.ResolveURL()
 
 	return c, c.Validate()
 }
@@ -191,12 +169,8 @@ func (c Config) Validate() error {
 	if c.DB.User == "" {
 		return errors.New("db.user must not be empty")
 	}
-	if c.Cache.DB < 0 {
-		return errors.New("cache.db must be nonnegative")
-	}
-
-	if _, err := redis.ParseURL(c.Cache.URL); err != nil {
-		return errors.New("cache.url must be a valid Redis connection URL; check cache fields")
+	if err := c.Cache.Validate(); err != nil {
+		return err
 	}
 
 	if _, err := pgx.ParseConfig(c.DB.URL); err != nil {
