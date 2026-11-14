@@ -13,6 +13,26 @@
   变异库会在此基础上生成更恶劣的输入；
 - 新增厂商时只需要往这里加一个文件，测试自动覆盖。
 
+## 为什么放在 `testdata/` 而不是仓库根 `tests/`
+
+Go 工具链把包内名为 `testdata` 的目录**整体忽略**（不参与 build、vet、lint、覆盖率统计），
+这是 Go 官方的测试夹具约定，编译器与 `go/*/testdata` 规则都依赖它：
+外部测试数据不污染构建产物，也不会被误当成包代码。
+
+仓库根的 `tests/` 放的是**跨模块的集成与端到端脚本**（`tests/integration`、`tests/e2e`），
+与"某个包自己的夹具"是两类东西：前者需要起容器、跑真实服务，后者只是纯数据。
+
+因此本仓库的约定是：
+
+| 位置 | 放什么 | 谁来跑 |
+|---|---|---|
+| `<package>/testdata/` | 该包测试用的纯数据（语料、fuzz 种子、期望输出） | `go test` |
+| `tests/integration/` | 需要 PostgreSQL/Redis/Kafka 的集成脚本 | `make integration` |
+| `tests/e2e/` | 浏览器端到端流程 | `make test-e2e` |
+
+`testdata/fuzz/<FuzzName>/` 是 `go test -fuzz` 自动写入的**回归语料**：
+模糊测试一旦发现失败输入就存到这里，之后每次普通 `go test` 都会重跑它。
+
 ## 目录约定
 
 ```

@@ -48,7 +48,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - `POST /api/v1/ingest/events/{connector_id}`，鉴权 `Authorization: Bearer <ingest token>`（per-connector，SHA-256 摘要存储，常数时间比较）。
 - 请求体上限 10 MiB（可配）；超限 413。数组批量上限 1000 条。
 - 限流 per-connector：默认 50 req/s、burst 200（Redis 计数；Redis 故障时**拒绝**不放行，与 IAM 登录限流同语义）。
-- 成功返回 `202`，正文为受理计数；解析与发布在响应之后异步完成，解析失败不改写事件流（事件带 parse_status=error），不回传错误给设备（设备重推由去重层兜底）。
+- 成功返回 `202`，正文为受理计数；解析与发布在响应之后异步完成，解析失败不改写事件流（事件带 `parse_status=error` 与 `parse_error{stage,reason,message}`），不回传错误给设备（设备重推由去重层兜底）。
 - Content-Type 只接受 `application/json` 与 `text/plain`；其余 415。
 
 ### 通道二：syslog
@@ -97,6 +97,8 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
+- **解析失败的三层表达（对照 Elastic 与 Vector）**：失败原因拆成三个字段回答三个问题——`stage`（decode/map/limit，哪一层失败）、`reason`（稳定枚举：no_rule / format_mismatch / truncated / engine_panic，供聚合告警）、`message`（人类可读细节，供排查）。**原因码与描述必须分开**：Elastic 用 `event.kind=pipeline_error` + `error.message` + processor tag，Vector 要求错误事件带机器可读的 `error_type` 标签；混成一个字符串则既不能聚合也不能排查。注意 Splunk 的做法相反——它不给事件加解析状态，错误只进 `_internal` 索引；我们不采用，因为事件存储需要能按解析质量做看板。
+- **截断不覆盖规则产出的分类**：失败事件只在缺失字段上兜底（`class_uid`、`severity_id`、`time`、`message`），已解析出的字段与规则声明的类一律保留——头部完整的 CEF 仍属 2004，覆盖成通用类会让下游按 class_uid 路由时找不到它。
 - **报文大小上限与截断语义（证据驱动）**：行业默认值各不相同——RFC5424 要求接收方 **MUST 支持 480 字节**、**SHOULD 支持 2048**，且规定「若截断，MUST 截在末尾」；RFC5426 对 UDP 的 IPv4 要求 480、IPv6 要求 1180；rsyslog 默认 **8 KiB**（`$MaxMessageSize`，官方注明不要低于 1k）；Splunk 默认 **10 000 字节/行**（`TRUNCATE`，0 表示永不截断）；Vector 默认 **102 400 字节**（`max_length`）。我们的取值：syslog 单条 **64 KiB**（远高于各规范下限，覆盖含结构化数据的 Windows 事件日志），HTTP 请求体 **10 MiB**（对齐 Splunk 事件量级与常见批量推送），Kafka 单条由 broker 的 `message.max.bytes` 约束。
 - **截断必须可观测，且不得伪装成解析成功**：截断不只写日志，事件元数据写入 `metadata.truncated=true` 与 `metadata.original_bytes`；同时该事件的 `parse_status` **强制为 error**（原因码 `truncated`）。理由是结构化格式在中间被切断后，剩余字段看起来完全合法却缺了尾部字段——CEF 的 `src`/`dst` 恰好在扩展区末尾，把半条 CEF 当成功解析会产出看似正常实则错误的字段。RFC5424 允许「截断」或「丢弃」，我们选择截断并显式标注，兼顾可排查与可追责。
 - **持续化验证（语料 + 模糊测试）**：解析层的形态回归由 `internal/parser/testdata/corpus/` 的语料库守护，按「模式 + 参数」组织变体（KV 的默认分隔符与冒号逗号是两套变体），每条样本走真实的 `Split → Parse` 流程；同一批语料同时是 Go 原生模糊测试的种子（`FuzzParseEveryMode`、`FuzzSplitNeverPanics`、`FuzzSplitFrames`、`FuzzFlattenNeverPanics`）。持续测试的公共性质：不 panic、零字段不得返回成功、分帧必须有界且推进、单帧不超上限。实测 30 秒完成 213 万次执行、零违规。语料可扩充的公开数据集见 `testdata/corpus/README.md`（Loghub、Azure Sentinel Sample Data、OCSF schema events、panw-fw-samples、log-zoo），导入时需注明来源与许可。
