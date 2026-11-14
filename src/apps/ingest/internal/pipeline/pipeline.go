@@ -457,12 +457,31 @@ func (p *Pipeline) batchLoop(ctx context.Context) error {
 				batch = batch[:0]
 			}
 		case done := <-p.flush:
-			if len(batch) > 0 {
-				p.publish(ctx, batch)
-				batch = batch[:0]
-			}
+			// Flush 保证在途任务都已投递到 events，但这些事件可能还在通道缓冲里，
+			// 而 select 可能先选中 flush 分支。先非阻塞排空缓冲，再发布，
+			// 否则最后一个事件会留到下一批，调用方看到的计数偏少。
+			batch = drain(p.events, batch)
+			p.publish(ctx, batch)
+			batch = batch[:0]
 
 			close(done)
+		}
+	}
+}
+
+// drain 非阻塞地把事件通道里已就绪的事件并入当前批次。
+// 通道关闭时返回已合并的批次，由调用方按停机路径处理。
+func drain(events <-chan Event, batch []Event) []Event {
+	for {
+		select {
+		case pending, open := <-events:
+			if !open {
+				return batch
+			}
+
+			batch = append(batch, pending)
+		default:
+			return batch
 		}
 	}
 }
