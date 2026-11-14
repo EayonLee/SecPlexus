@@ -21,6 +21,29 @@ kafka:
   # 唯一发布 topic。所有事件（含解析失败）都进这一个 topic，用 metadata.parse_status 区分。
   topic: "${SPX_INGEST_KAFKA_TOPIC-spx.ingest.event}"
 
+# ---- 解析流水线 ----
+# 接收与发布之间的解析环节。容量按 5w EPS 设计：默认值即推荐配置，
+# 只有在压测或资源受限时才需要调。
+pipeline:
+  # 解析 worker 数。留空/0 = 按 CPU 核数。5w EPS 在 4 核上绰绰有余。
+  workers: "${SPX_INGEST_WORKERS-0}"
+  # 待解析队列长度。队列满时接收阻塞（背压），不丢数据。
+  queue_depth: "${SPX_INGEST_QUEUE_DEPTH-10000}"
+  # 每批事件数。批越大单次发布越省，但延迟越高。
+  batch_size: "${SPX_INGEST_BATCH_SIZE-500}"
+  # 批量最长等待：未满批也会在这个时间后发出。
+  flush_interval: "${SPX_INGEST_FLUSH_INTERVAL-2s}"
+
+# ---- 设备推送通道 ----
+# 请求体上限、令牌限流配额。限流按接入点分别计数，存在 Redis 里。
+http_channel:
+  # 请求体上限（字节），超出返回 413。默认 10 MiB。
+  max_body_bytes: "${SPX_INGEST_HTTP_MAX_BODY_BYTES-10485760}"
+  # 每接入点每秒请求配额。默认 50。
+  rate_per_sec: "${SPX_INGEST_HTTP_RATE_PER_SEC-50}"
+  # 每接入点突发额度。默认 200。
+  rate_burst: "${SPX_INGEST_HTTP_RATE_BURST-200}"
+
 # ---- Redis（HTTP 通道令牌限流） ----
 # 全平台共用一个 Redis，用 key 前缀（spx:ingest:...）区分模块。
 # 令牌限流计数丢了会让暴力推送防护短暂失效，所以 Redis 挂了 HTTP 通道要拒绝（不是放行）。

@@ -8,16 +8,21 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/publish"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
+	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
-// Serve 初始化 Ingest 所需的客户端和 HTTP 服务，并管理它们的生命周期。
-// 骨架阶段只验证配置、建立 IAM 客户端并监听就绪检查；
-// Kafka 生产者、Redis 限流与三通道在后续批次接入。
+// Serve 初始化解析流水线、事件发布与 HTTP 通道，并管理它们的生命周期。
 func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	if err := cfg.ValidateServe(); err != nil {
 		return err
@@ -30,28 +35,149 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	defer func() { outcome = errors.Join(outcome, closeLog()) }()
 
 	slog.SetDefault(logger)
-	// 就绪检查集中在一个钩子上：依赖落地一批，探活就补一批，
-	// 避免"进程活着但依赖全挂仍然接流量"的可用性事故。
+
+	startup, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelStartup()
+
+	// 先建发布器：它连通性失败必须在启动期暴露，好过第一条事件才发现丢数据。
+	producer, err := publish.NewKafka(startup, publish.Options{
+		Brokers: cfg.Kafka.Brokers,
+		Topic:   cfg.Kafka.Topic,
+	})
+	if err != nil {
+		return err
+	}
+
+	defer producer.Close()
+
+	client, err := openCache(startup, cfg.Cache)
+	if err != nil {
+		return err
+	}
+
+	defer func() { outcome = errors.Join(outcome, client.Close()) }()
+
+	limiter, err := httpchannel.NewRedisLimiter(client, rateBurst(cfg.HTTP.RateBurst), ratePerSecond(cfg.HTTP.RatePerSec))
+	if err != nil {
+		return err
+	}
+
+	line := pipeline.New(pipeline.Options{
+		Workers:       cfg.Pipeline.Workers,
+		QueueDepth:    cfg.Pipeline.QueueDepth,
+		BatchSize:     cfg.Pipeline.BatchSize,
+		FlushInterval: cfg.Pipeline.FlushInterval,
+	}, producer)
+
+	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
+	defer stopPipeline()
+
+	pipelineDone := make(chan error, 1)
+	go func() { pipelineDone <- line.Start(pipelineCtx) }()
+
+	// 接入点注册表：第五组接入数据库加载；当前为空表，
+	// 未注册令牌一律 401——这比接受未知设备的推送安全。
+	registry := connector.NewMemory()
+
 	server := &handler.Server{
+		Registry: registry,
+		Pipeline: line,
 		Ready: func(ctx context.Context) error {
-			// 骨架阶段没有常驻外部依赖；通道与发布层落地后在这里探活 Kafka 与 Redis。
+			if err := client.Ping(ctx).Err(); err != nil {
+				return errors.New("cache is not ready")
+			}
+
 			return nil
 		},
 	}
 
+	channels := router.Channels{
+		Registry: registry,
+		Limiter:  limiter,
+		Pipeline: line,
+		MaxBody:  maxBodyBytes(cfg.HTTP.MaxBodyBytes),
+	}
+
 	httpServer := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           router.Handler(server),
+		Handler:           router.Handler(server, channels),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
+		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
 
-	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr())
-	if err := httpx.Serve(ctx, httpServer); err != nil {
-		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(err))
-		return err
+	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr(),
+		"workers", cfg.Pipeline.Workers, "topic", cfg.Kafka.Topic)
+
+	serveErr := httpx.Serve(ctx, httpServer)
+
+	// 停机顺序：停接收（HTTP 关闭）→ 排空在途解析 → 发布剩余批次。
+	stopPipeline()
+	if err := <-pipelineDone; err != nil {
+		logging.From(ctx).Error("Pipeline stopped with error", "event", "pipeline.stopped", "error", logging.Error(err))
 	}
+
+	if serveErr != nil {
+		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(serveErr))
+		return serveErr
+	}
+
 	return nil
+}
+
+// openCache 创建并验证 Redis 连接；失败时不遗留客户端连接。
+func openCache(ctx context.Context, cfg cache.Config) (*redis.Client, error) {
+	options, err := redis.ParseURL(cfg.URL)
+	if err != nil {
+		return nil, errors.New("invalid cache connection configuration")
+	}
+
+	options.DialTimeout = 3 * time.Second
+	options.ReadTimeout = 2 * time.Second
+	options.WriteTimeout = 2 * time.Second
+	options.PoolTimeout = 3 * time.Second
+	options.MaxRetries = -1
+
+	client := redis.NewClient(options)
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		logging.From(ctx).Error("Redis connection failed", "event", "dependency.failed",
+			"dependency", "redis", "error", logging.Error(err))
+
+		return nil, errors.New("cache unavailable")
+	}
+
+	return client, nil
+}
+
+// 默认值集中在这里：配置零值表示"用推荐的默认"。
+const (
+	defaultRatePerSec   = 50
+	defaultRateBurst    = 200
+	defaultMaxBodyBytes = 10 << 20
+)
+
+func ratePerSecond(value float64) float64 {
+	if value <= 0 {
+		return defaultRatePerSec
+	}
+
+	return value
+}
+
+func rateBurst(value int) int {
+	if value <= 0 {
+		return defaultRateBurst
+	}
+
+	return value
+}
+
+func maxBodyBytes(value int64) int64 {
+	if value <= 0 {
+		return defaultMaxBodyBytes
+	}
+
+	return value
 }

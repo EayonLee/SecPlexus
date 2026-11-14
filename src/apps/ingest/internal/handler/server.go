@@ -3,19 +3,19 @@ package handler
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // Server 持有 Ingest 处理请求所需的依赖。
-// 骨架阶段没有业务路由；通道与连接器路由在后续批次挂载。
 type Server struct {
+	Registry connector.Registry // 接入点查询；由通道与管理 API 共用。
+	Pipeline *pipeline.Pipeline // 已受理事件的解析与发布。
 	// Ready 报告外部依赖是否可用；nil 表示当前没有需要检查的依赖。
-	// 通道与发布层落地后，bootstrap 在这里接入 Kafka/Redis 的真实探活，
-	// 就绪检查绝不能在依赖全挂时仍然返回 200。
 	Ready func(ctx context.Context) error
 }
 
@@ -31,6 +31,3 @@ func (s *Server) ReadyHandler(c *gin.Context) {
 
 	result.Success(c.Writer, map[string]bool{"ready": true})
 }
-
-// 确认错误响应使用 HTTP 语义；result 包负责状态码映射。
-var _ = http.StatusServiceUnavailable
