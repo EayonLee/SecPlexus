@@ -1,28 +1,17 @@
 package router_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
-	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
-
-func testHandler(t *testing.T) http.Handler {
-	t.Helper()
-	client, err := iamclient.New("http://127.0.0.1:8081", strings.Repeat("c", 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(client.Close)
-	return router.Handler(&handler.Server{IAM: client})
-}
 
 // 只有已声明的路由应存在；未知路径必须是 404 而不是被中间件吞成其它状态。
 func TestUnknownRouteIsNotFound(t *testing.T) {
@@ -30,30 +19,57 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/nope", nil)
-	testHandler(t).ServeHTTP(recorder, request)
+	router.Handler(&handler.Server{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", recorder.Code)
 	}
 }
 
-// 健康检查必须存在；管理路由在后续批次挂载。
-func TestReadyRouteRegistered(t *testing.T) {
+// 回归：就绪检查在依赖探活失败时必须返回 503，
+// 恒真就绪会把流量导给依赖全挂的实例。
+func TestReadyReportsUnavailableWhenCheckFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	client, err := iamclient.New("http://127.0.0.1:8081", strings.Repeat("c", 32))
-	if err != nil {
-		t.Fatal(err)
+
+	server := &handler.Server{
+		Ready: func(context.Context) error { return errors.New("kafka unavailable") },
 	}
 
-	t.Cleanup(client.Close)
-	router.Register(engine, &handler.Server{IAM: client})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	router.Handler(server).ServeHTTP(recorder, request)
 
-	for _, route := range engine.Routes() {
-		if route.Path == "/health/ready" {
-			return
-		}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", recorder.Code)
+	}
+}
+
+// 依赖可用时返回 200。
+func TestReadySucceedsWhenCheckPasses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server := &handler.Server{
+		Ready: func(context.Context) error { return nil },
 	}
 
-	t.Fatal("readiness route is not registered")
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	router.Handler(server).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+}
+
+// 没有依赖检查的阶段同样就绪（进程已启动、配置已加载）。
+func TestReadyWithoutCheckIsOK(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	router.Handler(&handler.Server{}).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
 }
