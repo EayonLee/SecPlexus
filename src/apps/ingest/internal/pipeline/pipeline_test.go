@@ -107,11 +107,16 @@ func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 		t.Fatalf("event body is not JSON: %v", err)
 	}
 	metadata, ok := body["metadata"].(map[string]any)
-	if !ok || metadata["parse_status"] != "ok" {
+	if !ok {
 		t.Fatalf("metadata = %#v", body["metadata"])
 	}
-	if metadata["connector_id"] != "conn-1" {
-		t.Fatalf("connector id missing: %#v", metadata)
+
+	bookkeeping, ok := metadata["spx"].(map[string]any)
+	if !ok || bookkeeping["parse_status"] != "ok" {
+		t.Fatalf("metadata.spx = %#v", metadata["spx"])
+	}
+	if bookkeeping["connector_id"] != "conn-1" {
+		t.Fatalf("connector id missing: %#v", bookkeeping)
 	}
 }
 

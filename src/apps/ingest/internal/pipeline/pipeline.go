@@ -62,6 +62,17 @@ type Outcome struct {
 // OK 报告解析是否成功。
 func (o Outcome) OK() bool { return o.Status == StatusOK }
 
+// OCSFVersion 是本服务产出事件所遵循的 OCSF schema 版本。
+// 事件一旦发布就不能改语义，消费方靠它解释字段。
+const OCSFVersion = "1.1.0"
+
+// Product 描述产出方，填进 OCSF 必填的 metadata.product。
+var Product = map[string]any{
+	"name":        "SecPlexus ingest",
+	"vendor_name": "SecPlexus",
+	"version":     "0.1.0",
+}
+
 // ClassUIDGeneric 是未解析事件的兜底类。
 // 6003 由 spec 指定为"通用接入（原文透传 message）"的类，
 // 目的是让未挂规则的报文仍然可查询、可统计，而不是被丢弃。
@@ -571,16 +582,24 @@ func buildBody(job Job, fields map[string]any, event Event) []byte {
 		}
 	}
 
-	metadata := map[string]any{
+	// OCSF base_event 的 required 属性：category_uid、type_uid、activity_id、metadata。
+	// 缺了它们，任何 OCSF 消费者都无法分类或建表，所以在这里补齐而不是留给下游猜。
+	activityID := activityIDOf(envelope)
+	classUID := classUIDOf(envelope)
+
+	envelope["activity_id"] = activityID
+	envelope["category_uid"] = classUID / 1000
+	envelope["type_uid"] = classUID*100 + activityID
+
+	// 我方簿记放进 metadata.spx：metadata 是 OCSF 预留对象，
+	// 直接塞 connector_id/parse_status 会占用标准语义并挡掉必填的 version/product。
+	bookkeeping := map[string]any{
 		"connector_id": job.Snapshot.ID,
-		"event_id":     event.EventID,
 		"parse_status": string(event.Outcome.Status),
 	}
 
-	// 失败时给出机器可读原因、失败层次与人类可读细节，三者用途不同：
-	// 原因码用于聚合告警，层次用于定位，细节用于排查。
 	if !event.Outcome.OK() {
-		metadata["parse_error"] = map[string]any{
+		bookkeeping["parse_error"] = map[string]any{
 			"stage":   string(event.Outcome.Stage),
 			"reason":  string(event.Outcome.Reason),
 			"message": event.Outcome.Detail,
@@ -588,10 +607,29 @@ func buildBody(job Job, fields map[string]any, event Event) []byte {
 	}
 
 	if event.Truncated {
-		metadata["truncated"] = true
-		metadata["original_bytes"] = event.OriginalBytes
+		bookkeeping["truncated"] = true
+		bookkeeping["original_bytes"] = event.OriginalBytes
 	}
 
+	// 规则若已写 metadata（如 product 常量），合并而不是丢弃。
+	metadata := map[string]any{}
+	if existing, ok := envelope["metadata"].(map[string]any); ok {
+		for key, value := range existing {
+			metadata[key] = value
+		}
+	}
+
+	if _, exists := metadata["version"]; !exists {
+		metadata["version"] = OCSFVersion
+	}
+	if _, exists := metadata["product"]; !exists {
+		metadata["product"] = Product
+	}
+	if _, exists := metadata["uid"]; !exists {
+		metadata["uid"] = event.EventID
+	}
+
+	metadata["spx"] = bookkeeping
 	envelope["metadata"] = metadata
 
 	body, err := json.Marshal(envelope)
@@ -600,6 +638,39 @@ func buildBody(job Job, fields map[string]any, event Event) []byte {
 	}
 
 	return body
+}
+
+// activityIDOf 取规则声明的活动标识；未声明时用 OCSF 的 0（Unknown）。
+func activityIDOf(envelope map[string]any) int64 {
+	if value, ok := numeric(envelope["activity_id"]); ok {
+		return value
+	}
+
+	return 0
+}
+
+// classUIDOf 取分类标识；兜底事件一律归到通用类。
+func classUIDOf(envelope map[string]any) int64 {
+	if value, ok := numeric(envelope["class_uid"]); ok {
+		return value
+	}
+
+	return ClassUIDGeneric
+}
+
+// numeric 把 JSON 数字或整型统一成 int64。
+// 规则常量可能是 int、int64 或 float64，这里一处收口，避免三处类型断言。
+func numeric(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), true
+	}
+
+	return 0, false
 }
 
 // fallbackBody 在字段无法序列化时兜底：宁可丢掉字段，也不让事件消失。

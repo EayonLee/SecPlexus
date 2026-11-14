@@ -12,14 +12,8 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 )
 
-// RFC5424 与 RFC3164 的解析机无状态，包级保留一份即可。
-var (
-	rfc5424Machine = rfc5424.NewMachine()
-	rfc3164Machine = rfc3164.NewMachine()
-
-	// CEF 解析器无参数，同样复用。
-	cefParser, _ = parser.New(parser.Spec{Mode: parser.ModeCEF})
-)
+// CEF 解析器无参数、每次解析互不影响，可以复用。
+var cefParser, _ = parser.New(parser.Spec{Mode: parser.ModeCEF})
 
 // errNotSyslog 表示报文不是 syslog 信封；调用方据此走原文透传。
 var errNotSyslog = errors.New("not a syslog message")
@@ -84,6 +78,12 @@ func flatten(frame []byte) (map[string]any, error) {
 // 因此必须按具体类型断言取出通用字段。
 func parseEnvelope(frame []byte) (envelope, error) {
 	trimmed := bytes.TrimSpace(frame)
+
+	// go-syslog 的 machine 持有 data/cs/p/pe/eof 等可变状态，
+	// 每次解析必须用独立实例：包级共享会让并发的 UDP 循环与 TCP 连接
+	// 互相改写状态，实测触发 index out of range 崩溃。
+	rfc5424Machine := rfc5424.NewMachine()
+	rfc3164Machine := rfc3164.NewMachine()
 
 	if message, err := rfc5424Machine.Parse(trimmed); err == nil {
 		if typed, ok := message.(*rfc5424.SyslogMessage); ok {

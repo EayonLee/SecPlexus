@@ -52,10 +52,14 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 		t.Fatal("detail 为空：排查时不知道具体错在哪")
 	}
 
-	metadata := metadataOf(t, event.Body)
-	parseError, ok := metadata["parse_error"].(map[string]any)
+	bookkeeping, ok := metadataOf(t, event.Body)["spx"].(map[string]any)
 	if !ok {
-		t.Fatalf("缺少 parse_error: %#v", metadata)
+		t.Fatal("metadata.spx 缺失")
+	}
+
+	parseError, ok := bookkeeping["parse_error"].(map[string]any)
+	if !ok {
+		t.Fatalf("缺少 parse_error: %#v", bookkeeping)
 	}
 	for _, key := range []string{"stage", "reason", "message"} {
 		if _, exists := parseError[key]; !exists {
@@ -134,12 +138,15 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 		t.Fatal("解析出的字段丢失")
 	}
 
-	metadata := metadataOf(t, event.Body)
-	if metadata["truncated"] != true {
-		t.Fatalf("缺少 truncated 标记: %#v", metadata)
+	bookkeeping, ok := metadataOf(t, event.Body)["spx"].(map[string]any)
+	if !ok {
+		t.Fatal("metadata.spx 缺失")
 	}
-	if metadata["original_bytes"] != float64(90000) {
-		t.Fatalf("original_bytes = %#v", metadata["original_bytes"])
+	if bookkeeping["truncated"] != true {
+		t.Fatalf("缺少 truncated 标记: %#v", bookkeeping)
+	}
+	if bookkeeping["original_bytes"] != float64(90000) {
+		t.Fatalf("original_bytes = %#v", bookkeeping["original_bytes"])
 	}
 }
 
@@ -160,4 +167,60 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 		t.Fatal("detail 为空")
 	}
 	t.Logf("截断说明: %s", detail)
+}
+
+// 回归（P0）：OCSF base_event 的 required 属性必须齐全。
+// 依据 ocsf/ocsf-schema events/base_event.json：category_uid、type_uid、
+// activity_id、metadata 均为 required；objects/metadata.json 又要求 version 与 product。
+func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
+	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
+	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+
+	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	_ = line.Flush(context.Background())
+
+	var envelope map[string]any
+	if err := json.Unmarshal(publisher.events()[0].Body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	// class_uid 2004 → category_uid = 2004/1000 = 2。
+	if envelope["category_uid"] != float64(2) {
+		t.Fatalf("category_uid = %#v，期望 2", envelope["category_uid"])
+	}
+	// type_uid = class_uid*100 + activity_id；未声明活动时为 0。
+	if envelope["type_uid"] != float64(200400) {
+		t.Fatalf("type_uid = %#v，期望 200400", envelope["type_uid"])
+	}
+	if envelope["activity_id"] != float64(0) {
+		t.Fatalf("activity_id = %#v，期望 0", envelope["activity_id"])
+	}
+
+	metadata, ok := envelope["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata 不是对象: %#v", envelope["metadata"])
+	}
+	if metadata["version"] == nil || metadata["version"] == "" {
+		t.Fatal("metadata.version 缺失（OCSF 必填）")
+	}
+	product, ok := metadata["product"].(map[string]any)
+	if !ok || product["name"] == nil || product["vendor_name"] == nil {
+		t.Fatalf("metadata.product 缺失或不完整: %#v", metadata["product"])
+	}
+
+	// 事件标识映射到 OCSF 的 metadata.uid。
+	if metadata["uid"] != publisher.events()[0].EventID {
+		t.Fatalf("metadata.uid = %#v，期望 event_id", metadata["uid"])
+	}
+
+	// 我方簿记必须落在扩展命名空间，不能占用 OCSF 标准属性。
+	bookkeeping, ok := metadata["spx"].(map[string]any)
+	if !ok {
+		t.Fatalf("私有簿记未放进 metadata.spx: %#v", metadata)
+	}
+	if bookkeeping["connector_id"] != "conn-1" || bookkeeping["parse_status"] != "ok" {
+		t.Fatalf("metadata.spx = %#v", bookkeeping)
+	}
 }

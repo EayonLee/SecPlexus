@@ -1,6 +1,8 @@
 package syslogchannel
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -74,5 +76,47 @@ func TestFlattenDetectsCEFPayload(t *testing.T) {
 func TestFlattenRejectsNonSyslog(t *testing.T) {
 	if _, err := flatten([]byte("plain text, not syslog")); err == nil {
 		t.Fatal("non-syslog accepted")
+	}
+}
+
+// 回归（P0）：go-syslog 的 machine 带可变状态，包级共享会在并发下串数据。
+// 用不同 hostname 并发解析，任何一次串台都会让断言失败。
+func TestFlattenIsConcurrencySafe(t *testing.T) {
+	const workers = 64
+	const rounds = 20
+
+	var wait sync.WaitGroup
+	errors := make(chan string, workers*rounds)
+
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+
+		go func(worker int) {
+			defer wait.Done()
+
+			for round := 0; round < rounds; round++ {
+				host := fmt.Sprintf("host-%d-%d-zzzzzzzzzzzzzzzz", worker, round)
+				line := fmt.Sprintf("<34>1 2026-11-14T10:00:00Z %s app - - - msg", host)
+
+				fields, err := flatten([]byte(line))
+				if err != nil {
+					errors <- fmt.Sprintf("worker %d: %v", worker, err)
+
+					continue
+				}
+
+				if fields["syslog.hostname"] != host {
+					errors <- fmt.Sprintf("worker %d: hostname = %v, want %s", worker, fields["syslog.hostname"], host)
+				}
+			}
+		}(worker)
+	}
+
+	wait.Wait()
+	close(errors)
+
+	for message := range errors {
+		t.Error(message)
+		break
 	}
 }

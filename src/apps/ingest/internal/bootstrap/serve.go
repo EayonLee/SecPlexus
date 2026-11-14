@@ -72,7 +72,11 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}, producer)
 
 	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
-	defer stopPipeline()
+
+	// 通道单独一份取消信号：停机时要先停接收方，再排空流水线。
+	// 共用一个 ctx 会让通道在流水线排空期间继续投递，撞上 ErrClosed。
+	channelCtx, stopChannels := context.WithCancel(context.Background())
+	defer stopChannels()
 
 	pipelineDone := make(chan error, 1)
 	go func() { pipelineDone <- line.Start(pipelineCtx) }()
@@ -80,6 +84,10 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	// 接入点注册表：第五组接入数据库加载；当前为空表，
 	// 未注册令牌一律 401——这比接受未知设备的推送安全。
 	registry := connector.NewMemory()
+
+	// 显式标记"已加载（当前为空）"：readiness 的语义是"初始化完成"，
+	// 不是"有接入点"。不调用这一步，Loaded() 恒为假，进程永远 503。
+	registry.Replace(nil)
 
 	server := &handler.Server{
 		Ready: func(ctx context.Context) error {
@@ -107,24 +115,17 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	// syslog 与 Kafka 消费是后台通道：它们不挂在 HTTP 路由上，各自有监听/轮询循环。
 	syslogChannel := syslogchannel.New(registry, line, cfg.Syslog.ReloadInterval, cfg.Syslog.BindHost)
 	syslogDone := make(chan struct{})
-	go func() { defer close(syslogDone); _ = syslogChannel.Start(pipelineCtx) }()
+	go func() { defer close(syslogDone); _ = syslogChannel.Start(channelCtx) }()
 
 	kafkaConsumer := kafkachannel.New(registry, line, producer, kafkachannel.Options{
 		ReloadInterval: cfg.Pipeline.ReloadInterval,
 	})
 	kafkaDone := make(chan struct{})
-	go func() { defer close(kafkaDone); _ = kafkaConsumer.Start(pipelineCtx) }()
-
-	defer func() {
-		// 通道先停：不再产生新报文，之后的排空才有意义。
-		stopPipeline()
-		<-syslogDone
-		<-kafkaDone
-	}()
+	go func() { defer close(kafkaDone); _ = kafkaConsumer.Start(channelCtx) }()
 
 	httpServer := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           router.Handler(server, channels),
+		Handler:           router.RootHandler(server, channels),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -136,8 +137,14 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	serveErr := httpx.Serve(ctx, httpServer)
 
-	// 停机顺序：停接收（HTTP 与后台通道）→ 排空在途解析 → 发布剩余批次。
-	// 后台通道的停止由上面的 defer 完成；此处等流水线跑完。
+	// 停机顺序必须显式：停接收 → 停后台通道 → 排空流水线。
+	// 之前 cancel 在 defer 里，而这里先阻塞等 pipelineDone，
+	// 两者互相等待，进程收到 SIGTERM 后永远不退出。
+	stopChannels()
+	<-syslogDone
+	<-kafkaDone
+	stopPipeline()
+
 	if err := <-pipelineDone; err != nil {
 		logging.From(ctx).Error("Pipeline stopped with error", "event", "pipeline.stopped", "error", logging.Error(err))
 	}
