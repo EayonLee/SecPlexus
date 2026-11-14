@@ -184,7 +184,12 @@ func (c *Channel) readUDP(ctx context.Context, active *binding) {
 			continue
 		}
 
-		c.deliver(ctx, active.snapshot, buffer[:size])
+		// 必须复制：deliver 只是把 slice 交给管道入队，解析发生在 worker，
+		// 下一次 ReadFrom 会覆盖同一块内存，导致事件内容与 event_id 错乱。
+		frame := make([]byte, size)
+		copy(frame, buffer[:size])
+
+		c.deliver(ctx, active.snapshot, frame)
 	}
 }
 

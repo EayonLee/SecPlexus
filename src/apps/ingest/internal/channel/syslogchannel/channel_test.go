@@ -2,6 +2,7 @@ package syslogchannel_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -27,6 +28,13 @@ func (c *collector) Publish(_ context.Context, events []pipeline.Event) error {
 
 	c.events = append(c.events, events...)
 	return nil
+}
+
+func (c *collector) all() []pipeline.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return append([]pipeline.Event(nil), c.events...)
 }
 
 func (c *collector) count() int {
@@ -226,5 +234,61 @@ func TestReloadBindsNewConnector(t *testing.T) {
 
 	if !bound {
 		t.Fatal("reload did not bind the new connector port")
+	}
+}
+
+// 回归（P0）：UDP 读缓冲被复用，报文只能靠 copy 才能安全入队。
+// 连续快速发 40 条，每条 hostname 唯一；任何一条内容错乱都会让
+// 信封解析失败（事件变成 error）或 hostname 不在预期集合里。
+func TestUDPBurstKeepsMessagesIntact(t *testing.T) {
+	port := freePort(t)
+	publisher, line, cleanup := harness(t, port)
+	defer cleanup()
+
+	connection, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+
+	const total = 40
+	expected := make(map[string]struct{}, total)
+
+	for index := 0; index < total; index++ {
+		host := fmt.Sprintf("host-%02d-abcdefghijklmnopqrstuvwxyz0123456789", index)
+		expected[host] = struct{}{}
+
+		payload := fmt.Sprintf("<34>1 2026-11-14T10:00:00Z %s app - - - message %d", host, index)
+		if _, err = connection.Write([]byte(payload)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && publisher.count() < total {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	_ = line.Flush(context.Background())
+	events := publisher.all()
+	if len(events) != total {
+		t.Fatalf("收到 %d 条，期望 %d", len(events), total)
+	}
+
+	for index, event := range events {
+		if event.Outcome.Status != pipeline.StatusOK {
+			t.Fatalf("第 %d 条解析失败（内容已被覆盖）: %s", index, event.Outcome.Detail)
+		}
+
+		var body map[string]any
+		if err = json.Unmarshal(event.Body, &body); err != nil {
+			t.Fatalf("第 %d 条事件体非法: %v", index, err)
+		}
+
+		device, _ := body["device"].(map[string]any)
+		host, _ := device["hostname"].(string)
+		if _, ok := expected[host]; !ok {
+			t.Fatalf("第 %d 条 hostname = %q，不在发送集合内", index, host)
+		}
 	}
 }
