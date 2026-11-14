@@ -32,6 +32,7 @@ const (
 const (
 	ReasonFormatMismatch = "format_mismatch" // 报文与规则的线格式不符，或接入点尚未挂规则。
 	ReasonEnginePanic    = "engine_panic"    // 引擎 panic，兜底记录，正常不应出现。
+	ReasonTruncated      = "truncated"       // 报文超上限被截断，解析结果不可信。
 )
 
 // ClassUIDGeneric 是未解析事件的兜底类。
@@ -41,18 +42,27 @@ const ClassUIDGeneric = 6003
 
 // Event 是一条待发布的事件。
 type Event struct {
-	ConnectorID  string   // 来源接入点。
-	EventID      string   // 确定性标识，供下游去重。
-	PartitionKey string   // 分区键，保证同一实体的事件落在同一分区。
-	Body         []byte   // OCSF 事件 JSON。
-	Status       Status   // 解析状态。
-	Reasons      []string // 解析失败原因码；成功时为空。
+	ConnectorID   string   // 来源接入点。
+	EventID       string   // 确定性标识，供下游去重。
+	PartitionKey  string   // 分区键，保证同一实体的事件落在同一分区。
+	Body          []byte   // OCSF 事件 JSON。
+	Status        Status   // 解析状态。
+	Reasons       []string // 解析失败原因码；成功时为空。
+	Truncated     bool     // 报文是否被截断；截断事件不可能是 ok。
+	OriginalBytes int      // 截断前长度。>
 }
 
 // Publisher 是事件出口。管道只依赖这个接口，Kafka 是它的一个实现。
 // Publish 返回错误表示这一批没有送达，管道会重试而不是丢弃。
 type Publisher interface {
 	Publish(ctx context.Context, events []Event) error
+}
+
+// Meta 是通道提供的报文元信息。
+// 截断必须随事件一起落库：分析师看到的是不完整数据，这一点不能只写在日志里。
+type Meta struct {
+	Truncated     bool // 报文是否被截断。
+	OriginalBytes int  // 截断前的原始长度；未截断时为 0。
 }
 
 // Job 是一条待解析的报文。
@@ -63,6 +73,7 @@ type Job struct {
 	// Fields 非空表示第 1 层已由通道完成（如 syslog 剥信封），
 	// 管道直接进第 2 层映射，不再调用解析器。
 	Fields map[string]any
+	Meta   Meta
 }
 
 // Stats 是可观测计数，供健康检查与运行指标使用。
@@ -143,8 +154,8 @@ func New(options Options, publisher Publisher) *Pipeline {
 
 // SubmitFields 受理一条已由通道完成线格式解析的报文。
 // syslog 通道用 go-syslog 剥完信封后走这里：字段已就绪，只差规则映射。
-func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot, fields map[string]any, received time.Time) error {
-	job := Job{Snapshot: snapshot, Fields: fields, Received: received}
+func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot, fields map[string]any, received time.Time, meta Meta) error {
+	job := Job{Snapshot: snapshot, Fields: fields, Received: received, Meta: meta}
 
 	p.inflight.Add(1)
 
@@ -162,8 +173,8 @@ func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot
 // Submit 受理一条报文。
 // 队列满时阻塞而不是丢弃：背压必须传到通道层，由它阻塞发送方——
 // 丢数据比让设备重发更难补救。
-func (p *Pipeline) Submit(ctx context.Context, snapshot connector.Snapshot, raw []byte, received time.Time) error {
-	job := Job{Snapshot: snapshot, Raw: raw, Received: received}
+func (p *Pipeline) Submit(ctx context.Context, snapshot connector.Snapshot, raw []byte, received time.Time, meta Meta) error {
+	job := Job{Snapshot: snapshot, Raw: raw, Received: received, Meta: meta}
 
 	// 先登记再入队：Flush 看到计数为零才是真的全空。
 	p.inflight.Add(1)
@@ -264,6 +275,11 @@ func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.
 	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received})
 }
 
+// ParseWithMeta 同 Parse，但带上通道提供的截断信息。
+func (p *Pipeline) ParseWithMeta(snapshot connector.Snapshot, raw []byte, received time.Time, meta Meta) Event {
+	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received, Meta: meta})
+}
+
 // parse 把一条报文解析成事件。
 // 引擎 panic 只影响这一条：记原因码、计数，事件照常发布——
 // 单条坏消息不能拖垮 worker，也不能让整批消失。
@@ -274,9 +290,19 @@ func (p *Pipeline) parse(job Job) Event {
 	}
 
 	fields, reasons := p.apply(job)
+
+	// 截断的报文不能算解析成功：结构化格式在中间被切断后，
+	// 剩下的字段看起来完全合法，实际缺了尾部字段（CEF 的 src/dst 就在尾部）。
+	// 宁可标成 error 让分析师知道"这条不完整"，也不能让它伪装成正常事件。
+	if job.Meta.Truncated {
+		reasons = append(reasons, ReasonTruncated)
+	}
+
 	if len(reasons) > 0 {
 		event.Status = StatusError
 		event.Reasons = reasons
+		event.Truncated = job.Meta.Truncated
+		event.OriginalBytes = job.Meta.OriginalBytes
 		p.parseFailed.Add(1)
 	} else {
 		event.Status = StatusOK
@@ -391,6 +417,11 @@ func buildBody(job Job, fields map[string]any, event Event) []byte {
 	}
 	if len(event.Reasons) > 0 {
 		metadata["parse_reasons"] = event.Reasons
+	}
+	if event.Truncated {
+		// 显式标注：下游与分析师都要能看到这条数据不完整。
+		metadata["truncated"] = true
+		metadata["original_bytes"] = event.OriginalBytes
 	}
 	envelope["metadata"] = metadata
 

@@ -109,7 +109,7 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, connectorID str
 	received := time.Now()
 	for _, message := range messages {
 		// 队列满时此处阻塞，背压直接传到设备：不丢数据。
-		if err = c.pipeline.Submit(r.Context(), snapshot, message, received); err != nil {
+		if err = c.pipeline.Submit(r.Context(), snapshot, message, received, pipeline.Meta{}); err != nil {
 			logging.From(r.Context()).Warn("Submit aborted", "event", "ingest.submit_aborted",
 				"connector_id", snapshot.ID, "error", logging.Error(err))
 

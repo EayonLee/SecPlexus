@@ -51,6 +51,13 @@ func decodeObject(raw []byte) (map[string]any, error) {
 
 	fields := make(map[string]any, len(decoded))
 	flatten("", decoded, fields)
+
+	// 零字段与其它模式保持同一契约：空对象不携带任何数据，
+	// 让它"成功"会产出只有常量的空事件，污染事件流。
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("%w: JSON object has no fields", ErrMalformed)
+	}
+
 	return fields, nil
 }
 

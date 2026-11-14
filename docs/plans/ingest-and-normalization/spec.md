@@ -97,6 +97,9 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
+- **报文大小上限与截断语义（证据驱动）**：行业默认值各不相同——RFC5424 要求接收方 **MUST 支持 480 字节**、**SHOULD 支持 2048**，且规定「若截断，MUST 截在末尾」；RFC5426 对 UDP 的 IPv4 要求 480、IPv6 要求 1180；rsyslog 默认 **8 KiB**（`$MaxMessageSize`，官方注明不要低于 1k）；Splunk 默认 **10 000 字节/行**（`TRUNCATE`，0 表示永不截断）；Vector 默认 **102 400 字节**（`max_length`）。我们的取值：syslog 单条 **64 KiB**（远高于各规范下限，覆盖含结构化数据的 Windows 事件日志），HTTP 请求体 **10 MiB**（对齐 Splunk 事件量级与常见批量推送），Kafka 单条由 broker 的 `message.max.bytes` 约束。
+- **截断必须可观测，且不得伪装成解析成功**：截断不只写日志，事件元数据写入 `metadata.truncated=true` 与 `metadata.original_bytes`；同时该事件的 `parse_status` **强制为 error**（原因码 `truncated`）。理由是结构化格式在中间被切断后，剩余字段看起来完全合法却缺了尾部字段——CEF 的 `src`/`dst` 恰好在扩展区末尾，把半条 CEF 当成功解析会产出看似正常实则错误的字段。RFC5424 允许「截断」或「丢弃」，我们选择截断并显式标注，兼顾可排查与可追责。
+- **持续化验证（语料 + 模糊测试）**：解析层的形态回归由 `internal/parser/testdata/corpus/` 的语料库守护，按「模式 + 参数」组织变体（KV 的默认分隔符与冒号逗号是两套变体），每条样本走真实的 `Split → Parse` 流程；同一批语料同时是 Go 原生模糊测试的种子（`FuzzParseEveryMode`、`FuzzSplitNeverPanics`、`FuzzSplitFrames`、`FuzzFlattenNeverPanics`）。持续测试的公共性质：不 panic、零字段不得返回成功、分帧必须有界且推进、单帧不超上限。实测 30 秒完成 213 万次执行、零违规。语料可扩充的公开数据集见 `testdata/corpus/README.md`（Loghub、Azure Sentinel Sample Data、OCSF schema events、panw-fw-samples、log-zoo），导入时需注明来源与许可。
 - **event_id 语义（审查修订）**：UUIDv5 按（接入点, 接收序号, 原始字节）计算——内容相同的重复事件（暴力破解的第 1 次与第 50 次尝试）是独立事件，绝不能被 ID 去重吞掉；重试去重由查询层按（接入点, 内容, 时间窗）处理。
 - **未映射字段脱敏（审查修订）**：unmapped 里命中敏感名单（password/token/api_key/secret/cookie/credential 等，分隔符归一后包含匹配）的值替换为 `[REDACTED]`，键名保留供规则作者发现；设备日志里的凭证不得进入事件存储。
 - **OCSF 最小字段保障（审查修订）**：规则必须声明非空 `class_uid` 常量（加载即校验）；引擎始终写入 `severity_id`（缺省 Unknown=0）与 `time`（规则时间解析失败或未声明时回退接收时间）——不产出缺路由键或缺时间的伪 OCSF 事件。

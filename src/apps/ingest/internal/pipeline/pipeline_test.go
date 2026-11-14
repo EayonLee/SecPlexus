@@ -80,7 +80,7 @@ func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 2, BatchSize: 2, FlushInterval: 20 * time.Millisecond})
 	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
 
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.7"}`), time.Now()); err != nil {
+	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +119,7 @@ func TestParseFailureStillPublishesWithStatus(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
 
-	if err := line.Submit(context.Background(), snapshot, []byte(`this is not json`), time.Now()); err != nil {
+	if err := line.Submit(context.Background(), snapshot, []byte(`this is not json`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +154,7 @@ func TestGenericConnectorPassesThrough(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	snapshot := connector.Snapshot{ID: "conn-generic", Channel: connector.ChannelHTTP}
 
-	if err := line.Submit(context.Background(), snapshot, []byte("raw line"), time.Now()); err != nil {
+	if err := line.Submit(context.Background(), snapshot, []byte("raw line"), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +174,7 @@ func TestPublishRetriesUntilSuccess(t *testing.T) {
 	go func() { _ = line.Start(ctx) }()
 
 	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.1"}`), time.Now()); err != nil {
+	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +200,7 @@ func TestStatsCountAcceptedParsedPublished(t *testing.T) {
 	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
 
 	for index := 0; index < 5; index++ {
-		if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.1"}`), time.Now()); err != nil {
+		if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -221,14 +221,14 @@ func TestSubmitBlocksWhenQueueIsFull(t *testing.T) {
 	line := pipeline.New(pipeline.Options{QueueDepth: 1}, &recorder{})
 	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
 
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"1.1.1.1"}`), time.Now()); err != nil {
+	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	if err := line.Submit(ctx, snapshot, []byte(`{"src":"1.1.1.2"}`), time.Now()); !errors.Is(err, context.DeadlineExceeded) {
+	if err := line.Submit(ctx, snapshot, []byte(`{"src":"1.1.1.2"}`), time.Now(), pipeline.Meta{}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("submit error = %v, want deadline exceeded", err)
 	}
 }
@@ -239,7 +239,7 @@ func TestRepeatedIdenticalPayloadGetsDistinctIDs(t *testing.T) {
 
 	payload := []byte(`{"src":"10.0.0.9"}`)
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := line.Submit(context.Background(), snapshot, payload, time.Now()); err != nil {
+		if err := line.Submit(context.Background(), snapshot, payload, time.Now(), pipeline.Meta{}); err != nil {
 			t.Fatal(err)
 		}
 	}

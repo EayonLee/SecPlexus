@@ -90,6 +90,15 @@
 - **P2（性能）**：isSensitiveKey 每次调用构造 Replacer（热路径按字段分配）→ 包级构造一次。
 - **P3**：class_uid 显式 nil 通过编译 → 值非空校验（缺键与 nil 同判）。
 
+### 持续化测试（语料 + 模糊）
+
+- [x] 语料库 `internal/parser/testdata/corpus/`：六种变体（json/cef/kv/kv-colon/regex/delimiter-comma）+ syslog 三份（rfc5424/rfc3164/cef-over-syslog），走真实 `Split → Parse` 流程。
+- [x] 语料测试 `TestCorpusParsesEverySample`（按变体表驱动）与 `TestCorpusArraySplitsPerElement`。
+- [x] 原生模糊测试：`FuzzParseEveryMode`、`FuzzSplitNeverPanics`、`FuzzSplitFrames`、`FuzzFlattenNeverPanics`，语料即种子；公共性质为不 panic、零字段不成功、分帧有界。
+- [x] 截断语义：`metadata.truncated` + `original_bytes`，且 `parse_status` 强制 error（原因码 `truncated`）——模糊与语料之外的第三条护栏。
+- [ ] 从 Loghub / Azure Sentinel Sample Data 导入真实样本子集（需先确认各自许可并在文件头注明来源）。
+- [ ] 在 CI 增加定时模糊测试任务（夜间跑 5 分钟，发现新语料即提 issue）。
+
 ## 验证入口
 
 ```sh
