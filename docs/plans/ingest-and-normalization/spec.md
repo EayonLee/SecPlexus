@@ -97,7 +97,14 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
+- **event_id 语义（审查修订）**：UUIDv5 按（接入点, 接收序号, 原始字节）计算——内容相同的重复事件（暴力破解的第 1 次与第 50 次尝试）是独立事件，绝不能被 ID 去重吞掉；重试去重由查询层按（接入点, 内容, 时间窗）处理。
+- **未映射字段脱敏（审查修订）**：unmapped 里命中敏感名单（password/token/api_key/secret/cookie/credential 等，分隔符归一后包含匹配）的值替换为 `[REDACTED]`，键名保留供规则作者发现；设备日志里的凭证不得进入事件存储。
+- **OCSF 最小字段保障（审查修订）**：规则必须声明非空 `class_uid` 常量（加载即校验）；引擎始终写入 `severity_id`（缺省 Unknown=0）与 `time`（规则时间解析失败或未声明时回退接收时间）——不产出缺路由键或缺时间的伪 OCSF 事件。
+- **引擎拥有键（二轮修订）**：`severity_id` 与 `time` 由引擎保障写入；field_map 不得映射到这两个键（加载即拒绝，用 severity/time 规则声明），常量可以覆盖（最后盖章机制，固定级别源的唯一写法）。
+- **设备时区（审查修订）**：规则的 time.location 声明设备时区（IANA 名称，如 Asia/Shanghai），无时区的时间串按它解析；默认 UTC。国产设备普遍发本地时间，按 UTC 解析会让时间线整体偏移。
+- **值表键归一化（二轮修订）**：severity 值表键在编译期归一化（小写、去空白），与事件值同规则；归一后冲突的键加载即拒绝。
 - **容量模型（5w EPS 的算术）**：5w 事件/秒 = 每秒 5 万次 解析+映射+发布。按 Go 单核约 5-10 万次轻量 map 操作/秒，解析+映射在 4 核上绰绰有余；瓶颈在 JSON 序列化与 Kafka 发布——批量 500 条/批 = 100 批/秒，单分区顺序写，Kafka 单机可承 10 万+ msg/s。**8C16G 单机支撑 5w EPS 是工程上宽裕的配置**（AiSOC 同构架构按同容量设计）。
+- **实测校准**（Intel Ultra 7 155H 单核，`go test -bench=Apply`，审查修复后）：CEF 解析+映射 **约 4670 ns/op（21.4 万条/秒）**、JSON **约 3400 ns/op（29.4 万条/秒）**；CEF 6598 B/op、70 次分配。5 万 EPS 占 **0.23 核**，单核余量约 4 倍。较修复前（2900/47 次分配）慢约 60%——这是正确性的代价：json.Number 保数字精度、unmapped 敏感名单检查、级别与时间的恒写保障。投影路径编译期预切分仍有收益（同进程对照 229→208 ns/op/字段）。
 - **goroutine 模型**：固定 worker 池（SPX_INGEST_WORKERS，默认 = CPU 核数），从 channel 消费事件，无 per-event goroutine 创建。channel 缓冲 = SPX_INGEST_BUFFER（默认 10000，约 0.2 秒的量）。
 - **批处理贯穿全链**：接收→解析→发布全程按批流转（batch 500 条或 2 秒先到为准）。5w EPS 下每批 500 条 = 100 批/秒，每批一次 Kafka produce 调用（摊薄 syscall 与网络往返）。
 - **零分配热路径**：sync.Pool 复用扁平 map 与 OCSF map；字符串字段引用原始字节切片（[]byte → string 零拷贝转换 unsafe 仅限标准模式已支持的场合，默认用 string(bytes) 让编译器优化）；正则预编译缓存 *regexp.Regexp，运行期零编译。GC 目标：稳态下 < 10% CPU 花在 GC。
@@ -144,7 +151,7 @@ constants:
 
 - 单一出口 topic `spx.ingest.event`，value 为 OCSF 事件 JSON；分区键为实体标识（entity 优先级 src_ip → device → user → 域名，无实体回退 `event_id`，禁止回退固定常量造成热分区）。
 - 批量发布：满 500 条或 2s 刷出（与 AiSOC 默认一致）；Kafka 不可用时**阻塞接收**（channel 背压），不丢数据、不落本地盘（第一版明确取舍：Kafka 是唯一缓冲层，其保留期即重放窗口）。
-- 每条事件确定性 `event_id`（UUIDv5：connector_id + 原始指纹），为下游幂等去重提供键。
+- 每条事件确定性 `event_id`（UUIDv5：接入点 + 接收序号 + 原始字节）。内容相同的重复事件是独立事件；下游幂等去重按（接入点, 内容, 时间窗）在查询层处理。
 - 发布成功前通道层不确认（HTTP 202 已述异步；syslog/Kafka 由批发布与位移提交语义保证）。
 
 ### 解析状态（无隔离区）

@@ -28,7 +28,6 @@ func configFile(t *testing.T) string {
 func serveEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("SPX_KAFKA_BROKERS", "127.0.0.1:9092")
-	t.Setenv("SPX_INGEST_IAM_TOKEN", strings.Repeat("t", 32))
 }
 
 func TestConfigurationPrecedence(t *testing.T) {
@@ -46,9 +45,6 @@ func TestConfigurationPrecedence(t *testing.T) {
 	// 通道与 topic 的默认值来自 YAML，不来自 Go 代码。
 	if cfg.Kafka.Topic != "spx.ingest.event" {
 		t.Fatal("incorrect kafka topic default")
-	}
-	if !cfg.Channels.HTTP || !cfg.Channels.Syslog || !cfg.Channels.Kafka {
-		t.Fatal("incorrect channel defaults")
 	}
 	if cfg.IAM.BaseURL != "http://127.0.0.1:8081" {
 		t.Fatal("incorrect IAM base URL default")
@@ -90,17 +86,14 @@ func TestCheckConfigRequiresKafkaBrokers(t *testing.T) {
 	}
 }
 
-func TestCheckConfigRequiresIAMToken(t *testing.T) {
+// 管理 API 落地前 token 不强制，但填了就必须是合法格式——避免部署期埋下无效凭证。
+func TestLoadRejectsMalformedIAMToken(t *testing.T) {
 	file := configFile(t)
 	t.Setenv("SPX_KAFKA_BROKERS", "127.0.0.1:9092")
+	t.Setenv("SPX_INGEST_IAM_TOKEN", "short")
 
-	cfg, err := Load(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = cfg.ValidateServe()
-	if err == nil || !strings.Contains(err.Error(), "SPX_INGEST_IAM_TOKEN") {
-		t.Fatalf("expected iam.token field error, got %v", err)
+	if _, err := Load(file); err == nil || !strings.Contains(err.Error(), "32–512 bytes") {
+		t.Fatalf("malformed token accepted: %v", err)
 	}
 }
 

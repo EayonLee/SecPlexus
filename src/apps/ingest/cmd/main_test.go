@@ -26,10 +26,10 @@ func TestCheckConfigDoesNotConnectOrOpenLog(t *testing.T) {
 	if _, err := os.Stat(logfile); !os.IsNotExist(err) {
 		t.Fatal("check created a log", err)
 	}
-	t.Setenv("SPX_INGEST_IAM_TOKEN", "")
+	t.Setenv("SPX_INGEST_IAM_TOKEN", "short")
 	cmd = newCommand()
 	cmd.SetArgs([]string{"check-config", "--config", "../config.yaml"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("missing token accepted")
+		t.Fatal("malformed token accepted")
 	}
 }

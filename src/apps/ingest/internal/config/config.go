@@ -29,13 +29,6 @@ type Kafka struct {
 	Topic   string   `yaml:"topic" validate:"required"`             // 唯一发布 topic；解析失败事件也发这里（parse_status 区分）。
 }
 
-// Channels 描述三种接入通道的开关；端口绑定由 connectors 注册表决定，不在这里配置。
-type Channels struct {
-	HTTP   bool `yaml:"http"`   // 设备主动推送（Bearer 令牌）。
-	Syslog bool `yaml:"syslog"` // UDP/TCP syslog（RFC5424/3164/6587 自动识别）。
-	Kafka  bool `yaml:"kafka"`  // 消费客户已有总线。
-}
-
 // IAM 描述授权上游；Ingest 的管理 API 每个受保护请求都向 IAM 换取授权结论。
 type IAM struct {
 	Host    string `yaml:"host" validate:"required,hostname|ip"` // IAM 连接目标，IP 或域名。
@@ -46,12 +39,11 @@ type IAM struct {
 
 // Config 包含 Ingest 启动和运行所需的配置。
 type Config struct {
-	App      App            `yaml:"app"`      // 服务监听配置。
-	Kafka    Kafka          `yaml:"kafka"`    // 事件发布总线。
-	Cache    cache.Config   `yaml:"cache"`    // 令牌限流用的 Redis。
-	Channels Channels       `yaml:"channels"` // 通道开关。
-	IAM      IAM            `yaml:"iam"`      // 管理 API 的授权上游。
-	Logging  logging.Config `yaml:"logging"`  // 日志输出与轮转配置。
+	App     App            `yaml:"app"`     // 服务监听配置。
+	Kafka   Kafka          `yaml:"kafka"`   // 事件发布总线。
+	Cache   cache.Config   `yaml:"cache"`   // 令牌限流用的 Redis。
+	IAM     IAM            `yaml:"iam"`     // 管理 API 的授权上游。
+	Logging logging.Config `yaml:"logging"` // 日志输出与轮转配置。
 }
 
 // Load 加载并校验配置文件；文件名为空时读取当前目录的 config.yaml。
@@ -96,15 +88,14 @@ func (c Config) Validate() error {
 
 // ValidateServe 在创建运行资源前校验服务专用前置条件：
 // Kafka 是唯一缓冲层，没有 broker 地址服务无法履行"不丢数据"承诺，启动即失败。
+// IAM 凭证在管理 API（第五组）落地时才被消费，届时随路由一并启用必填校验；
+// 现在只做格式校验：填了就必须是 32–512 字节，避免部署期埋下无效凭证。
 func (c Config) ValidateServe() error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
 	if len(c.Kafka.Brokers) == 0 {
 		return errors.New("kafka.brokers (SPX_KAFKA_BROKERS) is required to serve")
-	}
-	if err := iamclient.ValidateConfig(c.IAM.BaseURL, c.IAM.Token, true); err != nil {
-		return errors.New("iam.token (SPX_INGEST_IAM_TOKEN) must contain 32–512 bytes")
 	}
 	return nil
 }

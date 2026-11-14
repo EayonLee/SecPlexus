@@ -12,7 +12,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
-	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -31,16 +30,18 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	defer func() { outcome = errors.Join(outcome, closeLog()) }()
 
 	slog.SetDefault(logger)
-	client, err := iamclient.New(cfg.IAM.BaseURL, cfg.IAM.Token)
-	if err != nil {
-		return err
+	// 就绪检查集中在一个钩子上：依赖落地一批，探活就补一批，
+	// 避免"进程活着但依赖全挂仍然接流量"的可用性事故。
+	server := &handler.Server{
+		Ready: func(ctx context.Context) error {
+			// 骨架阶段没有常驻外部依赖；通道与发布层落地后在这里探活 Kafka 与 Redis。
+			return nil
+		},
 	}
 
-	defer client.Close()
-
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           router.Handler(&handler.Server{IAM: client}),
+		Handler:           router.Handler(server),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -48,7 +49,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}
 
 	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr())
-	if err := httpx.Serve(ctx, server); err != nil {
+	if err := httpx.Serve(ctx, httpServer); err != nil {
 		logging.From(ctx).Error("Could not stop HTTP server", "event", "service.listener_failed", "error", logging.Error(err))
 		return err
 	}
