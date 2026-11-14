@@ -16,6 +16,7 @@ mkdirSync(path.join(root, 'bin'), { recursive: true });
 for (const [command, args] of [
   ['go', ['build', '-o', `bin/iam${executableSuffix}`, './src/apps/iam/cmd']],
   ['go', ['build', '-o', `bin/console${executableSuffix}`, './src/apps/console/cmd']],
+  ['go', ['build', '-o', `bin/ingest${executableSuffix}`, './src/apps/ingest/cmd']],
   ['pnpm', ['--dir', 'src/apps/web', 'build']],
 ]) {
   const result = spawnSync(command, args, { cwd: root, env: command === 'pnpm' ? webEnvironment(environment) : process.env, stdio: 'inherit', ...commandShell });

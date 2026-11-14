@@ -5,15 +5,14 @@ import (
 	"errors"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
 	"github.com/redis/go-redis/v9"
-
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
 )
 
 // openCache 创建并验证当前 Redis 连接；失败时不遗留客户端连接。
-func openCache(ctx context.Context, cfg config.Cache) (*redis.Client, error) {
+func openCache(ctx context.Context, cfg cache.Config) (*redis.Client, error) {
 	options, err := redis.ParseURL(cfg.URL)
 	if err != nil {
 		return nil, errors.New("invalid cache connection configuration")

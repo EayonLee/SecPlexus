@@ -38,6 +38,7 @@ export function moduleEnvironment(environment, module) {
     if (!key.startsWith('SPX_')) return !key.startsWith('NEXT_PUBLIC_');
     if (allowed.has(key)) return true;
     if (module === 'iam' && (key.startsWith('SPX_POSTGRES_') || key.startsWith('SPX_REDIS_'))) return true;
+    if (module === 'ingest' && (key.startsWith('SPX_REDIS_') || key.startsWith('SPX_KAFKA_'))) return true;
     if (!key.startsWith(`SPX_${module.toUpperCase()}_`)) return false;
     return true;
   }));

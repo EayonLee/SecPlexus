@@ -192,7 +192,7 @@ async function stopExistingListeners() {
       const { command, parent } = snapshot.get(pid);
       if (directory && inside(directory, apps)) return true;
       if (directory && inside(directory, root) &&
-          (command.includes(`${apps}/`) || command.includes('src/apps/') || command.includes(`${root}/bin/`) || command.includes('scripts/start.mjs') || /(?:^|\s)(?:\.\/)?(?:bin\/(?:iam|console))(?:\s|$)/.test(command))) return true;
+          (command.includes(`${apps}/`) || command.includes('src/apps/') || command.includes(`${root}/bin/`) || command.includes('scripts/start.mjs') || /(?:^|\s)(?:\.\/)?(?:bin\/(?:iam|console|ingest))(?:\s|$)/.test(command))) return true;
       pid = parent;
     }
     return false;
