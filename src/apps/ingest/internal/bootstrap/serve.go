@@ -82,11 +82,15 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	registry := connector.NewMemory()
 
 	server := &handler.Server{
-		Registry: registry,
-		Pipeline: line,
 		Ready: func(ctx context.Context) error {
 			if err := client.Ping(ctx).Err(); err != nil {
 				return errors.New("cache is not ready")
+			}
+
+			// 没有接入点的进程不能算就绪：它接不了任何数据，
+			// 报 200 只会让负载均衡把流量导给一个空壳。
+			if !registry.Loaded() {
+				return errors.New("connector registry is not loaded")
 			}
 
 			return nil
@@ -101,7 +105,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}
 
 	// syslog 与 Kafka 消费是后台通道：它们不挂在 HTTP 路由上，各自有监听/轮询循环。
-	syslogChannel := syslogchannel.New(registry, line, cfg.Syslog.ReloadInterval)
+	syslogChannel := syslogchannel.New(registry, line, cfg.Syslog.ReloadInterval, cfg.Syslog.BindHost)
 	syslogDone := make(chan struct{})
 	go func() { defer close(syslogDone); _ = syslogChannel.Start(pipelineCtx) }()
 
@@ -148,24 +152,12 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 // openCache 创建并验证 Redis 连接；失败时不遗留客户端连接。
 func openCache(ctx context.Context, cfg cache.Config) (*redis.Client, error) {
-	options, err := redis.ParseURL(cfg.URL)
+	client, err := cache.Open(ctx, cfg)
 	if err != nil {
-		return nil, errors.New("invalid cache connection configuration")
-	}
-
-	options.DialTimeout = 3 * time.Second
-	options.ReadTimeout = 2 * time.Second
-	options.WriteTimeout = 2 * time.Second
-	options.PoolTimeout = 3 * time.Second
-	options.MaxRetries = -1
-
-	client := redis.NewClient(options)
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
 		logging.From(ctx).Error("Redis connection failed", "event", "dependency.failed",
 			"dependency", "redis", "error", logging.Error(err))
 
-		return nil, errors.New("cache unavailable")
+		return nil, err
 	}
 
 	return client, nil

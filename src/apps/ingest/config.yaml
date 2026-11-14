@@ -40,6 +40,9 @@ pipeline:
 # 端口绑定关系来自 connectors 注册表（每个接入点一个端口，UDP 与 TCP 同端口）。
 # 改端口不需要重启进程：周期刷新，或 kill -HUP 立即重载。
 syslog:
+  # 监听地址。留空跟随 app.host —— syslog 端口的暴露面不能比主监听更宽松。
+  # 前面有反向代理、只允许本机接收时，这个值必须是 127.0.0.1。
+  bind_host: "${SPX_INGEST_SYSLOG_BIND_HOST-}"
   # 端口绑定关系的刷新间隔。
   reload_interval: "${SPX_INGEST_SYSLOG_RELOAD_INTERVAL-10s}"
 

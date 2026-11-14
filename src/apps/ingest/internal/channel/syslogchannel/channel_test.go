@@ -90,7 +90,7 @@ func harness(t *testing.T, port int) (*collector, *pipeline.Pipeline, func()) {
 	lineDone := make(chan struct{})
 	go func() { defer close(lineDone); _ = line.Start(ctx) }()
 
-	channel := syslogchannel.New(registry, line, time.Second)
+	channel := syslogchannel.New(registry, line, time.Second, "127.0.0.1")
 	channelDone := make(chan struct{})
 	go func() { defer close(channelDone); _ = channel.Start(ctx) }()
 
@@ -137,7 +137,7 @@ func TestUDPDeliveryIsParsed(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	if publisher.count() == 0 {
 		t.Fatal("UDP message was not ingested")
 	}
@@ -169,7 +169,7 @@ func TestTCPOctetCountingDeliversBothFrames(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	if publisher.count() < 2 {
 		t.Fatalf("ingested %d events, want 2", publisher.count())
 	}
@@ -193,7 +193,7 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	lineDone := make(chan struct{})
 	go func() { defer close(lineDone); _ = line.Start(ctx) }()
 
-	channel := syslogchannel.New(registry, line, 50*time.Millisecond)
+	channel := syslogchannel.New(registry, line, 50*time.Millisecond, "127.0.0.1")
 	channelDone := make(chan struct{})
 	go func() { defer close(channelDone); _ = channel.Start(ctx) }()
 

@@ -26,6 +26,7 @@ type Consumer struct {
 	publisher pipeline.Publisher
 
 	mu       sync.Mutex
+	running  map[string]context.CancelFunc // 接入点 → 取消函数，用于取消消失的消费者
 	workers  sync.WaitGroup
 	interval time.Duration
 }
@@ -46,20 +47,19 @@ func New(registry connector.Registry, line *pipeline.Pipeline, publisher pipelin
 		registry:  registry,
 		pipeline:  line,
 		publisher: publisher,
+		running:   make(map[string]context.CancelFunc),
 		interval:  options.ReloadInterval,
 	}
 }
 
 // Start 为每个 Kafka 接入点启动一个消费循环，直到 ctx 取消。
 func (c *Consumer) Start(ctx context.Context) error {
-	running := make(map[string]struct{})
-
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
 	defer c.workers.Wait()
 
-	if err := c.sync(ctx, running); err != nil {
+	if err := c.sync(ctx); err != nil {
 		logging.From(ctx).Error("Kafka consumer start failed", "event", "kafka.start_failed",
 			"error", logging.Error(err))
 	}
@@ -69,7 +69,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := c.sync(ctx, running); err != nil {
+			if err := c.sync(ctx); err != nil {
 				logging.From(ctx).Error("Kafka consumer reload failed", "event", "kafka.reload_failed",
 					"error", logging.Error(err))
 			}
@@ -77,23 +77,43 @@ func (c *Consumer) Start(ctx context.Context) error {
 	}
 }
 
-// sync 为新增的 Kafka 接入点启动消费循环；已启动的保持运行。
-func (c *Consumer) sync(ctx context.Context, running map[string]struct{}) error {
+// sync 让消费循环集合与注册表一致：新增的启动，消失的取消。
+// 只加不减会让已删除的接入点继续从客户总线拉数据，
+// 发布出带不存在 connector_id 的幽灵事件，并且泄漏 goroutine。
+func (c *Consumer) sync(ctx context.Context) error {
+	desired := make(map[string]connector.Snapshot)
 	for _, snapshot := range c.registry.KafkaSources() {
-		if _, exists := running[snapshot.ID]; exists {
+		desired[snapshot.ID] = snapshot
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 先取消消失的。
+	for id, cancel := range c.running {
+		if _, keep := desired[id]; keep {
 			continue
 		}
 
-		running[snapshot.ID] = struct{}{}
+		logging.From(ctx).Info("Kafka consumer stopped", "event", "kafka.consumer_removed", "connector_id", id)
+		cancel()
+		delete(c.running, id)
+	}
 
-		c.mu.Lock()
+	// 再启动新增的。
+	for id, snapshot := range desired {
+		if _, exists := c.running[id]; exists {
+			continue
+		}
+
+		consumeCtx, cancel := context.WithCancel(ctx)
+		c.running[id] = cancel
+
 		c.workers.Add(1)
-		c.mu.Unlock()
-
 		go func(snapshot connector.Snapshot) {
 			defer c.workers.Done()
 
-			if err := c.consume(ctx, snapshot); err != nil && ctx.Err() == nil {
+			if err := c.consume(consumeCtx, snapshot); err != nil && consumeCtx.Err() == nil {
 				logging.From(ctx).Error("Kafka consumer stopped", "event", "kafka.consumer_stopped",
 					"connector_id", snapshot.ID, "error", logging.Error(err))
 			}
@@ -154,12 +174,11 @@ func (c *Consumer) consume(ctx context.Context, snapshot connector.Snapshot) err
 			continue
 		}
 
-		if err := client.CommitRecords(ctx, records...); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-
-			return fmt.Errorf("commit failed: %w", err)
+		// 提交失败要重试而不是退出：一次瞬时抖动不该让接入点永久停摆，
+		// 而此时数据已发布，重投只会产生重复（由 event_id 去重），
+		// 比"停摆直到人工重启"代价小得多。
+		if err := c.commit(ctx, client, records); err != nil {
+			return err
 		}
 	}
 }
@@ -176,6 +195,34 @@ func (c *Consumer) publish(ctx context.Context, events []pipeline.Event) error {
 
 		if ctx.Err() != nil {
 			return errors.Join(ctx.Err(), err)
+		}
+
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		if backoff < 5*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// commit 带退避重试地提交位移，直到成功或进程退出。
+func (c *Consumer) commit(ctx context.Context, client *kgo.Client, records []*kgo.Record) error {
+	backoff := 100 * time.Millisecond
+
+	for {
+		err := client.CommitRecords(ctx, records...)
+		if err == nil {
+			return nil
+		}
+
+		// 关停时结束重试：位移没提交，重启后会重读这批消息并重投，
+		// 由 event_id 去重兜底。返回 ctx 错误让调用方区分"关停"与"故障"。
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 
 		select {

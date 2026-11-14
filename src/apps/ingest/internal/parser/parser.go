@@ -18,6 +18,9 @@ const (
 	ModeKV        = "kv"        // key=value，分隔符可配。
 	ModeRegex     = "regex"     // 命名捕获组。
 	ModeDelimiter = "delimiter" // 按分隔符切列。
+	// ModeLines 不是解析模式，而是拆分策略：一行一条。
+	// 独立常量替代空字符串，避免调用方传 "" 这种看不出意图的魔法值。
+	ModeLines = "lines"
 )
 
 // modes 按常用程度排列；新增模式在此登记。

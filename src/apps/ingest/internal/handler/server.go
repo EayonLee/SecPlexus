@@ -6,15 +6,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
 // Server 持有 Ingest 处理请求所需的依赖。
+// 通道依赖走 router.Channels，管理 API 依赖在第五组加在这里——
+// 同一依赖只保留一条装配路径，避免改一处忘另一处。
 type Server struct {
-	Registry connector.Registry // 接入点查询；由通道与管理 API 共用。
-	Pipeline *pipeline.Pipeline // 已受理事件的解析与发布。
 	// Ready 报告外部依赖是否可用；nil 表示当前没有需要检查的依赖。
 	Ready func(ctx context.Context) error
 }

@@ -84,7 +84,7 @@ func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	events := publisher.events()
 	if len(events) != 1 {
@@ -123,7 +123,7 @@ func TestParseFailureStillPublishesWithStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	events := publisher.events()
 	if len(events) != 1 {
@@ -158,7 +158,7 @@ func TestGenericConnectorPassesThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 	events := publisher.events()
 	if len(events) != 1 || events[0].Outcome.Status != pipeline.StatusError {
 		t.Fatalf("passthrough events = %#v", events)
@@ -205,7 +205,7 @@ func TestStatsCountAcceptedParsedPublished(t *testing.T) {
 		}
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	stats := line.Stats()
 	if stats.Accepted != 5 || stats.Parsed != 5 || stats.Published != 5 {
@@ -244,7 +244,7 @@ func TestRepeatedIdenticalPayloadGetsDistinctIDs(t *testing.T) {
 		}
 	}
 
-	line.Flush(context.Background())
+	_ = line.Flush(context.Background())
 
 	events := publisher.events()
 	if len(events) != 2 {
