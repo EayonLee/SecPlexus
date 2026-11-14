@@ -29,6 +29,18 @@ type Snapshot struct {
 	Engine  *normalizer.Engine // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
 	Token   [sha256.Size]byte  // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
 	Port    int                // syslog 通道的监听端口；0 表示未绑定。
+	Kafka   KafkaBinding       // Kafka 消费绑定；仅 ChannelKafka 使用。
+}
+
+// KafkaBinding 描述要消费的外部总线。
+type KafkaBinding struct {
+	Brokers []string // 客户已有总线的 broker 列表。
+	Topic   string   // 外部 topic 名。
+}
+
+// Usable 报告绑定是否完整。不完整的接入点不启动消费循环。
+func (k KafkaBinding) Usable() bool {
+	return len(k.Brokers) > 0 && k.Topic != ""
 }
 
 // HasToken 报告接入点是否配置了 HTTP 令牌。
@@ -51,6 +63,8 @@ type Registry interface {
 	ByTokenDigest(digest [sha256.Size]byte) (Snapshot, bool)
 	// SyslogBindings 返回所有已绑定端口的 syslog 接入点，供热重载与监听器启动使用。
 	SyslogBindings() []Snapshot
+	// KafkaSources 返回所有绑定完整的 Kafka 消费接入点。
+	KafkaSources() []Snapshot
 }
 
 // Memory 是内存注册表：测试与第五组数据库加载之前的占位实现。
@@ -112,7 +126,7 @@ func (m *Memory) ByTokenDigest(digest [sha256.Size]byte) (Snapshot, bool) {
 	return m.byID[id], true
 }
 
-// SyslogBindings 返回已绑定端口的 syslog 接入点，按端口升序。
+// SyslogBindings 返回已绑定端口的 syslog 接入点。
 func (m *Memory) SyslogBindings() []Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -125,4 +139,19 @@ func (m *Memory) SyslogBindings() []Snapshot {
 	}
 
 	return bindings
+}
+
+// KafkaSources 返回绑定完整的 Kafka 接入点。
+func (m *Memory) KafkaSources() []Snapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sources := make([]Snapshot, 0, len(m.byID))
+	for _, snapshot := range m.byID {
+		if snapshot.Channel == ChannelKafka && snapshot.Kafka.Usable() {
+			sources = append(sources, snapshot)
+		}
+	}
+
+	return sources
 }

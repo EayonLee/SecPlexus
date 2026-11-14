@@ -32,10 +32,17 @@ type Kafka struct {
 
 // Pipeline 描述解析流水线的容量参数；零值由管道填默认值，配置里只写想改的。',
 type Pipeline struct {
-	Workers       int           `yaml:"workers"`        // 解析 worker 数；0 表示按 CPU 核数。
-	QueueDepth    int           `yaml:"queue_depth"`    // 待解析队列长度；0 表示 10000，队列满时阻塞接收。
-	BatchSize     int           `yaml:"batch_size"`     // 每批事件数；0 表示 500。
-	FlushInterval time.Duration `yaml:"flush_interval"` // 批量最长等待；0 表示 2 秒。
+	Workers        int           `yaml:"workers"`         // 解析 worker 数；0 表示按 CPU 核数。
+	QueueDepth     int           `yaml:"queue_depth"`     // 待解析队列长度；0 表示 10000，队列满时阻塞接收。
+	BatchSize      int           `yaml:"batch_size"`      // 每批事件数；0 表示 500。
+	ReloadInterval time.Duration `yaml:"reload_interval"` // Kafka 接入点刷新间隔；0 表示 30 秒。
+	FlushInterval  time.Duration `yaml:"flush_interval"`  // 批量最长等待；0 表示 2 秒。
+}
+
+// Syslog 描述 syslog 通道参数。
+type Syslog struct {
+	// ReloadInterval 是端口绑定关系的刷新间隔；SIGHUP 可立即重载。
+	ReloadInterval time.Duration `yaml:"reload_interval"`
 }
 
 // HTTPChannel 描述设备推送通道的参数。
@@ -58,6 +65,7 @@ type Config struct {
 	App      App            `yaml:"app"`          // 服务监听配置。
 	Pipeline Pipeline       `yaml:"pipeline"`     // 解析流水线容量。
 	HTTP     HTTPChannel    `yaml:"http_channel"` // 设备推送通道参数。
+	Syslog   Syslog         `yaml:"syslog"`       // syslog 通道参数。
 	Kafka    Kafka          `yaml:"kafka"`        // 事件发布总线。
 	Cache    cache.Config   `yaml:"cache"`        // 令牌限流用的 Redis。
 	IAM      IAM            `yaml:"iam"`          // 管理 API 的授权上游。

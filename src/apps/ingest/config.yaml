@@ -33,6 +33,15 @@ pipeline:
   batch_size: "${SPX_INGEST_BATCH_SIZE-500}"
   # 批量最长等待：未满批也会在这个时间后发出。
   flush_interval: "${SPX_INGEST_FLUSH_INTERVAL-2s}"
+  # Kafka 消费接入点的刷新间隔。
+  reload_interval: "${SPX_INGEST_PIPELINE_RELOAD_INTERVAL-30s}"
+
+# ---- syslog 通道 ----
+# 端口绑定关系来自 connectors 注册表（每个接入点一个端口，UDP 与 TCP 同端口）。
+# 改端口不需要重启进程：周期刷新，或 kill -HUP 立即重载。
+syslog:
+  # 端口绑定关系的刷新间隔。
+  reload_interval: "${SPX_INGEST_SYSLOG_RELOAD_INTERVAL-10s}"
 
 # ---- 设备推送通道 ----
 # 请求体上限、令牌限流配额。限流按接入点分别计数，存在 Redis 里。

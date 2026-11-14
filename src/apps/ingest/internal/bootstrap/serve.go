@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/kafkachannel"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
@@ -98,6 +100,24 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		MaxBody:  maxBodyBytes(cfg.HTTP.MaxBodyBytes),
 	}
 
+	// syslog 与 Kafka 消费是后台通道：它们不挂在 HTTP 路由上，各自有监听/轮询循环。
+	syslogChannel := syslogchannel.New(registry, line, cfg.Syslog.ReloadInterval)
+	syslogDone := make(chan struct{})
+	go func() { defer close(syslogDone); _ = syslogChannel.Start(pipelineCtx) }()
+
+	kafkaConsumer := kafkachannel.New(registry, line, producer, kafkachannel.Options{
+		ReloadInterval: cfg.Pipeline.ReloadInterval,
+	})
+	kafkaDone := make(chan struct{})
+	go func() { defer close(kafkaDone); _ = kafkaConsumer.Start(pipelineCtx) }()
+
+	defer func() {
+		// 通道先停：不再产生新报文，之后的排空才有意义。
+		stopPipeline()
+		<-syslogDone
+		<-kafkaDone
+	}()
+
 	httpServer := &http.Server{
 		Addr:              cfg.App.Addr(),
 		Handler:           router.Handler(server, channels),
@@ -112,8 +132,8 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	serveErr := httpx.Serve(ctx, httpServer)
 
-	// 停机顺序：停接收（HTTP 关闭）→ 排空在途解析 → 发布剩余批次。
-	stopPipeline()
+	// 停机顺序：停接收（HTTP 与后台通道）→ 排空在途解析 → 发布剩余批次。
+	// 后台通道的停止由上面的 defer 完成；此处等流水线跑完。
 	if err := <-pipelineDone; err != nil {
 		logging.From(ctx).Error("Pipeline stopped with error", "event", "pipeline.stopped", "error", logging.Error(err))
 	}

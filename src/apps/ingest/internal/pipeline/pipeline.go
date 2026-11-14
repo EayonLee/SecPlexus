@@ -60,6 +60,9 @@ type Job struct {
 	Snapshot connector.Snapshot
 	Raw      []byte
 	Received time.Time
+	// Fields 非空表示第 1 层已由通道完成（如 syslog 剥信封），
+	// 管道直接进第 2 层映射，不再调用解析器。
+	Fields map[string]any
 }
 
 // Stats 是可观测计数，供健康检查与运行指标使用。
@@ -135,6 +138,24 @@ func New(options Options, publisher Publisher) *Pipeline {
 		jobs:      make(chan Job, options.QueueDepth),
 		events:    make(chan Event, options.BatchSize*2),
 		flush:     make(chan chan struct{}),
+	}
+}
+
+// SubmitFields 受理一条已由通道完成线格式解析的报文。
+// syslog 通道用 go-syslog 剥完信封后走这里：字段已就绪，只差规则映射。
+func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot, fields map[string]any, received time.Time) error {
+	job := Job{Snapshot: snapshot, Fields: fields, Received: received}
+
+	p.inflight.Add(1)
+
+	select {
+	case p.jobs <- job:
+		p.accepted.Add(1)
+		return nil
+	case <-ctx.Done():
+		p.inflight.Done()
+
+		return ctx.Err()
 	}
 }
 
@@ -237,6 +258,12 @@ func (p *Pipeline) parseLoop(ctx context.Context) {
 	}
 }
 
+// Parse 只做解析与信封构造，不发布。
+// Kafka 消费需要"确认发布成功后再提交位移"，因此由它自己掌控发布与提交的顺序。
+func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.Time) Event {
+	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received})
+}
+
 // parse 把一条报文解析成事件。
 // 引擎 panic 只影响这一条：记原因码、计数，事件照常发布——
 // 单条坏消息不能拖垮 worker，也不能让整批消失。
@@ -264,6 +291,11 @@ func (p *Pipeline) parse(job Job) Event {
 
 // apply 调用解析规则；未挂规则的接入点走原文透传。
 func (p *Pipeline) apply(job Job) (fields map[string]any, reasons []string) {
+	// 通道已完成第 1 层：直接用它的字段。
+	if job.Fields != nil {
+		return job.Fields, nil
+	}
+
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			p.panics.Add(1)
@@ -425,12 +457,31 @@ func (p *Pipeline) batchLoop(ctx context.Context) error {
 				batch = batch[:0]
 			}
 		case done := <-p.flush:
-			if len(batch) > 0 {
-				p.publish(ctx, batch)
-				batch = batch[:0]
-			}
+			// Flush 保证在途任务都已投递到 events，但这些事件可能还在通道缓冲里，
+			// 而 select 可能先选中 flush 分支。先非阻塞排空缓冲，再发布，
+			// 否则最后一个事件会留到下一批，调用方看到的计数偏少。
+			batch = drain(p.events, batch)
+			p.publish(ctx, batch)
+			batch = batch[:0]
 
 			close(done)
+		}
+	}
+}
+
+// drain 非阻塞地把事件通道里已就绪的事件并入当前批次。
+// 通道关闭时返回已合并的批次，由调用方按停机路径处理。
+func drain(events <-chan Event, batch []Event) []Event {
+	for {
+		select {
+		case pending, open := <-events:
+			if !open {
+				return batch
+			}
+
+			batch = append(batch, pending)
+		default:
+			return batch
 		}
 	}
 }

@@ -91,6 +91,13 @@ func (e *Engine) Apply(raw []byte, receivedAt time.Time) (Event, error) {
 		return Event{}, err
 	}
 
+	return e.ApplyFields(fields, receivedAt), nil
+}
+
+// ApplyFields 只做第 2 层：把已解析的扁平字段投影成 OCSF 事件。
+// 第 1 层由通道自己做时用它——syslog 通道先用 go-syslog 剥信封，
+// 再把字段交给规则映射，两层职责仍然不混。
+func (e *Engine) ApplyFields(fields map[string]any, receivedAt time.Time) Event {
 	event := Event{Fields: make(map[string]any, len(e.projections)+len(e.constants)+4)}
 
 	for index := range e.projections {
@@ -113,7 +120,7 @@ func (e *Engine) Apply(raw []byte, receivedAt time.Time) (Event, error) {
 		writePath(event.Fields, plan.segments, plan.value)
 	}
 
-	return event, nil
+	return event
 }
 
 // collectUnmapped 记录规则没有用到的源字段；一个都没有时不分配 map。
