@@ -227,7 +227,7 @@ func TestPipelineSplitParseApply(t *testing.T) {
 			t.Fatalf("event %d src_endpoint missing", index)
 		}
 
-		id := normalizer.EventID("connector-1", uint64(index), message)
+		id := normalizer.EventID("connector-1", [16]byte{1}, uint64(index), message)
 		if _, duplicate := seen[id]; duplicate {
 			t.Fatalf("event %d shares an id with an earlier message", index)
 		}
@@ -241,14 +241,14 @@ func TestPipelineSplitParseApply(t *testing.T) {
 func TestEventIDDistinguishesDeliveries(t *testing.T) {
 	message := []byte(`{"src":"10.0.0.1"}`)
 
-	first := normalizer.EventID("connector-1", 0, message)
+	first := normalizer.EventID("connector-1", [16]byte{1}, 0, message)
 	for round := 0; round < 5; round++ {
-		if again := normalizer.EventID("connector-1", 0, message); again != first {
+		if again := normalizer.EventID("connector-1", [16]byte{1}, 0, message); again != first {
 			t.Fatalf("id changed for the same sequence: %s vs %s", first, again)
 		}
 	}
 
-	if retry := normalizer.EventID("connector-1", 1, message); retry == first {
+	if retry := normalizer.EventID("connector-1", [16]byte{1}, 1, message); retry == first {
 		t.Fatal("a re-delivery with a new sequence must get a new id")
 	}
 }

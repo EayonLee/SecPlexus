@@ -224,3 +224,33 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 		t.Fatalf("metadata.spx = %#v", bookkeeping)
 	}
 }
+
+// 回归（P1）：规则未映射的源字段曾被整体丢弃，
+// 导致"未映射字段一条不丢"（spec）不成立、脱敏代码也是死代码。
+// 它们现在进 OCSF 的 unmapped 属性，且敏感键已脱敏。
+func TestUnmappedFieldsReachTheEvent(t *testing.T) {
+	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
+	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+
+	payload := `{"src":"10.0.0.7","password":"hunter2","vendor_note":"keep me"}`
+	if err := line.Submit(context.Background(), snapshot, []byte(payload), time.Now(), pipeline.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	_ = line.Flush(context.Background())
+
+	var envelope map[string]any
+	if err := json.Unmarshal(publisher.events()[0].Body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	unmapped, ok := envelope["unmapped"].(map[string]any)
+	if !ok {
+		t.Fatalf("缺少 unmapped: %#v", envelope)
+	}
+	if unmapped["vendor_note"] != "keep me" {
+		t.Fatalf("未映射字段丢失: %#v", unmapped)
+	}
+	if unmapped["password"] == "hunter2" {
+		t.Fatalf("敏感值未脱敏: %#v", unmapped["password"])
+	}
+}

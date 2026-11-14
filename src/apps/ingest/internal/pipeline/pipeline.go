@@ -6,6 +6,8 @@ package pipeline
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -185,6 +187,8 @@ type Pipeline struct {
 	batcher   chan struct{} // batchLoop 退出信号
 
 	sequence atomic.Uint64
+	// epoch 标识本次进程启动；参与 event_id，避免重启后与上一批事件撞 ID。
+	epoch [16]byte
 
 	// inflight 统计已提交但尚未进入批处理的报文数。
 	// Flush 与优雅停机都靠它判断"在途是否排空"，只看批处理缓冲区会漏掉解析队列里的事件。
@@ -203,7 +207,7 @@ type Pipeline struct {
 func New(options Options, publisher Publisher) *Pipeline {
 	options = options.defaults()
 
-	return &Pipeline{
+	instance := &Pipeline{
 		options:   options,
 		publisher: publisher,
 		jobs:      make(chan Job, options.QueueDepth),
@@ -212,6 +216,13 @@ func New(options Options, publisher Publisher) *Pipeline {
 		done:      make(chan struct{}),
 		batcher:   make(chan struct{}),
 	}
+
+	// 启动期标识：取不到随机源时退化为时间戳，仍能区分进程。
+	if _, err := rand.Read(instance.epoch[:]); err != nil {
+		binary.BigEndian.PutUint64(instance.epoch[:8], uint64(time.Now().UnixNano()))
+	}
+
+	return instance
 }
 
 // SubmitFields 受理一条已由通道完成线格式解析的报文。
@@ -415,10 +426,10 @@ func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.
 func (p *Pipeline) parse(job Job) Event {
 	event := Event{
 		ConnectorID: job.Snapshot.ID,
-		EventID:     normalizer.EventID(job.Snapshot.ID, p.sequence.Add(1), job.Raw),
+		EventID:     normalizer.EventID(job.Snapshot.ID, p.epoch, p.sequence.Add(1), job.Raw),
 	}
 
-	fields, outcome := p.apply(job)
+	fields, unmapped, outcome := p.apply(job)
 
 	// 截断是一件独立的完整性事实，但它使解析结果不可信：
 	// 结构化格式在中间被切断后，剩下的字段逐个看都合法，
@@ -446,7 +457,7 @@ func (p *Pipeline) parse(job Job) Event {
 	}
 
 	event.PartitionKey = partitionKey(fields, event.EventID)
-	event.Body = buildBody(job, fields, event)
+	event.Body = buildBody(job, fields, unmapped, event)
 
 	return event
 }
@@ -462,7 +473,7 @@ func truncationDetail(meta Meta) string {
 
 // apply 调用解析规则，返回字段与结构化结果。
 // 调用方需要字段做分区键与事件体，需要结果做状态标注，两样一起返回。
-func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
+func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outcome) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			p.panics.Add(1)
@@ -471,6 +482,7 @@ func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
 				"panic_kind", fmt.Sprintf("%T", recovered), "stack", logging.Stack())
 
 			fields = nil
+			unmapped = nil
 			outcome = Outcome{
 				Status: StatusError,
 				Stage:  StageMap,
@@ -483,7 +495,7 @@ func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
 	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
 	// 原因码单独区分，运维才能看出该去补规则还是查报文。
 	if job.Snapshot.Engine == nil {
-		return nil, Outcome{
+		return nil, nil, Outcome{
 			Status: StatusError,
 			Stage:  StageMap,
 			Reason: ReasonNoRule,
@@ -495,12 +507,12 @@ func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
 	if job.Fields != nil {
 		mapped := job.Snapshot.Engine.ApplyFields(job.Fields, job.Received)
 
-		return mapped.Fields, Outcome{Status: StatusOK}
+		return mapped.Fields, mapped.Unmapped, Outcome{Status: StatusOK}
 	}
 
 	parsed, err := job.Snapshot.Engine.Apply(job.Raw, job.Received)
 	if err != nil {
-		return nil, Outcome{
+		return nil, nil, Outcome{
 			Status: StatusError,
 			Stage:  StageDecode,
 			Reason: ReasonFormatMismatch,
@@ -513,7 +525,7 @@ func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
 			"connector_id", job.Snapshot.ID, "warning", warning)
 	}
 
-	return parsed.Fields, Outcome{Status: StatusOK}
+	return parsed.Fields, parsed.Unmapped, Outcome{Status: StatusOK}
 }
 
 // partitionKey 按 spec 的实体优先级取分区键：
@@ -560,7 +572,7 @@ func nestedString(fields map[string]any, path string) string {
 // 解析失败时才补兜底类与原文字段；已经解析出的字段一律保留——
 // 一条被截断但头部完整的 CEF 仍然属于 2004（Detection Finding），
 // 覆盖成通用类会让它落进错误的分类，下游按 class_uid 路由时就找不到了。
-func buildBody(job Job, fields map[string]any, event Event) []byte {
+func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
 	envelope := make(map[string]any, len(fields)+2)
 	for key, value := range fields {
 		envelope[key] = value
@@ -590,6 +602,12 @@ func buildBody(job Job, fields map[string]any, event Event) []byte {
 	envelope["activity_id"] = activityID
 	envelope["category_uid"] = classUID / 1000
 	envelope["type_uid"] = classUID*100 + activityID
+
+	// OCSF 的 unmapped 属性就是给"规则未使用的源字段"准备的；
+	// 丢掉它们会让排查时看不到原始上下文，也会让脱敏逻辑变成死代码。
+	if len(unmapped) > 0 {
+		envelope["unmapped"] = unmapped
+	}
 
 	// 我方簿记放进 metadata.spx：metadata 是 OCSF 预留对象，
 	// 直接塞 connector_id/parse_status 会占用标准语义并挡掉必填的 version/product。
