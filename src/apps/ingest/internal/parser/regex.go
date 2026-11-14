@@ -18,7 +18,7 @@ func newRegex(spec Spec) (Parser, error) {
 	// 匹配时间与输入长度线性相关，没有灾难性回溯，恶意样本拖不垮 worker。
 	expression, err := regexp.Compile(spec.Pattern)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidSpec, err)
 	}
 
 	if !hasNamedGroup(expression) {

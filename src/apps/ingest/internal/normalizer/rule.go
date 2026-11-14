@@ -82,14 +82,14 @@ func Compile(rule Rule) (*Engine, error) {
 
 	instance, err := parser.New(rule.Parse)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidRule, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRule, err)
 	}
 
 	location := time.UTC
 	if rule.Time.Location != "" {
 		parsed, err := time.LoadLocation(rule.Time.Location)
 		if err != nil {
-			return nil, fmt.Errorf("%w: time.location %q: %v", ErrInvalidRule, rule.Time.Location, err)
+			return nil, fmt.Errorf("%w: time.location %q: %w", ErrInvalidRule, rule.Time.Location, err)
 		}
 
 		location = parsed
@@ -115,7 +115,7 @@ func Compile(rule Rule) (*Engine, error) {
 	for index, sample := range rule.Samples {
 		// 样本校验用固定接收时间：样本验证的是解析与映射，不是时间回退。
 		if _, err = engine.Apply([]byte(sample), time.Unix(0, 0).UTC()); err != nil {
-			return nil, fmt.Errorf("%w: sample %d: %v", ErrSampleFailed, index+1, err)
+			return nil, fmt.Errorf("%w: sample %d: %w", ErrSampleFailed, index+1, err)
 		}
 	}
 
@@ -175,7 +175,7 @@ func (r Rule) validate() error {
 
 		segments, err := validatePath(target)
 		if err != nil {
-			return fmt.Errorf("%w: field_map %q: %v", ErrInvalidRule, source, err)
+			return fmt.Errorf("%w: field_map %q: %w", ErrInvalidRule, source, err)
 		}
 
 		key := strings.Join(segments, ".")
@@ -233,7 +233,7 @@ func (r Rule) validate() error {
 	for target := range r.Constants {
 		segments, err := validatePath(target)
 		if err != nil {
-			return fmt.Errorf("%w: constant %q: %v", ErrInvalidRule, target, err)
+			return fmt.Errorf("%w: constant %q: %w", ErrInvalidRule, target, err)
 		}
 
 		constantTargets[strings.Join(segments, ".")] = struct{}{}

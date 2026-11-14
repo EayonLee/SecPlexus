@@ -51,7 +51,7 @@ func (p delimiterParser) Parse(raw []byte) (map[string]any, error) {
 			return nil, fmt.Errorf("%w: empty record", ErrMalformed)
 		}
 
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 
 	fields := make(map[string]any, len(p.columns))

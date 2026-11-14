@@ -43,7 +43,7 @@ func decodeObject(raw []byte) (map[string]any, error) {
 
 	var decoded map[string]any
 	if err := decoder.Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	if err := ensureEOF(decoder); err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func splitJSONStream(raw []byte) ([][]byte, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+			return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 		}
 
 		messages = append(messages, value)
@@ -133,7 +133,7 @@ func splitJSONArray(raw []byte) ([][]byte, error) {
 
 	token, err := decoder.Token()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
 		return nil, fmt.Errorf("%w: expected a JSON array", ErrMalformed)
@@ -143,7 +143,7 @@ func splitJSONArray(raw []byte) ([][]byte, error) {
 	for decoder.More() {
 		var element json.RawMessage
 		if err = decoder.Decode(&element); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+			return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 		}
 
 		messages = append(messages, element)
@@ -151,7 +151,7 @@ func splitJSONArray(raw []byte) ([][]byte, error) {
 
 	// 消费闭合的 ]，再确认后面没有尾随内容。
 	if token, err = decoder.Token(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != ']' {
 		return nil, fmt.Errorf("%w: unclosed JSON array", ErrMalformed)
