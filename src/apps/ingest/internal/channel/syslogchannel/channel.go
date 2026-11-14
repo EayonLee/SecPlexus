@@ -243,7 +243,7 @@ func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, fram
 	}
 
 	// 截断信息随事件落库：分析师必须能看出这条数据不完整。
-	meta := pipeline.Meta{Truncated: truncated, OriginalBytes: original}
+	meta := pipeline.Meta{Truncated: truncated, OriginalBytes: original, DroppedBytes: original - len(trimmed)}
 
 	if len(trimmed) == 0 {
 		return

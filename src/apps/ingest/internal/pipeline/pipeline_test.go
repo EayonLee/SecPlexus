@@ -92,8 +92,8 @@ func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 	}
 
 	event := events[0]
-	if event.Status != pipeline.StatusOK {
-		t.Fatalf("status = %q", event.Status)
+	if event.Outcome.Status != pipeline.StatusOK {
+		t.Fatalf("status = %q", event.Outcome.Status)
 	}
 	if event.EventID == "" {
 		t.Fatal("event id is empty")
@@ -131,10 +131,10 @@ func TestParseFailureStillPublishesWithStatus(t *testing.T) {
 	}
 
 	event := events[0]
-	if event.Status != pipeline.StatusError {
-		t.Fatalf("status = %q, want error", event.Status)
+	if event.Outcome.Status != pipeline.StatusError {
+		t.Fatalf("status = %q, want error", event.Outcome.Status)
 	}
-	if len(event.Reasons) == 0 {
+	if event.Outcome.Reason == "" {
 		t.Fatal("missing reason code")
 	}
 
@@ -160,7 +160,7 @@ func TestGenericConnectorPassesThrough(t *testing.T) {
 
 	line.Flush(context.Background())
 	events := publisher.events()
-	if len(events) != 1 || events[0].Status != pipeline.StatusError {
+	if len(events) != 1 || events[0].Outcome.Status != pipeline.StatusError {
 		t.Fatalf("passthrough events = %#v", events)
 	}
 }

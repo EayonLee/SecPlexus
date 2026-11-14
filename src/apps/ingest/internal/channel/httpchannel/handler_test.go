@@ -158,8 +158,8 @@ func TestAcceptedPushReturns202AndPublishes(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("published %d events, want 1", len(events))
 	}
-	if events[0].Status != pipeline.StatusOK {
-		t.Fatalf("status = %q, want ok", events[0].Status)
+	if events[0].Outcome.Status != pipeline.StatusOK {
+		t.Fatalf("status = %q, want ok", events[0].Outcome.Status)
 	}
 	if events[0].PartitionKey != "10.0.0.1" {
 		t.Fatalf("partition key = %q, want the src ip", events[0].PartitionKey)
@@ -304,7 +304,7 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 
 	line.Flush(context.Background())
 	for _, event := range publisher.snapshot() {
-		if event.Status == pipeline.StatusError && len(event.Reasons) == 0 {
+		if event.Outcome.Status == pipeline.StatusError && event.Outcome.Reason == "" {
 			t.Fatal("error event without a reason code")
 		}
 	}
@@ -340,7 +340,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 
 	line.Flush(context.Background())
 	events := publisher.snapshot()
-	if len(events) != 1 || events[0].Status != pipeline.StatusError {
+	if len(events) != 1 || events[0].Outcome.Status != pipeline.StatusError {
 		t.Fatalf("passthrough events = %#v", events)
 	}
 }

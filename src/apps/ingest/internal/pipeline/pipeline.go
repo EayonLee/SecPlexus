@@ -7,7 +7,6 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -28,12 +26,40 @@ const (
 	StatusError Status = "error" // 解析失败；事件仍发布，可查询、可补救。
 )
 
-// 解析失败的原因码。下游按它做看板与告警，取值必须稳定。
+// Stage 是失败发生的层次，决定排查方向：
+// decode 看报文与解析模式，map 看字段映射与规则，limit 看上限与设备侧写法。
+type Stage string
+
 const (
-	ReasonFormatMismatch = "format_mismatch" // 报文与规则的线格式不符，或接入点尚未挂规则。
-	ReasonEnginePanic    = "engine_panic"    // 引擎 panic，兜底记录，正常不应出现。
-	ReasonTruncated      = "truncated"       // 报文超上限被截断，解析结果不可信。
+	StageDecode Stage = "decode" // 第 1 层：线格式解析失败。
+	StageMap    Stage = "map"    // 第 2 层：规则映射失败。
+	StageLimit  Stage = "limit"  // 触及上限（截断）。
 )
+
+// Reason 是稳定的机器可读原因码，用于聚合、告警与看板。
+// 取值一旦发布不能改名：下游按它分组统计。
+// 它与人类可读的描述刻意分开——原因码可枚举，描述不可枚举。
+type Reason string
+
+const (
+	ReasonNoRule         Reason = "no_rule"         // 接入点未挂解析规则，原文透传。
+	ReasonFormatMismatch Reason = "format_mismatch" // 报文与规则的线格式不符。
+	ReasonTruncated      Reason = "truncated"       // 报文超上限被截断，解析结果不可信。
+	ReasonEnginePanic    Reason = "engine_panic"    // 引擎 panic，正常不应出现。
+)
+
+// Outcome 是一次解析的结果。
+// 四个字段回答四个不同的问题：Status 什么结果、Stage 哪一层失败、
+// Reason 为什么（可聚合）、Detail 具体是什么（可排查）。
+type Outcome struct {
+	Status Status // ok 或 error。
+	Stage  Stage  // 失败层次；成功时为空。
+	Reason Reason // 稳定原因码；成功时为空。
+	Detail string // 人类可读细节；成功时为空。
+}
+
+// OK 报告解析是否成功。
+func (o Outcome) OK() bool { return o.Status == StatusOK }
 
 // ClassUIDGeneric 是未解析事件的兜底类。
 // 6003 由 spec 指定为"通用接入（原文透传 message）"的类，
@@ -42,14 +68,17 @@ const ClassUIDGeneric = 6003
 
 // Event 是一条待发布的事件。
 type Event struct {
-	ConnectorID   string   // 来源接入点。
-	EventID       string   // 确定性标识，供下游去重。
-	PartitionKey  string   // 分区键，保证同一实体的事件落在同一分区。
-	Body          []byte   // OCSF 事件 JSON。
-	Status        Status   // 解析状态。
-	Reasons       []string // 解析失败原因码；成功时为空。
-	Truncated     bool     // 报文是否被截断；截断事件不可能是 ok。
-	OriginalBytes int      // 截断前长度。>
+	ConnectorID  string  // 来源接入点。
+	EventID      string  // 确定性标识，供下游去重。
+	PartitionKey string  // 分区键，保证同一实体的事件落在同一分区。
+	Body         []byte  // OCSF 事件 JSON。
+	Outcome      Outcome // 解析结果：状态、阶段、原因码与细节。
+
+	// Truncated 与 OriginalBytes 是数据完整性事实，与"解析是否成功"分开：
+	// 一条被截断的报文可能仍然解析成功（字段都在头部），
+	// 下游需要能分别对"不完整"和"解析失败"告警。
+	Truncated     bool
+	OriginalBytes int
 }
 
 // Publisher 是事件出口。管道只依赖这个接口，Kafka 是它的一个实现。
@@ -63,6 +92,7 @@ type Publisher interface {
 type Meta struct {
 	Truncated     bool // 报文是否被截断。
 	OriginalBytes int  // 截断前的原始长度；未截断时为 0。
+	DroppedBytes  int  // 被丢弃的字节数，用于生成人类可读的截断说明。
 }
 
 // Job 是一条待解析的报文。
@@ -289,24 +319,31 @@ func (p *Pipeline) parse(job Job) Event {
 		EventID:     normalizer.EventID(job.Snapshot.ID, p.sequence.Add(1), job.Raw),
 	}
 
-	fields, reasons := p.apply(job)
+	fields, outcome := p.apply(job)
 
-	// 截断的报文不能算解析成功：结构化格式在中间被切断后，
-	// 剩下的字段看起来完全合法，实际缺了尾部字段（CEF 的 src/dst 就在尾部）。
-	// 宁可标成 error 让分析师知道"这条不完整"，也不能让它伪装成正常事件。
+	// 截断是一件独立的完整性事实，但它使解析结果不可信：
+	// 结构化格式在中间被切断后，剩下的字段逐个看都合法，
+	// 实际缺了尾部字段（CEF 的 src/dst 就在扩展区末尾）。
 	if job.Meta.Truncated {
-		reasons = append(reasons, ReasonTruncated)
+		event.Truncated = true
+		event.OriginalBytes = job.Meta.OriginalBytes
+
+		// 已因解析失败报错的保留更具体的原因：解析失败的证据更直接。
+		if outcome.OK() {
+			outcome = Outcome{
+				Status: StatusError,
+				Stage:  StageLimit,
+				Reason: ReasonTruncated,
+				Detail: truncationDetail(job.Meta),
+			}
+		}
 	}
 
-	if len(reasons) > 0 {
-		event.Status = StatusError
-		event.Reasons = reasons
-		event.Truncated = job.Meta.Truncated
-		event.OriginalBytes = job.Meta.OriginalBytes
-		p.parseFailed.Add(1)
-	} else {
-		event.Status = StatusOK
+	event.Outcome = outcome
+	if outcome.OK() {
 		p.parsed.Add(1)
+	} else {
+		p.parseFailed.Add(1)
 	}
 
 	event.PartitionKey = partitionKey(fields, event.EventID)
@@ -315,13 +352,18 @@ func (p *Pipeline) parse(job Job) Event {
 	return event
 }
 
-// apply 调用解析规则；未挂规则的接入点走原文透传。
-func (p *Pipeline) apply(job Job) (fields map[string]any, reasons []string) {
-	// 通道已完成第 1 层：直接用它的字段。
-	if job.Fields != nil {
-		return job.Fields, nil
+// truncationDetail 生成人类可读的截断说明：保留多少、原始多少。
+func truncationDetail(meta Meta) string {
+	if meta.OriginalBytes <= 0 {
+		return "message truncated at the configured size limit"
 	}
 
+	return fmt.Sprintf("message truncated: kept %d of %d bytes", meta.OriginalBytes-meta.DroppedBytes, meta.OriginalBytes)
+}
+
+// apply 调用解析规则，返回字段与结构化结果。
+// 调用方需要字段做分区键与事件体，需要结果做状态标注，两样一起返回。
+func (p *Pipeline) apply(job Job) (fields map[string]any, outcome Outcome) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			p.panics.Add(1)
@@ -329,31 +371,50 @@ func (p *Pipeline) apply(job Job) (fields map[string]any, reasons []string) {
 				"event", "parse.panic", "connector_id", job.Snapshot.ID,
 				"panic_kind", fmt.Sprintf("%T", recovered), "stack", logging.Stack())
 
-			fields, reasons = nil, []string{ReasonEnginePanic}
+			fields = nil
+			outcome = Outcome{
+				Status: StatusError,
+				Stage:  StageMap,
+				Reason: ReasonEnginePanic,
+				Detail: fmt.Sprintf("engine panicked: %T", recovered),
+			}
 		}
 	}()
 
-	// 未挂规则：原文透传。spec 规定这类事件的 parse_status 仍为 error，
-	// 因为它还没有被真正解析过，后续可换正式规则重放。
+	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
+	// 原因码单独区分，运维才能看出该去补规则还是查报文。
 	if job.Snapshot.Engine == nil {
-		return nil, []string{ReasonFormatMismatch}
-	}
-
-	event, err := job.Snapshot.Engine.Apply(job.Raw, job.Received)
-	if err != nil {
-		if errors.Is(err, parser.ErrMalformed) {
-			return nil, []string{ReasonFormatMismatch}
+		return nil, Outcome{
+			Status: StatusError,
+			Stage:  StageMap,
+			Reason: ReasonNoRule,
+			Detail: "connector has no parse rule; raw message passed through",
 		}
-
-		return nil, []string{ReasonFormatMismatch}
 	}
 
-	for _, warning := range event.Warnings {
+	// 通道已完成第 1 层：字段直接进第 2 层映射。
+	if job.Fields != nil {
+		mapped := job.Snapshot.Engine.ApplyFields(job.Fields, job.Received)
+
+		return mapped.Fields, Outcome{Status: StatusOK}
+	}
+
+	parsed, err := job.Snapshot.Engine.Apply(job.Raw, job.Received)
+	if err != nil {
+		return nil, Outcome{
+			Status: StatusError,
+			Stage:  StageDecode,
+			Reason: ReasonFormatMismatch,
+			Detail: err.Error(),
+		}
+	}
+
+	for _, warning := range parsed.Warnings {
 		logging.From(context.Background()).Debug("Rule warning", "event", "parse.warning",
 			"connector_id", job.Snapshot.ID, "warning", warning)
 	}
 
-	return event.Fields, nil
+	return parsed.Fields, Outcome{Status: StatusOK}
 }
 
 // partitionKey 按 spec 的实体优先级取分区键：
@@ -396,54 +457,81 @@ func nestedString(fields map[string]any, path string) string {
 }
 
 // buildBody 生成要发布的事件 JSON：OCSF 字段 + metadata。
+//
+// 解析失败时才补兜底类与原文字段；已经解析出的字段一律保留——
+// 一条被截断但头部完整的 CEF 仍然属于 2004（Detection Finding），
+// 覆盖成通用类会让它落进错误的分类，下游按 class_uid 路由时就找不到了。
 func buildBody(job Job, fields map[string]any, event Event) []byte {
 	envelope := make(map[string]any, len(fields)+2)
 	for key, value := range fields {
 		envelope[key] = value
 	}
 
-	if event.Status == StatusError {
-		// 兜底类 + 原文：未解析的报文仍然可查询、可统计、可换规则重放。
-		envelope["class_uid"] = ClassUIDGeneric
-		envelope["severity_id"] = normalizer.SeverityUnknown
-		envelope["time"] = job.Received.UTC().UnixMilli()
-		envelope["message"] = string(job.Raw)
+	if !event.Outcome.OK() {
+		// 兜底只在规则没给出对应字段时生效。
+		if _, ok := envelope["class_uid"]; !ok {
+			envelope["class_uid"] = ClassUIDGeneric
+		}
+		if _, ok := envelope["severity_id"]; !ok {
+			envelope["severity_id"] = normalizer.SeverityUnknown
+		}
+		if _, ok := envelope["time"]; !ok {
+			envelope["time"] = job.Received.UTC().UnixMilli()
+		}
+		if _, ok := envelope["message"]; !ok {
+			envelope["message"] = string(job.Raw)
+		}
 	}
 
 	metadata := map[string]any{
 		"connector_id": job.Snapshot.ID,
 		"event_id":     event.EventID,
-		"parse_status": string(event.Status),
+		"parse_status": string(event.Outcome.Status),
 	}
-	if len(event.Reasons) > 0 {
-		metadata["parse_reasons"] = event.Reasons
+
+	// 失败时给出机器可读原因、失败层次与人类可读细节，三者用途不同：
+	// 原因码用于聚合告警，层次用于定位，细节用于排查。
+	if !event.Outcome.OK() {
+		metadata["parse_error"] = map[string]any{
+			"stage":   string(event.Outcome.Stage),
+			"reason":  string(event.Outcome.Reason),
+			"message": event.Outcome.Detail,
+		}
 	}
+
 	if event.Truncated {
-		// 显式标注：下游与分析师都要能看到这条数据不完整。
 		metadata["truncated"] = true
 		metadata["original_bytes"] = event.OriginalBytes
 	}
+
 	envelope["metadata"] = metadata
 
 	body, err := json.Marshal(envelope)
 	if err != nil {
-		// 字段里出现无法序列化的值只可能是内部类型错误；
-		// 退回一个带原因的事件，不让它消失。
-		fallback, _ := json.Marshal(map[string]any{
-			"class_uid":   ClassUIDGeneric,
-			"severity_id": normalizer.SeverityUnknown,
-			"time":        job.Received.UTC().UnixMilli(),
-			"message":     string(job.Raw),
-			"metadata": map[string]any{
-				"connector_id":  job.Snapshot.ID,
-				"event_id":      event.EventID,
-				"parse_status":  string(StatusError),
-				"parse_reasons": []string{ReasonFormatMismatch},
-			},
-		})
-
-		return fallback
+		return fallbackBody(job, event)
 	}
+
+	return body
+}
+
+// fallbackBody 在字段无法序列化时兜底：宁可丢掉字段，也不让事件消失。
+func fallbackBody(job Job, event Event) []byte {
+	body, _ := json.Marshal(map[string]any{
+		"class_uid":   ClassUIDGeneric,
+		"severity_id": normalizer.SeverityUnknown,
+		"time":        job.Received.UTC().UnixMilli(),
+		"message":     string(job.Raw),
+		"metadata": map[string]any{
+			"connector_id": job.Snapshot.ID,
+			"event_id":     event.EventID,
+			"parse_status": string(StatusError),
+			"parse_error": map[string]any{
+				"stage":   string(StageMap),
+				"reason":  string(ReasonFormatMismatch),
+				"message": "event fields are not serializable",
+			},
+		},
+	})
 
 	return body
 }
