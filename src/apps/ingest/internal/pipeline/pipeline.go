@@ -494,7 +494,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
 	// 原因码单独区分，运维才能看出该去补规则还是查报文。
-	if job.Source.Engine == nil {
+	if job.Source.Rule == nil {
 		return nil, nil, Outcome{
 			Status: StatusError,
 			Stage:  StageMap,
@@ -505,12 +505,12 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 通道已完成第 1 层：字段直接进第 2 层映射。
 	if job.Fields != nil {
-		mapped := job.Source.Engine.ApplyFields(job.Fields, job.Received)
+		mapped := job.Source.Rule.ApplyFields(job.Fields, job.Received)
 
 		return mapped.Fields, mapped.Unmapped, Outcome{Status: StatusOK}
 	}
 
-	parsed, err := job.Source.Engine.Apply(job.Raw, job.Received)
+	parsed, err := job.Source.Rule.Apply(job.Raw, job.Received)
 	if err != nil {
 		return nil, nil, Outcome{
 			Status: StatusError,

@@ -81,7 +81,7 @@ func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipe
 	registry.Replace([]source.Entry{{
 		ID:        "conn-1",
 		Transport: source.TransportHTTP,
-		Engine:    newRule(t),
+		Rule:      newRule(t),
 		Token:     source.DigestToken(testToken),
 	}})
 
@@ -316,7 +316,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 	registry.Replace([]source.Entry{{
 		ID:        "conn-generic",
 		Transport: source.TransportHTTP,
-		Engine:    nil,
+		Rule:      nil,
 		Token:     source.DigestToken(testToken),
 	}})
 
@@ -350,7 +350,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 func TestNoAcceptedReturns503(t *testing.T) {
 	registry := source.NewMemory()
 	registry.Replace([]source.Entry{{
-		ID: "conn-1", Transport: source.TransportHTTP, Engine: newRule(t),
+		ID: "conn-1", Transport: source.TransportHTTP, Rule: newRule(t),
 		Token: source.DigestToken(testToken),
 	}})
 

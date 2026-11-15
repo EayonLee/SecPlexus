@@ -78,7 +78,7 @@ func start(t *testing.T, options pipeline.Options) (*pipeline.Pipeline, *recorde
 
 func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 2, BatchSize: 2, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestSubmitParsesIntoOcsfEvent(t *testing.T) {
 
 func TestParseFailureStillPublishesWithStatus(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`this is not json`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestPublishRetriesUntilSuccess(t *testing.T) {
 	t.Cleanup(cancel)
 	go func() { _ = line.Start(ctx) }()
 
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestPublishRetriesUntilSuccess(t *testing.T) {
 
 func TestStatsCountAcceptedParsedPublished(t *testing.T) {
 	line, _ := start(t, pipeline.Options{Workers: 2, BatchSize: 2, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	for index := 0; index < 5; index++ {
 		if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.1"}`), time.Now(), pipeline.Meta{}); err != nil {
@@ -224,7 +224,7 @@ func TestStatsCountAcceptedParsedPublished(t *testing.T) {
 func TestSubmitBlocksWhenQueueIsFull(t *testing.T) {
 	// 不启动 Start：队列容量 1 会被第一次提交填满。
 	line := pipeline.New(pipeline.Options{QueueDepth: 1}, &recorder{})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestSubmitBlocksWhenQueueIsFull(t *testing.T) {
 
 func TestRepeatedIdenticalPayloadGetsDistinctIDs(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 2, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	payload := []byte(`{"src":"10.0.0.9"}`)
 	for attempt := 0; attempt < 2; attempt++ {

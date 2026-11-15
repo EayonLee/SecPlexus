@@ -33,7 +33,7 @@ func metadataOf(t *testing.T, body []byte) map[string]any {
 // 只给一个字符串时，聚合告警与人工排查只能二选一。
 func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`not json`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	}
 
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-cef", Transport: source.TransportSyslog, Engine: engine}
+	entry := source.Entry{ID: "conn-cef", Transport: source.TransportSyslog, Rule: engine}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 90000, DroppedBytes: 20000}
 	if err = line.Submit(context.Background(), entry,
@@ -153,7 +153,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 // 截断说明要能说清"保留多少、原始多少"，否则运维无法判断丢了多少。
 func TestTruncationDetailReportsBytes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 100000, DroppedBytes: 34464}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), meta); err != nil {
@@ -174,7 +174,7 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 // activity_id、metadata 均为 required；objects/metadata.json 又要求 version 与 product。
 func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 // 它们现在进 OCSF 的 unmapped 属性，且敏感键已脱敏。
 func TestUnmappedFieldsReachTheEvent(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	payload := `{"src":"10.0.0.7","password":"hunter2","vendor_note":"keep me"}`
 	if err := line.Submit(context.Background(), entry, []byte(payload), time.Now(), pipeline.Meta{}); err != nil {

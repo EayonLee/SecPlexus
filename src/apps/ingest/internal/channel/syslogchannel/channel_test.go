@@ -114,7 +114,7 @@ func harness(t *testing.T, port int) (*collector, *pipeline.Pipeline, func()) {
 		ID:        "syslog-1",
 		Transport: source.TransportSyslog,
 		Port:      port,
-		Engine:    syslogRule(t),
+		Rule:      syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -216,7 +216,7 @@ func TestReloadBindsNewConnector(t *testing.T) {
 
 	registry := source.NewMemory()
 	registry.Replace([]source.Entry{{
-		ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Engine: syslogRule(t),
+		ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Rule: syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -241,8 +241,8 @@ func TestReloadBindsNewConnector(t *testing.T) {
 
 	// 追加一个接入点，周期刷新应当把它绑定。
 	registry.Replace([]source.Entry{
-		{ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Engine: syslogRule(t)},
-		{ID: "syslog-2", Transport: source.TransportSyslog, Port: secondPort, Engine: syslogRule(t)},
+		{ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Rule: syslogRule(t)},
+		{ID: "syslog-2", Transport: source.TransportSyslog, Port: secondPort, Rule: syslogRule(t)},
 	})
 
 	var bound bool

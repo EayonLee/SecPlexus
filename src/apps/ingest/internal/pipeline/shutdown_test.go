@@ -52,7 +52,7 @@ func TestShutdownDrainsLastBatch(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- line.Start(ctx) }()
 
-	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestSubmitAfterCloseReturnsErrClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -110,7 +110,7 @@ func TestDrainTimeoutDropsAndCounts(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- line.Start(ctx) }()
 
-	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}

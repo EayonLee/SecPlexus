@@ -26,7 +26,7 @@ type Entry struct {
 	ID        string             // 接入点标识，事件里回填。
 	Name      string             // 展示名称，仅用于日志与诊断。
 	Transport Transport          // 接入方式。
-	Engine    *normalizer.Engine // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
+	Rule      *normalizer.Engine // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
 	Token     [sha256.Size]byte  // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
 	Port      int                // syslog 通道的监听端口；0 表示未绑定。
 	Kafka     KafkaBinding       // Kafka 消费绑定；仅 TransportKafka 使用。
