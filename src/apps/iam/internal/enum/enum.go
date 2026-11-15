@@ -73,6 +73,8 @@ const (
 	TargetTypeUser TargetType = "user"
 	// TargetTypeSession 表示操作作用于会话。
 	TargetTypeSession TargetType = "session"
+	// TargetTypeRole 表示操作作用于角色。
+	TargetTypeRole TargetType = "role"
 	// TargetTypePlatform 表示操作作用于平台整体，由运维命令发起。
 	TargetTypePlatform TargetType = "platform"
 	// TargetTypeInput 表示操作作用于数据接入点。

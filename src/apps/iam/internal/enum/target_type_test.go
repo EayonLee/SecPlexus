@@ -16,7 +16,7 @@ import (
 // 只改一边的后果是静默的：代码写出数据库不接受的值，或数据库允许了代码从不产生的值。
 // 这条测试让两边任何一次单边改动都失败。
 func TestTargetTypeMatchesDatabaseConstraint(t *testing.T) {
-	migrationPath := filepath.Join("..", "..", "migrations", "00004_audit_target_type.sql")
+	migrationPath := filepath.Join("..", "..", "migrations", "00005_audit_target_type_role.sql")
 
 	raw, err := os.ReadFile(migrationPath)
 	if err != nil {
@@ -40,6 +40,7 @@ func TestTargetTypeMatchesDatabaseConstraint(t *testing.T) {
 	fromCode := []string{
 		string(enum.TargetTypeUser),
 		string(enum.TargetTypeSession),
+		string(enum.TargetTypeRole),
 		string(enum.TargetTypePlatform),
 		string(enum.TargetTypeInput),
 		string(enum.TargetTypeMapping),
