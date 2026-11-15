@@ -16,6 +16,7 @@
 | [go-quality-gates](go-quality-gates/spec.md) | Go 质量闸门：lint、格式化与可达漏洞真正生效 | golangci-lint 显式配置（default: none + 17 项）；gofmt/goimports 作为 formatter；govulncheck 常驻 CI；工具链固定 go1.27.3；存量 10 个问题清零 | 已实施（PR #40） | [spec](go-quality-gates/spec.md) | [plan](go-quality-gates/plan.md) |
 | [sqlc-data-layer](sqlc-data-layer/spec.md) | 数据访问层改造：SQL 可校验、HTTP JSON 回到 Go | sqlc 以 goose 迁移为 schema 源；repository 只返回类型化行；动态过滤改静态 narg；`jsonb_build_object` 4 处清零；GORM 最终移除；沉淀 `docs/development/data-access.md` | 已实施：B0–B6 全部合并（#41–#54），GORM 已移除；逐文件迁移轨迹见 plan 第十一节 | [spec](sqlc-data-layer/spec.md) | [plan](sqlc-data-layer/plan.md) |
 | [ingest-and-normalization](ingest-and-normalization/spec.md) | 数据接入与归一化（ingestor 首版） | syslog/HTTP/Kafka 三通道接收；格式探测 + 厂商 YAML 模板映射 OCSF；发布 `spx.ingest.event`；connectors 注册表。不做告警提升/合并（归 correlator），不写 ClickHouse | 待审核，未实施 | [spec](ingest-and-normalization/spec.md) | [plan](ingest-and-normalization/plan.md) |
+| [ingest-naming-and-authorization](ingest-naming-and-authorization/spec.md) | Ingest 命名对齐与统一鉴权 | 命名对齐 Splunk（`input` / `protocol` / `mapping`）；鉴权逻辑收敛进 `iamclient`，Console 与 Ingest 零鉴权代码；权限由 IAM 数据库数据控制；登记前几轮审查遗留缺口 | 待审核，未实施 | [spec](ingest-naming-and-authorization/spec.md) | [plan](ingest-naming-and-authorization/plan.md) |
 
 ## 维护规则
 

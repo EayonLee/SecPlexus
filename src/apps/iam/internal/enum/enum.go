@@ -61,6 +61,26 @@ const (
 	ActorTypeDeploymentOperator ActorType = "deployment_operator"
 )
 
+// TargetType 是 iam.audit_events.target_type 的取值：操作作用的对象类别。
+//
+// 取值来自两处事实来源的组合：数据库里实际出现的值（user、session），
+// 以及生产代码确实会写入的值（platform 为运维维护操作）。
+// 新增类别必须同时改本包与迁移里的 CHECK；对齐测试会拦住只改一边的情况。
+type TargetType string
+
+const (
+	// TargetTypeUser 表示操作作用于账号。
+	TargetTypeUser TargetType = "user"
+	// TargetTypeSession 表示操作作用于会话。
+	TargetTypeSession TargetType = "session"
+	// TargetTypePlatform 表示操作作用于平台整体，由运维命令发起。
+	TargetTypePlatform TargetType = "platform"
+	// TargetTypeInput 表示操作作用于数据接入点。
+	TargetTypeInput TargetType = "input"
+	// TargetTypeMapping 表示操作作用于解析映射。
+	TargetTypeMapping TargetType = "mapping"
+)
+
 // AuditOutcome 是 iam.audit_events.outcome 的取值：操作结果。
 type AuditOutcome string
 

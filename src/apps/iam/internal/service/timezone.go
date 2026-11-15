@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
@@ -38,7 +39,7 @@ func (s *Service) UpdateTimeZone(ctx context.Context, timeZone string, requestID
 			ActorID:    &userID,
 			ActorName:  p.Username,
 			Action:     "iam.profile.timezone",
-			TargetType: "user",
+			TargetType: string(enum.TargetTypeUser),
 			TargetID:   &userID,
 			RequestID:  requestID,
 		}); err != nil {
