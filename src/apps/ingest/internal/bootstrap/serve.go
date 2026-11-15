@@ -17,6 +17,7 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/publish"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
@@ -52,6 +53,15 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	defer producer.Close()
 
+	// 数据库是接入点与解析规则的来源；首次加载失败就启动失败——
+	// 与 nginx 遇到坏配置拒绝启动同理：不知道自己收什么的服务不该对外报就绪。
+	pool, err := repository.Open(startup, cfg.DB.DSN())
+	if err != nil {
+		return err
+	}
+
+	defer pool.Close()
+
 	client, err := openCache(startup, cfg.Cache)
 	if err != nil {
 		return err
@@ -72,6 +82,8 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}, producer)
 
 	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
+	// 取消是幂等的：正常路径在停机阶段显式调用，这里兜住提前返回的情况。
+	defer stopPipeline()
 
 	// 通道单独一份取消信号：停机时要先停接收方，再排空流水线。
 	// 共用一个 ctx 会让通道在流水线排空期间继续投递，撞上 ErrClosed。
@@ -81,13 +93,19 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	pipelineDone := make(chan error, 1)
 	go func() { pipelineDone <- line.Start(pipelineCtx) }()
 
-	// 接入点注册表：第五组接入数据库加载；当前为空表，
-	// 未注册令牌一律 401——这比接受未知设备的推送安全。
+	// 接入点注册表：内容来自数据库，未注册令牌一律 401——
+	// 这比接受未知设备的推送安全。
 	registry := source.NewMemory()
 
-	// 显式标记"已加载（当前为空）"：readiness 的语义是"初始化完成"，
-	// 不是"有接入点"。不调用这一步，Loaded() 恒为假，进程永远 503。
-	registry.Replace(nil)
+	refresher := newSourceRefresher(pool, registry, cfg.Pipeline.ReloadInterval)
+	if err = refresher.Load(startup); err != nil {
+		return err
+	}
+
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+
+	go refresher.Watch(watchCtx)
 
 	server := &handler.Server{
 		Ready: func(ctx context.Context) error {
@@ -99,6 +117,12 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 			// 报 200 只会让负载均衡把流量导给一个空壳。
 			if !registry.Loaded() {
 				return errors.New("source registry is not loaded")
+			}
+
+			// 曾经加载成功、之后刷新失败时旧配置仍在服务：
+			// 这种情况靠日志暴露，不再把实例摘掉，否则会中断正常工作的接入点。
+			if degraded := refresher.Degraded(); degraded != "" {
+				logging.From(ctx).Warn("Source refresh degraded", "event", "source.degraded", "reason", degraded)
 			}
 
 			return nil

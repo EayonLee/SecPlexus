@@ -60,7 +60,7 @@ func TestStartToleratesUnreachableBroker(t *testing.T) {
 
 	registry := source.NewMemory()
 	registry.Replace([]source.Entry{{
-		ID: "conn-1", Transport: source.TransportKafka, Engine: engine,
+		ID: "conn-1", Transport: source.TransportKafka, Rule: engine,
 		Kafka: source.KafkaBinding{Brokers: []string{"127.0.0.1:1"}, Topic: "t"},
 	}})
 

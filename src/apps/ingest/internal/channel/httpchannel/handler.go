@@ -143,8 +143,8 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 // 挂了规则就用规则声明的模式；未挂规则时按请求体类型推断：
 // text/plain 一行一条，其余按 JSON（数组与 NDJSON 都能拆）。
 func splitMode(entry source.Entry, contentType string) string {
-	if entry.Engine != nil {
-		return entry.Engine.Rule().Parse.Mode
+	if entry.Rule != nil {
+		return entry.Rule.Rule().Parse.Mode
 	}
 
 	mediaType, _, err := mime.ParseMediaType(contentType)
