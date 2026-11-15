@@ -10,7 +10,7 @@ import (
 )
 
 // Server 持有 Ingest 处理请求所需的依赖。
-// 通道依赖走 router.Channels，管理 API 依赖在第五组加在这里——
+// 通道依赖走 router.Deps，管理 API 依赖在第五组加在这里——
 // 同一依赖只保留一条装配路径，避免改一处忘另一处。
 type Server struct {
 	// Ready 报告外部依赖是否可用；nil 表示当前没有需要检查的依赖。

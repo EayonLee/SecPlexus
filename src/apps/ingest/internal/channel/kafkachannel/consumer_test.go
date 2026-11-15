@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/kafkachannel"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // countingPublisher 记录发布次数。
@@ -29,15 +29,15 @@ func (c *countingPublisher) Publish(context.Context, []pipeline.Event) error {
 
 // 只绑定完整的 Kafka 接入点才会被消费；不完整的被跳过。
 func TestKafkaSourcesOnlyReturnsUsableBindings(t *testing.T) {
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{
-		{ID: "complete", Channel: connector.ChannelKafka, Kafka: connector.KafkaBinding{
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{
+		{ID: "complete", Transport: source.TransportKafka, Kafka: source.KafkaBinding{
 			Brokers: []string{"127.0.0.1:9092"}, Topic: "external-events",
 		}},
-		{ID: "no-topic", Channel: connector.ChannelKafka, Kafka: connector.KafkaBinding{
+		{ID: "no-topic", Transport: source.TransportKafka, Kafka: source.KafkaBinding{
 			Brokers: []string{"127.0.0.1:9092"},
 		}},
-		{ID: "http", Channel: connector.ChannelHTTP, Token: connector.DigestToken("t")},
+		{ID: "http", Transport: source.TransportHTTP, Token: source.DigestToken("t")},
 	})
 
 	sources := registry.KafkaSources()
@@ -58,10 +58,10 @@ func TestStartToleratesUnreachableBroker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID: "conn-1", Channel: connector.ChannelKafka, Engine: engine,
-		Kafka: connector.KafkaBinding{Brokers: []string{"127.0.0.1:1"}, Topic: "t"},
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID: "conn-1", Transport: source.TransportKafka, Engine: engine,
+		Kafka: source.KafkaBinding{Brokers: []string{"127.0.0.1:1"}, Topic: "t"},
 	}})
 
 	publisher := &countingPublisher{}

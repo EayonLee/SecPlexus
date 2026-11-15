@@ -14,11 +14,11 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/kafkachannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/publish"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
@@ -83,7 +83,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	// 接入点注册表：第五组接入数据库加载；当前为空表，
 	// 未注册令牌一律 401——这比接受未知设备的推送安全。
-	registry := connector.NewMemory()
+	registry := source.NewMemory()
 
 	// 显式标记"已加载（当前为空）"：readiness 的语义是"初始化完成"，
 	// 不是"有接入点"。不调用这一步，Loaded() 恒为假，进程永远 503。
@@ -98,14 +98,14 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 			// 没有接入点的进程不能算就绪：它接不了任何数据，
 			// 报 200 只会让负载均衡把流量导给一个空壳。
 			if !registry.Loaded() {
-				return errors.New("connector registry is not loaded")
+				return errors.New("source registry is not loaded")
 			}
 
 			return nil
 		},
 	}
 
-	channels := router.Channels{
+	channels := router.Deps{
 		Registry: registry,
 		Limiter:  limiter,
 		Pipeline: line,

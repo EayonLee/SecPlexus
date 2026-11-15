@@ -12,10 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // 只有已声明的路由应存在；未知路径必须是 404 而不是被中间件吞成其它状态。
@@ -24,7 +24,7 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/nope", nil)
-	router.Handler(&handler.Server{}, router.Channels{}).ServeHTTP(recorder, request)
+	router.Handler(&handler.Server{}, router.Deps{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", recorder.Code)
@@ -64,7 +64,7 @@ func TestReadyReportsUnavailableWhenCheckFails(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(server, router.Channels{}).ServeHTTP(recorder, request)
+	router.Handler(server, router.Deps{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", recorder.Code)
@@ -81,7 +81,7 @@ func TestReadySucceedsWhenCheckPasses(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(server, router.Channels{}).ServeHTTP(recorder, request)
+	router.Handler(server, router.Deps{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
@@ -94,7 +94,7 @@ func TestReadyWithoutCheckIsOK(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(&handler.Server{}, router.Channels{}).ServeHTTP(recorder, request)
+	router.Handler(&handler.Server{}, router.Deps{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
@@ -104,11 +104,11 @@ func TestReadyWithoutCheckIsOK(t *testing.T) {
 // 回归（P0）：注册表加载完成（哪怕没有接入点）后就绪必须为真。
 // 之前从未调用 Replace，Loaded() 恒为假，进程永远 503。
 func TestReadyAfterRegistryLoaded(t *testing.T) {
-	registry := connector.NewMemory()
+	registry := source.NewMemory()
 
 	handlerInstance := &handler.Server{Ready: func(context.Context) error {
 		if !registry.Loaded() {
-			return errors.New("connector registry is not loaded")
+			return errors.New("source registry is not loaded")
 		}
 
 		return nil
@@ -116,7 +116,7 @@ func TestReadyAfterRegistryLoaded(t *testing.T) {
 
 	before := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-	router.Handler(handlerInstance, router.Channels{}).ServeHTTP(before, request)
+	router.Handler(handlerInstance, router.Deps{}).ServeHTTP(before, request)
 
 	if before.Code != http.StatusServiceUnavailable {
 		t.Fatalf("加载前状态 = %d，期望 503", before.Code)
@@ -126,7 +126,7 @@ func TestReadyAfterRegistryLoaded(t *testing.T) {
 	registry.Replace(nil)
 
 	after := httptest.NewRecorder()
-	router.Handler(handlerInstance, router.Channels{}).ServeHTTP(after, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	router.Handler(handlerInstance, router.Deps{}).ServeHTTP(after, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
 
 	if after.Code != http.StatusOK {
 		t.Fatalf("加载后状态 = %d，期望 200", after.Code)
@@ -137,11 +137,11 @@ func TestReadyAfterRegistryLoaded(t *testing.T) {
 // 这条测试刻意走完整的 router.Handler（含中间件），
 // 因为之前所有推送用例都直接调通道的 Handle，绕过了中间件，缺陷因此没被发现。
 func TestDevicePushBypassesAdminInputBoundary(t *testing.T) {
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID:      "conn-1",
-		Channel: connector.ChannelHTTP,
-		Token:   connector.DigestToken(testToken),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID:        "conn-1",
+		Transport: source.TransportHTTP,
+		Token:     source.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}
@@ -151,7 +151,7 @@ func TestDevicePushBypassesAdminInputBoundary(t *testing.T) {
 	t.Cleanup(cancel)
 	go func() { _ = line.Start(ctx) }()
 
-	server := httptest.NewServer(router.RootHandler(&handler.Server{}, router.Channels{
+	server := httptest.NewServer(router.RootHandler(&handler.Server{}, router.Deps{
 		Registry: registry,
 		Limiter:  allowAllLimiter{},
 		Pipeline: line,

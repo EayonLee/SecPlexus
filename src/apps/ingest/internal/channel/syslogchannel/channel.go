@@ -18,14 +18,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // Channel 管理所有 syslog 接入点的监听器。
 type Channel struct {
-	registry connector.Registry
+	registry source.Lookup
 	pipeline *pipeline.Pipeline
 
 	mu        sync.Mutex
@@ -37,14 +37,14 @@ type Channel struct {
 
 // binding 是一个接入点的 UDP 与 TCP 监听器。
 type binding struct {
-	snapshot connector.Snapshot
-	udp      net.PacketConn
-	tcp      net.Listener
-	closed   atomic.Bool
+	entry  source.Entry
+	udp    net.PacketConn
+	tcp    net.Listener
+	closed atomic.Bool
 }
 
 // New 创建 syslog 通道。reloadInterval 为零时用 10 秒。
-func New(registry connector.Registry, line *pipeline.Pipeline, reloadInterval time.Duration, bindHost string) *Channel {
+func New(registry source.Lookup, line *pipeline.Pipeline, reloadInterval time.Duration, bindHost string) *Channel {
 	if reloadInterval <= 0 {
 		reloadInterval = 10 * time.Second
 	}
@@ -96,9 +96,9 @@ func (c *Channel) Start(ctx context.Context) error {
 // Reload 让监听器集合与注册表一致：新增的绑定、消失的关闭、变更的重绑。
 // 端口变更必须靠重载完成，不重启进程。
 func (c *Channel) Reload(ctx context.Context) error {
-	desired := make(map[string]connector.Snapshot)
-	for _, snapshot := range c.registry.SyslogBindings() {
-		desired[snapshot.ID] = snapshot
+	desired := make(map[string]source.Entry)
+	for _, entry := range c.registry.SyslogBindings() {
+		desired[entry.ID] = entry
 	}
 
 	c.mu.Lock()
@@ -109,7 +109,7 @@ func (c *Channel) Reload(ctx context.Context) error {
 	// 关掉不再需要或端口已变的监听器。
 	for id, active := range c.listeners {
 		next, keep := desired[id]
-		if keep && next.Port == active.snapshot.Port {
+		if keep && next.Port == active.entry.Port {
 			continue
 		}
 
@@ -118,14 +118,14 @@ func (c *Channel) Reload(ctx context.Context) error {
 	}
 
 	// 绑定新增的接入点。
-	for id, snapshot := range desired {
+	for id, entry := range desired {
 		if _, exists := c.listeners[id]; exists {
 			continue
 		}
 
-		created, err := c.bind(ctx, snapshot)
+		created, err := c.bind(ctx, entry)
 		if err != nil {
-			failures = append(failures, fmt.Errorf("connector %s: %w", id, err))
+			failures = append(failures, fmt.Errorf("source %s: %w", id, err))
 			continue
 		}
 
@@ -136,10 +136,10 @@ func (c *Channel) Reload(ctx context.Context) error {
 }
 
 // bind 绑定一个接入点的 UDP 与 TCP 监听器并启动读取循环。
-func (c *Channel) bind(ctx context.Context, snapshot connector.Snapshot) (*binding, error) {
+func (c *Channel) bind(ctx context.Context, entry source.Entry) (*binding, error) {
 	// 监听地址跟随配置，不再写死所有网卡：
 	// 部署在反向代理后面时，syslog 也不该绕过代理直接暴露。
-	address := net.JoinHostPort(c.bindHost, strconv.Itoa(snapshot.Port))
+	address := net.JoinHostPort(c.bindHost, strconv.Itoa(entry.Port))
 
 	// ListenConfig 带 context：取消时绑定立刻中断，不会卡在慢启动的地址解析上。
 	var listenConfig net.ListenConfig
@@ -156,10 +156,10 @@ func (c *Channel) bind(ctx context.Context, snapshot connector.Snapshot) (*bindi
 		return nil, fmt.Errorf("tcp bind: %w", err)
 	}
 
-	created := &binding{snapshot: snapshot, udp: udp, tcp: tcp}
+	created := &binding{entry: entry, udp: udp, tcp: tcp}
 
 	logging.From(ctx).Info("Syslog listener bound", "event", "syslog.bound",
-		"connector_id", snapshot.ID, "port", snapshot.Port)
+		"source_id", entry.ID, "port", entry.Port)
 
 	go c.readUDP(ctx, created)
 	go c.readTCP(ctx, created)
@@ -179,7 +179,7 @@ func (c *Channel) readUDP(ctx context.Context, active *binding) {
 			}
 
 			logging.From(ctx).Warn("UDP read failed", "event", "syslog.read_failed",
-				"connector_id", active.snapshot.ID, "error", logging.Error(err))
+				"source_id", active.entry.ID, "error", logging.Error(err))
 
 			continue
 		}
@@ -189,7 +189,7 @@ func (c *Channel) readUDP(ctx context.Context, active *binding) {
 		frame := make([]byte, size)
 		copy(frame, buffer[:size])
 
-		c.deliver(ctx, active.snapshot, frame)
+		c.deliver(ctx, active.entry, frame)
 	}
 }
 
@@ -203,17 +203,17 @@ func (c *Channel) readTCP(ctx context.Context, active *binding) {
 			}
 
 			logging.From(ctx).Warn("TCP accept failed", "event", "syslog.accept_failed",
-				"connector_id", active.snapshot.ID, "error", logging.Error(err))
+				"source_id", active.entry.ID, "error", logging.Error(err))
 
 			continue
 		}
 
-		go c.serveTCPConnection(ctx, active.snapshot, connection)
+		go c.serveTCPConnection(ctx, active.entry, connection)
 	}
 }
 
 // serveTCPConnection 处理一条长连接；分帧残留在连接内累积。
-func (c *Channel) serveTCPConnection(ctx context.Context, snapshot connector.Snapshot, connection net.Conn) {
+func (c *Channel) serveTCPConnection(ctx context.Context, entry source.Entry, connection net.Conn) {
 	defer func() { _ = connection.Close() }()
 
 	chunk := make([]byte, 8<<10)
@@ -232,7 +232,7 @@ func (c *Channel) serveTCPConnection(ctx context.Context, snapshot connector.Sna
 			}
 
 			for _, frame := range frames {
-				c.deliver(ctx, snapshot, frame)
+				c.deliver(ctx, entry, frame)
 			}
 		}
 
@@ -243,12 +243,12 @@ func (c *Channel) serveTCPConnection(ctx context.Context, snapshot connector.Sna
 }
 
 // deliver 把一条报文交给流水线；失败只记日志，不影响连接。
-func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, frame []byte) {
+func (c *Channel) deliver(ctx context.Context, entry source.Entry, frame []byte) {
 	original := len(frame)
 	trimmed, truncated := truncate(frame)
 	if truncated {
 		logging.From(ctx).Warn("Syslog message truncated", "event", "syslog.truncated",
-			"connector_id", snapshot.ID, "limit", MaxMessageBytes, "original_bytes", original)
+			"source_id", entry.ID, "limit", MaxMessageBytes, "original_bytes", original)
 	}
 
 	// 截断信息随事件落库：分析师必须能看出这条数据不完整。
@@ -261,20 +261,20 @@ func (c *Channel) deliver(ctx context.Context, snapshot connector.Snapshot, fram
 	fields, err := flatten(trimmed)
 	if err != nil {
 		logging.From(ctx).Debug("Syslog envelope unparsed", "event", "syslog.unparsed",
-			"connector_id", snapshot.ID, "bytes", len(trimmed))
+			"source_id", entry.ID, "bytes", len(trimmed))
 
 		// 信封解析不了仍然受理：按原文透传，事件带 parse_status=error 可查。
-		if submitErr := c.pipeline.Submit(ctx, snapshot, trimmed, time.Now(), meta); submitErr != nil {
+		if submitErr := c.pipeline.Submit(ctx, entry, trimmed, time.Now(), meta); submitErr != nil {
 			logging.From(ctx).Warn("Submit aborted", "event", "syslog.submit_aborted",
-				"connector_id", snapshot.ID, "error", logging.Error(submitErr))
+				"source_id", entry.ID, "error", logging.Error(submitErr))
 		}
 
 		return
 	}
 
-	if err = c.pipeline.SubmitFields(ctx, snapshot, fields, time.Now(), meta); err != nil {
+	if err = c.pipeline.SubmitFields(ctx, entry, fields, time.Now(), meta); err != nil {
 		logging.From(ctx).Warn("Submit aborted", "event", "syslog.submit_aborted",
-			"connector_id", snapshot.ID, "error", logging.Error(err))
+			"source_id", entry.ID, "error", logging.Error(err))
 	}
 }
 

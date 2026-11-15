@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // metadataOf 取出事件体里的 metadata。
@@ -33,9 +33,9 @@ func metadataOf(t *testing.T, body []byte) map[string]any {
 // 只给一个字符串时，聚合告警与人工排查只能二选一。
 func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
 
-	if err := line.Submit(context.Background(), snapshot, []byte(`not json`), time.Now(), pipeline.Meta{}); err != nil {
+	if err := line.Submit(context.Background(), entry, []byte(`not json`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,9 +71,9 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 // 未挂规则与格式不符是两件事：前者要补规则，后者要查报文。
 func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-generic", Channel: connector.ChannelHTTP}
+	entry := source.Entry{ID: "conn-generic", Transport: source.TransportHTTP}
 
-	if err := line.Submit(context.Background(), snapshot, []byte("raw line"), time.Now(), pipeline.Meta{}); err != nil {
+	if err := line.Submit(context.Background(), entry, []byte("raw line"), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,10 +103,10 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	}
 
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-cef", Channel: connector.ChannelSyslog, Engine: engine}
+	entry := source.Entry{ID: "conn-cef", Transport: source.TransportSyslog, Engine: engine}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 90000, DroppedBytes: 20000}
-	if err = line.Submit(context.Background(), snapshot,
+	if err = line.Submit(context.Background(), entry,
 		[]byte("CEF:0|F|P|1|1|n|5|src=1.2.3.4"), time.Now(), meta); err != nil {
 		t.Fatal(err)
 	}
@@ -153,10 +153,10 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 // 截断说明要能说清"保留多少、原始多少"，否则运维无法判断丢了多少。
 func TestTruncationDetailReportsBytes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 100000, DroppedBytes: 34464}
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"1.1.1.1"}`), time.Now(), meta); err != nil {
+	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), meta); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,9 +174,9 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 // activity_id、metadata 均为 required；objects/metadata.json 又要求 version 与 product。
 func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
 
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
+	if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	_ = line.Flush(context.Background())
@@ -220,7 +220,7 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 	if !ok {
 		t.Fatalf("私有簿记未放进 metadata.spx: %#v", metadata)
 	}
-	if bookkeeping["connector_id"] != "conn-1" || bookkeeping["parse_status"] != "ok" {
+	if bookkeeping["source_id"] != "conn-1" || bookkeeping["parse_status"] != "ok" {
 		t.Fatalf("metadata.spx = %#v", bookkeeping)
 	}
 }
@@ -230,10 +230,10 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 // 它们现在进 OCSF 的 unmapped 属性，且敏感键已脱敏。
 func TestUnmappedFieldsReachTheEvent(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	snapshot := connector.Snapshot{ID: "conn-1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
 
 	payload := `{"src":"10.0.0.7","password":"hunter2","vendor_note":"keep me"}`
-	if err := line.Submit(context.Background(), snapshot, []byte(payload), time.Now(), pipeline.Meta{}); err != nil {
+	if err := line.Submit(context.Background(), entry, []byte(payload), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	_ = line.Flush(context.Background())
