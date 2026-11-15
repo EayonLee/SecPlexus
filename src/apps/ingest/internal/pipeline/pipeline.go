@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -86,7 +86,7 @@ var ErrClosed = errors.New("pipeline is closed")
 
 // Event 是一条待发布的事件。
 type Event struct {
-	ConnectorID  string  // 来源接入点。
+	SourceID     string  // 来源接入点。
 	EventID      string  // 确定性标识，供下游去重。
 	PartitionKey string  // 分区键，保证同一实体的事件落在同一分区。
 	Body         []byte  // OCSF 事件 JSON。
@@ -115,7 +115,7 @@ type Meta struct {
 
 // Job 是一条待解析的报文。
 type Job struct {
-	Snapshot connector.Snapshot
+	Source   source.Entry
 	Raw      []byte
 	Received time.Time
 	// Fields 非空表示第 1 层已由通道完成（如 syslog 剥信封），
@@ -227,8 +227,8 @@ func New(options Options, publisher Publisher) *Pipeline {
 
 // SubmitFields 受理一条已由通道完成线格式解析的报文。
 // syslog 通道用 go-syslog 剥完信封后走这里：字段已就绪，只差规则映射。
-func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot, fields map[string]any, received time.Time, meta Meta) error {
-	job := Job{Snapshot: snapshot, Fields: fields, Received: received, Meta: meta}
+func (p *Pipeline) SubmitFields(ctx context.Context, entry source.Entry, fields map[string]any, received time.Time, meta Meta) error {
+	job := Job{Source: entry, Fields: fields, Received: received, Meta: meta}
 
 	p.inflight.Add(1)
 
@@ -260,8 +260,8 @@ func (p *Pipeline) SubmitFields(ctx context.Context, snapshot connector.Snapshot
 // Submit 受理一条报文。
 // 队列满时阻塞而不是丢弃：背压必须传到通道层，由它阻塞发送方——
 // 丢数据比让设备重发更难补救。
-func (p *Pipeline) Submit(ctx context.Context, snapshot connector.Snapshot, raw []byte, received time.Time, meta Meta) error {
-	job := Job{Snapshot: snapshot, Raw: raw, Received: received, Meta: meta}
+func (p *Pipeline) Submit(ctx context.Context, entry source.Entry, raw []byte, received time.Time, meta Meta) error {
+	job := Job{Source: entry, Raw: raw, Received: received, Meta: meta}
 
 	// 先登记再入队：Flush 看到计数为零才是真的全空。
 	p.inflight.Add(1)
@@ -416,8 +416,8 @@ func (p *Pipeline) handle(job Job) {
 
 // Parse 只做解析与信封构造，不发布。
 // Kafka 消费需要"确认发布成功后再提交位移"，因此由它自己掌控发布与提交的顺序。
-func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.Time) Event {
-	return p.parse(Job{Snapshot: snapshot, Raw: raw, Received: received})
+func (p *Pipeline) Parse(entry source.Entry, raw []byte, received time.Time) Event {
+	return p.parse(Job{Source: entry, Raw: raw, Received: received})
 }
 
 // parse 把一条报文解析成事件。
@@ -425,8 +425,8 @@ func (p *Pipeline) Parse(snapshot connector.Snapshot, raw []byte, received time.
 // 单条坏消息不能拖垮 worker，也不能让整批消失。
 func (p *Pipeline) parse(job Job) Event {
 	event := Event{
-		ConnectorID: job.Snapshot.ID,
-		EventID:     normalizer.EventID(job.Snapshot.ID, p.epoch, p.sequence.Add(1), job.Raw),
+		SourceID: job.Source.ID,
+		EventID:  normalizer.EventID(job.Source.ID, p.epoch, p.sequence.Add(1), job.Raw),
 	}
 
 	fields, unmapped, outcome := p.apply(job)
@@ -478,7 +478,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 		if recovered := recover(); recovered != nil {
 			p.panics.Add(1)
 			logging.From(context.Background()).Error("Parse engine panicked",
-				"event", "parse.panic", "connector_id", job.Snapshot.ID,
+				"event", "parse.panic", "source_id", job.Source.ID,
 				"panic_kind", fmt.Sprintf("%T", recovered), "stack", logging.Stack())
 
 			fields = nil
@@ -494,7 +494,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
 	// 原因码单独区分，运维才能看出该去补规则还是查报文。
-	if job.Snapshot.Engine == nil {
+	if job.Source.Engine == nil {
 		return nil, nil, Outcome{
 			Status: StatusError,
 			Stage:  StageMap,
@@ -505,12 +505,12 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 通道已完成第 1 层：字段直接进第 2 层映射。
 	if job.Fields != nil {
-		mapped := job.Snapshot.Engine.ApplyFields(job.Fields, job.Received)
+		mapped := job.Source.Engine.ApplyFields(job.Fields, job.Received)
 
 		return mapped.Fields, mapped.Unmapped, Outcome{Status: StatusOK}
 	}
 
-	parsed, err := job.Snapshot.Engine.Apply(job.Raw, job.Received)
+	parsed, err := job.Source.Engine.Apply(job.Raw, job.Received)
 	if err != nil {
 		return nil, nil, Outcome{
 			Status: StatusError,
@@ -522,7 +522,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	for _, warning := range parsed.Warnings {
 		logging.From(context.Background()).Debug("Rule warning", "event", "parse.warning",
-			"connector_id", job.Snapshot.ID, "warning", warning)
+			"source_id", job.Source.ID, "warning", warning)
 	}
 
 	return parsed.Fields, parsed.Unmapped, Outcome{Status: StatusOK}
@@ -610,9 +610,9 @@ func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
 	}
 
 	// 我方簿记放进 metadata.spx：metadata 是 OCSF 预留对象，
-	// 直接塞 connector_id/parse_status 会占用标准语义并挡掉必填的 version/product。
+	// 直接塞 source_id/parse_status 会占用标准语义并挡掉必填的 version/product。
 	bookkeeping := map[string]any{
-		"connector_id": job.Snapshot.ID,
+		"source_id":    job.Source.ID,
 		"parse_status": string(event.Outcome.Status),
 	}
 
@@ -699,7 +699,7 @@ func fallbackBody(job Job, event Event) []byte {
 		"time":        job.Received.UTC().UnixMilli(),
 		"message":     string(job.Raw),
 		"metadata": map[string]any{
-			"connector_id": job.Snapshot.ID,
+			"source_id":    job.Source.ID,
 			"event_id":     event.EventID,
 			"parse_status": string(StatusError),
 			"parse_error": map[string]any{

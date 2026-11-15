@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // collector 记录已发布事件。
@@ -109,12 +109,12 @@ func freePort(t *testing.T) int {
 func harness(t *testing.T, port int) (*collector, *pipeline.Pipeline, func()) {
 	t.Helper()
 
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID:      "syslog-1",
-		Channel: connector.ChannelSyslog,
-		Port:    port,
-		Engine:  syslogRule(t),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID:        "syslog-1",
+		Transport: source.TransportSyslog,
+		Port:      port,
+		Engine:    syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -214,9 +214,9 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	firstPort := freePort(t)
 	secondPort := freePort(t)
 
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID: "syslog-1", Channel: connector.ChannelSyslog, Port: firstPort, Engine: syslogRule(t),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Engine: syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -240,9 +240,9 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	}()
 
 	// 追加一个接入点，周期刷新应当把它绑定。
-	registry.Replace([]connector.Snapshot{
-		{ID: "syslog-1", Channel: connector.ChannelSyslog, Port: firstPort, Engine: syslogRule(t)},
-		{ID: "syslog-2", Channel: connector.ChannelSyslog, Port: secondPort, Engine: syslogRule(t)},
+	registry.Replace([]source.Entry{
+		{ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Engine: syslogRule(t)},
+		{ID: "syslog-2", Transport: source.TransportSyslog, Port: secondPort, Engine: syslogRule(t)},
 	})
 
 	var bound bool
@@ -259,7 +259,7 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	}
 
 	if !bound {
-		t.Fatal("reload did not bind the new connector port")
+		t.Fatal("reload did not bind the new source port")
 	}
 }
 

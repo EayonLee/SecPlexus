@@ -261,8 +261,8 @@ func writePath(target map[string]any, segments []string, value any) {
 // sequence 是接入点的接收序号（通道层维护，同一接入点内单调）。
 // 同一接入点的重复投递（网络重试）因此得到不同 ID；
 // 重试去重由查询层按 (接入点, 内容, 时间窗) 处理，不在 ID 里解决。
-func EventID(connectorID string, epoch [16]byte, sequence uint64, raw []byte) string {
-	namespace := uuid.NewSHA1(uuid.NameSpaceOID, []byte(connectorID))
+func EventID(sourceID string, epoch [16]byte, sequence uint64, raw []byte) string {
+	namespace := uuid.NewSHA1(uuid.NameSpaceOID, []byte(sourceID))
 
 	// epoch 是进程启动期标识：序号在进程内唯一，但重启后会从 1 重新开始。
 	// 不带上它，重启后的第一批事件会和上一批同 ID，下游按 event_id 去重就会吞数据。

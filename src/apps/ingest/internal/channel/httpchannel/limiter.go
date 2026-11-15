@@ -16,7 +16,7 @@ var ErrRateLimited = errors.New("rate limited")
 // 接口存在是为了让通道用假实现测试，Redis 只是其中一种实现。
 type Limiter interface {
 	// Allow 消耗一个配额；超额返回 ErrRateLimited。
-	Allow(ctx context.Context, connectorID string) error
+	Allow(ctx context.Context, sourceID string) error
 }
 
 // tokenBucketScript 是原子令牌桶：读、补、扣在一次执行内完成，
@@ -75,9 +75,9 @@ func NewRedisLimiter(client *redis.Client, capacity int, rate float64) (*RedisLi
 }
 
 // Allow 消耗一个配额。
-func (l *RedisLimiter) Allow(ctx context.Context, connectorID string) error {
+func (l *RedisLimiter) Allow(ctx context.Context, sourceID string) error {
 	now := time.Now().UnixMilli()
-	key := l.prefix + connectorID
+	key := l.prefix + sourceID
 
 	allowed, err := tokenBucketScript.Run(ctx, l.client, []string{key},
 		l.capacity, l.rate, now, 1).Int()

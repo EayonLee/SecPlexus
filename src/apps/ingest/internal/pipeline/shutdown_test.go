@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // strictPublisher 只在 ctx 有效时接受发布，模拟真实 Kafka 客户端。
@@ -52,8 +52,8 @@ func TestShutdownDrainsLastBatch(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- line.Start(ctx) }()
 
-	snapshot := connector.Snapshot{ID: "c1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +85,7 @@ func TestSubmitAfterCloseReturnsErrClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot := connector.Snapshot{ID: "c1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -93,7 +93,7 @@ func TestSubmitAfterCloseReturnsErrClosed(t *testing.T) {
 		}
 	}()
 
-	err := line.Submit(context.Background(), snapshot, []byte("x"), time.Now(), pipeline.Meta{})
+	err := line.Submit(context.Background(), entry, []byte("x"), time.Now(), pipeline.Meta{})
 	if !errors.Is(err, pipeline.ErrClosed) {
 		t.Fatalf("错误 = %v，期望 ErrClosed", err)
 	}
@@ -110,8 +110,8 @@ func TestDrainTimeoutDropsAndCounts(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- line.Start(ctx) }()
 
-	snapshot := connector.Snapshot{ID: "c1", Channel: connector.ChannelHTTP, Engine: jsonRule(t)}
-	if err := line.Submit(context.Background(), snapshot, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
+	entry := source.Entry{ID: "c1", Transport: source.TransportHTTP, Engine: jsonRule(t)}
+	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 

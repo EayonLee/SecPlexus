@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connector"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 const testToken = "ing_test_token_0123456789abcdef"
@@ -49,7 +49,7 @@ func (f *fakePublisher) Publish(_ context.Context, events []pipeline.Event) erro
 	return nil
 }
 
-func (f *fakePublisher) snapshot() []pipeline.Event {
+func (f *fakePublisher) entry() []pipeline.Event {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -77,12 +77,12 @@ func newRule(t *testing.T) *normalizer.Engine {
 func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipeline.Pipeline, *fakePublisher, *fakeLimiter) {
 	t.Helper()
 
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID:      "conn-1",
-		Channel: connector.ChannelHTTP,
-		Engine:  newRule(t),
-		Token:   connector.DigestToken(testToken),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID:        "conn-1",
+		Transport: source.TransportHTTP,
+		Engine:    newRule(t),
+		Token:     source.DigestToken(testToken),
 	}})
 
 	if limiter == nil {
@@ -99,7 +99,7 @@ func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipe
 	channel := httpchannel.New(registry, limiter, line)
 
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{connector_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -108,11 +108,11 @@ func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipe
 }
 
 // post 发起一次推送；token 为空表示不带鉴权头。
-func post(t *testing.T, server *httptest.Server, connectorID, token, contentType, body string) *http.Response {
+func post(t *testing.T, server *httptest.Server, sourceID, token, contentType, body string) *http.Response {
 	t.Helper()
 
 	request, err := http.NewRequest(http.MethodPost,
-		server.URL+"/api/v1/ingest/events/"+connectorID, strings.NewReader(body))
+		server.URL+"/api/v1/ingest/events/"+sourceID, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestAcceptedPushReturns202AndPublishes(t *testing.T) {
 	}
 
 	_ = line.Flush(context.Background())
-	events := publisher.snapshot()
+	events := publisher.entry()
 	if len(events) != 1 {
 		t.Fatalf("published %d events, want 1", len(events))
 	}
@@ -177,14 +177,14 @@ func TestArrayPayloadSplitsIntoEvents(t *testing.T) {
 	}
 
 	_ = line.Flush(context.Background())
-	if events := publisher.snapshot(); len(events) != 3 {
+	if events := publisher.entry(); len(events) != 3 {
 		t.Fatalf("published %d events, want 3", len(events))
 	}
 }
 
 // 令牌缺失、错误、与路径不匹配都返回 401。
 func TestUnauthorizedVariants(t *testing.T) {
-	tests := map[string]struct{ connectorID, token string }{
+	tests := map[string]struct{ sourceID, token string }{
 		"missing token":   {"conn-1", ""},
 		"wrong token":     {"conn-1", "ing_wrong_token_0123456789abcdef"},
 		"token for other": {"conn-2", testToken},
@@ -194,11 +194,11 @@ func TestUnauthorizedVariants(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server, _, publisher, _ := harness(t, nil)
 
-			response := post(t, server, test.connectorID, test.token, "application/json", `{"src":"10.0.0.1"}`)
+			response := post(t, server, test.sourceID, test.token, "application/json", `{"src":"10.0.0.1"}`)
 			if response.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", response.StatusCode)
 			}
-			if events := publisher.snapshot(); len(events) != 0 {
+			if events := publisher.entry(); len(events) != 0 {
 				t.Fatalf("unauthorized push published %d events", len(events))
 			}
 		})
@@ -273,7 +273,7 @@ func TestRateLimitedReturns429(t *testing.T) {
 	if response.Header.Get("Retry-After") == "" {
 		t.Fatal("missing Retry-After header")
 	}
-	if events := publisher.snapshot(); len(events) != 0 {
+	if events := publisher.entry(); len(events) != 0 {
 		t.Fatal("rate limited push published events")
 	}
 }
@@ -287,7 +287,7 @@ func TestLimiterFailureReturns503(t *testing.T) {
 	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", response.StatusCode)
 	}
-	if events := publisher.snapshot(); len(events) != 0 {
+	if events := publisher.entry(); len(events) != 0 {
 		t.Fatal("push accepted while the limiter was down")
 	}
 }
@@ -303,7 +303,7 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 	}
 
 	_ = line.Flush(context.Background())
-	for _, event := range publisher.snapshot() {
+	for _, event := range publisher.entry() {
 		if event.Outcome.Status == pipeline.StatusError && event.Outcome.Reason == "" {
 			t.Fatal("error event without a reason code")
 		}
@@ -312,12 +312,12 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 
 // 未挂规则的接入点：受理成功，事件以 error 状态透传原文。
 func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID:      "conn-generic",
-		Channel: connector.ChannelHTTP,
-		Engine:  nil,
-		Token:   connector.DigestToken(testToken),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID:        "conn-generic",
+		Transport: source.TransportHTTP,
+		Engine:    nil,
+		Token:     source.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}
@@ -329,7 +329,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 
 	channel := httpchannel.New(registry, &fakeLimiter{}, line)
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{connector_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -339,7 +339,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 	}
 
 	_ = line.Flush(context.Background())
-	events := publisher.snapshot()
+	events := publisher.entry()
 	if len(events) != 1 || events[0].Outcome.Status != pipeline.StatusError {
 		t.Fatalf("passthrough events = %#v", events)
 	}
@@ -348,10 +348,10 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 // 回归（P1-2）：管道关停/队列满导致一条都没受理时必须返回 503，
 // 而不是用 202 假装成功——设备看到 202 就不会重推，数据真丢。
 func TestNoAcceptedReturns503(t *testing.T) {
-	registry := connector.NewMemory()
-	registry.Replace([]connector.Snapshot{{
-		ID: "conn-1", Channel: connector.ChannelHTTP, Engine: newRule(t),
-		Token: connector.DigestToken(testToken),
+	registry := source.NewMemory()
+	registry.Replace([]source.Entry{{
+		ID: "conn-1", Transport: source.TransportHTTP, Engine: newRule(t),
+		Token: source.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}
@@ -362,7 +362,7 @@ func TestNoAcceptedReturns503(t *testing.T) {
 
 	channel := httpchannel.New(registry, &fakeLimiter{}, line)
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{connector_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 

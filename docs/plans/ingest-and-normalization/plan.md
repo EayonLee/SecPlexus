@@ -75,7 +75,7 @@
 - [ ] 失败测试先行（集成）：`syslog_port` 部分唯一索引——两条 `syslog` 接入点抢同一端口时第二条插入失败。
 - [ ] 失败测试先行（集成）：加载器把 `sources` 与 `parse_rules` 编译进注册表；`parse_rule_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
 - [ ] 迁移 `ingest.sources` 与 `ingest.parse_rules` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
-- [ ] `internal/source` 包替换现有 `internal/connector`：`Entry`（原 `Snapshot`）、`Transport`（原 `Channel`）、`Lookup`（原 `Registry`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`connector_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
+- [ ] `internal/source` 包替换现有 `internal/source`：`Entry`（原 `Entry`）、`Transport`（原 `Channel`）、`Lookup`（原 `Lookup`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`connector_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
 - [ ] 启动时从数据库加载 + 周期刷新（默认 10s）+ `SIGHUP` 立即重载；数据库不可用时保持上次成功加载的结果并在 readiness 上报降级，不退回空表。
 
 #### 5.2 管理 API
