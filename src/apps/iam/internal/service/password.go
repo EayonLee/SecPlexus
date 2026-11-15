@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // ChangePassword 验证当前密码、修改密码并撤销受影响的会话。
@@ -85,7 +85,7 @@ func (s *Service) ChangePassword(ctx context.Context, oldPassword, newPassword, 
 			ActorID:    &userID,
 			ActorName:  p.Username,
 			Action:     "iam.password.change",
-			TargetType: "user",
+			TargetType: string(enum.TargetTypeUser),
 			TargetID:   &userID,
 			RequestID:  requestID,
 		}); err != nil {

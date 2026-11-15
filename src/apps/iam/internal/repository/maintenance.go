@@ -63,7 +63,7 @@ func (s *Store) RevokeAfterRestore(ctx context.Context) error {
 		return AppendAudit(ctx, tx, Audit{
 			ActorType:  enum.ActorTypeDeploymentOperator,
 			Action:     "iam.sessions.revoke_after_restore",
-			TargetType: "platform",
+			TargetType: string(enum.TargetTypePlatform),
 			RequestID:  uuid.NewString(),
 		})
 	})

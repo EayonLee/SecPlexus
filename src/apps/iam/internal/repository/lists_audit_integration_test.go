@@ -24,7 +24,7 @@ func TestListAuditEventsPagesWithoutGaps(t *testing.T) {
 	for i := 0; i < total; i++ {
 		if err := repository.AppendAudit(ctx, store.DB, repository.Audit{
 			Action:     "iam.test.paging",
-			TargetType: "test",
+			TargetType: "session",
 			RequestID:  uuid.NewString(),
 		}); err != nil {
 			t.Fatal(err)
