@@ -21,11 +21,39 @@ type Deps struct {
 	Limiter  httpchannel.Limiter // 每接入点频率限制。
 	Pipeline *pipeline.Pipeline  // 受理后的解析与发布。
 	MaxBody  int64               // 请求体上限，由配置注入通道。
+	Admin    handler.SourceStore // 接入点与规则存取；nil 表示管理面未启用。
+	Guard    gin.HandlerFunc     // 管理面会话守卫；nil 表示不注册管理路由。
 }
 
 // devicePrefix 是设备接入路径前缀。
 // 单独列出来是因为它必须与管理面共享同一个监听端口、但用不同的输入边界。
 const devicePrefix = "/api/v1/ingest/events/"
+
+// AdminGuard 校验发起管理请求的用户会话。
+//
+// 本项目不新增权限点（全员可见决策）：守卫只需要确认"是一个有效会话"，
+// 不做细粒度授权。为 nil 时管理路由不注册——绝不暴露无鉴权的写接口。
+type AdminGuard gin.HandlerFunc
+
+// registerAdmin 注册接入点与解析规则的管理路由。
+func registerAdmin(engine gin.IRouter, deps Deps) {
+	if deps.Admin == nil || deps.Guard == nil {
+		return
+	}
+
+	admin := &handler.Admin{Store: deps.Admin}
+	group := engine.Group("/api/v1/ingest", deps.Guard)
+
+	group.GET("/sources", admin.ListSources)
+	group.POST("/sources", admin.CreateSource)
+	group.PATCH("/sources/:id", admin.UpdateSource)
+	group.DELETE("/sources/:id", admin.DeleteSource)
+
+	group.GET("/parse-rules", admin.ListRules)
+	group.POST("/parse-rules", admin.CreateRule)
+	group.PATCH("/parse-rules/:id", admin.UpdateRule)
+	group.DELETE("/parse-rules/:id", admin.DeleteRule)
+}
 
 // Register 注册管理面路由。
 // 设备推送不在这里：它有自己的体积与媒体类型规则，不能继承管理面的边界。
@@ -52,6 +80,7 @@ func Handler(server *handler.Server, deps Deps) http.Handler {
 	engine := middleware.NewEngine()
 	engine.Use(middleware.InputBoundary(nil))
 	Register(engine, server, deps)
+	registerAdmin(engine, deps)
 
 	return engine
 }
