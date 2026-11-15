@@ -30,6 +30,32 @@ type Kafka struct {
 	Topic   string   `yaml:"topic" validate:"required"`             // 唯一发布 topic；解析失败事件也发这里（parse_status 区分）。
 }
 
+// Database 描述 PostgreSQL 连接；接入点与解析规则存在这里。
+type Database struct {
+	Name     string `yaml:"name"`     // 数据库名。
+	Host     string `yaml:"host"`     // 连接地址。
+	Port     int    `yaml:"port"`     // 连接端口。
+	User     string `yaml:"user"`     // 账号。
+	Password string `yaml:"password"` // 密码；生产必须由环境变量覆盖。
+	SSLMode  string `yaml:"sslmode"`  // TLS 模式。
+}
+
+// DSN 由各字段拼出连接地址，不建立连接。
+func (d Database) DSN() string {
+	query := url.Values{}
+	if d.SSLMode != "" {
+		query.Set("sslmode", d.SSLMode)
+	}
+
+	return (&url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(d.User, d.Password),
+		Host:     net.JoinHostPort(d.Host, strconv.Itoa(d.Port)),
+		Path:     "/" + d.Name,
+		RawQuery: query.Encode(),
+	}).String()
+}
+
 // Pipeline 描述解析流水线的容量参数；零值由管道填默认值，配置里只写想改的。',
 type Pipeline struct {
 	Workers        int           `yaml:"workers"`         // 解析 worker 数；0 表示按 CPU 核数。
@@ -66,6 +92,7 @@ type IAM struct {
 
 // Config 包含 Ingest 启动和运行所需的配置。
 type Config struct {
+	DB       Database       `yaml:"db"`           // 接入点与解析规则的存储。
 	App      App            `yaml:"app"`          // 服务监听配置。
 	Pipeline Pipeline       `yaml:"pipeline"`     // 解析流水线容量。
 	HTTP     HTTPChannel    `yaml:"http_channel"` // 设备推送通道参数。
@@ -115,6 +142,9 @@ func (c Config) Validate() error {
 		return err
 	}
 
+	if c.DB.Host == "" || c.DB.Port <= 0 || c.DB.Name == "" {
+		return errors.New("db.host, db.port and db.name are required")
+	}
 	if err := c.Cache.Validate(); err != nil {
 		return err
 	}
