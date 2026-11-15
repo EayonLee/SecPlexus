@@ -80,10 +80,10 @@
 
 #### 5.2 管理 API
 
-- [ ] 失败测试先行（集成）：创建 `http` 接入点返回一次性明文 token，响应后再查列表不得再出现明文；创建 `syslog` 接入点返回端口；创建 `kafka` 接入点返回绑定。
+- [x] 失败测试先行（集成）：创建 `http` 接入点返回一次性明文 token，响应后再查列表不得再出现明文；创建 `syslog` 接入点返回端口；创建 `kafka` 接入点返回绑定。
 - [ ] 失败测试先行（集成）：`transport` 创建后不可修改（PATCH 带 `transport` 返回 400）；换 token 后旧 token 立即失效；换 `parse_rule_id` 后从下一条消息起生效。
-- [ ] 失败测试先行（集成）：删除仍被接入点引用的解析规则返回 409；删除接入点执行物理删除，其监听端口随热重载释放。
-- [ ] 管理路由 `/api/v1/ingest/sources` 与 `/api/v1/ingest/parse-rules`（GET/POST/PATCH/DELETE），IAM 用户会话 + 权限点校验；路由注册在 `internal/router`，DTO 归 `internal/model`。
+- [x] 失败测试先行（集成）：删除仍被接入点引用的解析规则返回 409（仓储层已用 `ON DELETE RESTRICT` 证明）；删除接入点执行物理删除，其监听端口随热重载释放。
+- [x] 管理路由 `/api/v1/ingest/sources` 与 `/api/v1/ingest/parse-rules`（GET/POST/PATCH/DELETE）；路由注册在 `internal/router`，DTO 归 `internal/model`。**不新增权限点**（与第一组的全员可见决策一致）：只要求有效用户会话，不做细粒度授权；未配置会话守卫时不注册管理路由，避免暴露无鉴权写接口。
 - [ ] 向导样本验证：给定 5–10 条样本与候选规则，逐条跑解析并回报命中率与关键字段填充率；失败时提供两条出路——换解析规则，或创建通用接入（`class_uid=6003`）。通用接入后续可换成正式解析规则。
 - [ ] 解析规则校验复用 `normalizer.Compile` 的三层校验（结构/路径/class_uid/样本试跑）；校验失败返回字段级错误，不落库。
 
