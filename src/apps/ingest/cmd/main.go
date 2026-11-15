@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/bootstrap"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 )
 
 // main 处理进程退出码，具体初始化和命令执行交给 run。
@@ -39,6 +41,12 @@ func newCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if cmd.Name() == "migrate" {
+			migrationCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+			defer cancel()
+
+			return repository.Migrate(migrationCtx, cfg.DB.DSN())
+		}
 		if cmd.Name() == "check-config" {
 			if err := cfg.ValidateServe(); err != nil {
 				return err
@@ -58,5 +66,6 @@ func newCommand() *cobra.Command {
 	root.PersistentFlags().BoolVar(&printEndpoints, "print-endpoints", false, "print effective endpoints without connecting dependencies")
 	root.AddCommand(&cobra.Command{Use: "serve", Args: cobra.NoArgs, RunE: action})
 	root.AddCommand(&cobra.Command{Use: "check-config", Args: cobra.NoArgs, RunE: action})
+	root.AddCommand(&cobra.Command{Use: "migrate", Short: "Apply database migrations", Args: cobra.NoArgs, RunE: action})
 	return root
 }

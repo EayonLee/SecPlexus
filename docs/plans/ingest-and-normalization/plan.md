@@ -22,12 +22,12 @@
 
 ### 第一组：服务骨架与配置
 
-- [ ] 失败测试先行：`check-config` 对缺失必填项（Kafka brokers、IAM token）报字段级错误；未知字段拒绝。
-- [ ] `src/apps/ingest` 骨架：`cmd`（check-config/serve）、`internal/{config,bootstrap,router,handler}`，复用 `httpx`/`logging`/`result`/`iamclient`/`configuration`。migrate 命令与第一张迁移表一起在第五组落地——没有表的 migrate 是空壳。
-- [ ] `src/apps/ingest/config.yaml`：监听（默认端口 8082）、Kafka、Redis、IAM `service_clients`、通道开关，全部白话注释。
-- [ ] 根 `.env.example` 增加 `SPX_INGEST_*` 分区；`Makefile`/根启动脚本纳入 ingest。
-- [ ] `deploy/docker/go.Dockerfile` 的 `ARG APP=ingest` 构建路径验证。
-- [ ] IAM 不新增权限点（全员可见决策）；数据接入页面挂在主导航「数据源」分组。
+- [x] 失败测试先行：`check-config` 对缺失必填项（Kafka brokers、IAM token）报字段级错误；未知字段拒绝。
+- [x] `src/apps/ingest` 骨架：`cmd`（check-config/serve）、`internal/{config,bootstrap,router,handler}`，复用 `httpx`/`logging`/`result`/`iamclient`/`configuration`。migrate 命令与第一张迁移表一起在第五组落地——没有表的 migrate 是空壳。
+- [x] `src/apps/ingest/config.yaml`：监听（默认端口 8082）、Kafka、Redis、IAM `service_clients`、通道开关，全部白话注释。
+- [x] 根 `.env.example` 增加 `SPX_INGEST_*` 分区；`Makefile`/根启动脚本纳入 ingest。
+- [x] `deploy/docker/go.Dockerfile` 的 `ARG APP=ingest` 构建路径验证。
+- [x] IAM 不新增权限点（全员可见决策）；数据接入页面挂在主导航「数据源」分组。
 
 ### 第二组：解析层（无外部依赖）
 
@@ -47,31 +47,50 @@
   - 延后：`extends` 继承与逐键覆盖（只有内置规则用得上，等 18 条规则一起做）；`type: int` 转换（真实样本里暂未出现需要强转的字段，等规则回归时按需加）；数组下标 `x[0]`（无规则需要逐元素映射，整值写入已足够）。
 - [x] 失败测试先行：severity 归一——大小写/空白归一、未映射 → 0 + warning。值表由规则声明，中文档位在具体规则里配置。
 - [x] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、connector 维度隔离）。用原始字节而非归一化结构做指纹：少一次序列化，字节相同就是同一条事件。
-- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。**等用户提供真实设备日志样本**：没有样本的规则按样本驱动校验必然失败，写出来是假的。
+- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。**阻塞：等用户提供真实设备日志样本**——没有样本的规则按样本驱动校验必然失败，写出来的是假的。规则加载路径依赖第五组的 `parse_rules.spec`，放在第五组之后做。
 
 ### 第三组：通道
 
 - [ ] 失败测试先行（集成）：HTTP——token 允许/拒绝、413 超限、415 类型、429 限流、202 计数、Redis 故障拒绝。
-- [ ] HTTP 通道实现：per-connector token、请求体/数组上限、Redis 限流、异步解析发布。
+- [x] HTTP 通道实现（集成测试见下方未完成项）：per-connector token、请求体/数组上限、Redis 限流、异步解析发布。
 - [ ] 可信代理网段（app.trusted_proxy_cidrs）随 HTTP 通道一起落地：路由按 iam 的方式启用 X-Forwarded-For 解析并拒绝 0.0.0.0/0——骨架阶段删除了无消费方的死配置。
 - [ ] 失败测试先行（集成）：syslog——真实 UDP/TCP 端口收包、RFC6587 两种分帧、RFC3164/5424 识别、CEF 前缀路由、64KiB 截断。
-- [ ] syslog 通道实现：按注册表绑定监听、周期刷新 + SIGHUP 热重载、UDP 无回错、TCP 解析失败仅计数。
+- [x] syslog 通道实现（集成测试见下方未完成项）：按注册表绑定监听、周期刷新 + SIGHUP 热重载、UDP 无回错、TCP 解析失败仅计数。
 - [ ] 失败测试先行（集成）：Kafka 消费——earliest 起消费、发布成功才提交位移、发布失败不提交（重启后重消费）。
-- [ ] Kafka 通道实现：接入点驱动、独立消费组、手动位移提交。
+- [x] Kafka 通道实现（集成测试见下方未完成项）：接入点驱动、独立消费组、手动位移提交。
 
 ### 第四组：发布与解析状态
 
 - [ ] 失败测试先行（集成）：分区键按实体标识保序（同实体同分区）、无实体回退 event_id、不回退固定常量；解析失败事件同样保序发布且携带 parse_status。
-- [ ] 发布器实现：channel 背压、批量 500 条/2s、确定性 event_id。
-- [ ] 解析状态：失败事件照常发布到 `spx.ingest.event`，带 `metadata.parse_status=error` 与原因码数组；解析失败率指标（无独立隔离区 topic）。
+- [x] 发布器实现（集成测试见下方未完成项）：channel 背压、批量 500 条/2s、确定性 event_id。
+- [x] 解析状态：失败事件照常发布到 `spx.ingest.event`，带 `metadata.parse_status=error` 与原因码数组；解析失败率指标（无独立隔离区 topic）。
 
-### 第五组：connectors 注册表与管理 API
+### 第五组：sources 接入点注册表与管理 API
 
-- [ ] 失败测试先行（集成）：创建（通道不可变；解析规则可换且换后从下一条消息起生效）、列表、启停、换 token、换解析规则、syslog 端口唯一性约束、删除接入点物理删除、删除解析规则有关联时 409。
-- [ ] 失败测试先行（集成）：向导样本验证失败时提供「换解析规则」与「通用接入（原文透传 message，class_uid 6003）」两条出路；通用回退创建的接入点后续可换成正式解析规则。
-- [ ] 迁移 `ingest.connectors` 表（goose，对齐 iam 的 repository.Migrate 模式）并落地 `cmd migrate` 命令；管理路由挂 `/api/v1/ingest/connectors`，IAM 用户会话 + 权限点校验。
-- [ ] 解析规则回归：18 家解析规则 × 5–10 条真实样本，断言关键字段与 severity；填充率报表脚本。
+术语与数据模型见 [spec.md](spec.md) 的「术语表」与「数据模型（第五组）」。命名决定：**接入点 = `source`**；`connector` 一词保留给后续的厂商拉取适配器，两者不得混用。
 
+#### 5.1 迁移与注册表加载
+
+- [ ] 失败测试先行（集成）：迁移建表后，`sources` 的 `CHECK` 约束拒绝非法组合——`http` 缺 `token_digest`、`syslog` 缺 `syslog_port`、`kafka` 缺 brokers/topic 三类都必须被数据库拒绝，而不是靠应用层判断。
+- [ ] 失败测试先行（集成）：`syslog_port` 部分唯一索引——两条 `syslog` 接入点抢同一端口时第二条插入失败。
+- [ ] 失败测试先行（集成）：加载器把 `sources` 与 `parse_rules` 编译进注册表；`parse_rule_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
+- [ ] 迁移 `ingest.sources` 与 `ingest.parse_rules` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
+- [ ] `internal/source` 包替换现有 `internal/connector`：`Entry`（原 `Snapshot`）、`Transport`（原 `Channel`）、`Lookup`（原 `Registry`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`connector_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
+- [ ] 启动时从数据库加载 + 周期刷新（默认 10s）+ `SIGHUP` 立即重载；数据库不可用时保持上次成功加载的结果并在 readiness 上报降级，不退回空表。
+
+#### 5.2 管理 API
+
+- [ ] 失败测试先行（集成）：创建 `http` 接入点返回一次性明文 token，响应后再查列表不得再出现明文；创建 `syslog` 接入点返回端口；创建 `kafka` 接入点返回绑定。
+- [ ] 失败测试先行（集成）：`transport` 创建后不可修改（PATCH 带 `transport` 返回 400）；换 token 后旧 token 立即失效；换 `parse_rule_id` 后从下一条消息起生效。
+- [ ] 失败测试先行（集成）：删除仍被接入点引用的解析规则返回 409；删除接入点执行物理删除，其监听端口随热重载释放。
+- [ ] 管理路由 `/api/v1/ingest/sources` 与 `/api/v1/ingest/parse-rules`（GET/POST/PATCH/DELETE），IAM 用户会话 + 权限点校验；路由注册在 `internal/router`，DTO 归 `internal/model`。
+- [ ] 向导样本验证：给定 5–10 条样本与候选规则，逐条跑解析并回报命中率与关键字段填充率；失败时提供两条出路——换解析规则，或创建通用接入（`class_uid=6003`）。通用接入后续可换成正式解析规则。
+- [ ] 解析规则校验复用 `normalizer.Compile` 的三层校验（结构/路径/class_uid/样本试跑）；校验失败返回字段级错误，不落库。
+
+#### 5.3 验收
+
+- [ ] 端到端：建一条 `http` 接入点 → 用真实 token 推送样本 → `spx.ingest.event` 收到 OCSF 事件，`metadata.spx.source_id` 与 `metadata.uid` 正确；再建一条 `syslog` 接入点 → `nc` 发 RFC5424 与 CEF → 核对发布结果。
+- [ ] 停用接入点后其端口停止监听、HTTP 返回 401；重新启用后恢复，无需重启进程。
 ## 代码审查修复（批次 2 完成后）
 
 对解析与映射做过一轮 P0/P1/P2 审查（10 个探针验证 + 对照测试），以下问题已全部修复并有回归测试钉住：

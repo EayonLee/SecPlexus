@@ -12,6 +12,17 @@ app:
   # 监听端口。BIND_PORT 是本进程实际绑定的端口；未设置时回退到 SPX_INGEST_PORT（调用方连接的目标端口）。
   port: "${SPX_INGEST_BIND_PORT-${SPX_INGEST_PORT-8082}}"
 
+# ---- PostgreSQL ----
+# 接入点与解析规则存这里。接收路径不写库：事件一律走 Kafka，
+# 写 ClickHouse 与关联分析属于下游模块。
+db:
+  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
+  port: "${SPX_POSTGRES_PORT-5432}"
+  name: "${SPX_POSTGRES_DATABASE-secplexus}"
+  user: "${SPX_POSTGRES_USER-secplexus}"
+  password: "${SPX_POSTGRES_PASSWORD-secplexus}"
+  sslmode: "${SPX_POSTGRES_SSLMODE-disable}"
+
 # ---- Kafka（事件发布总线） ----
 # Kafka 是第一版唯一缓冲层：解析失败的事件照常发布（parse_status=error），没有隔离区 topic，也不落盘。
 # Kafka 不可用时接收阻塞（背压），不丢数据。

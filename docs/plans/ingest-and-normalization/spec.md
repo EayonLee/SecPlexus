@@ -13,6 +13,56 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - **syslog 无身份，绑定必须来自服务端**。syslog 没有认证与 header，报文内任何 tenant 字段都是可伪造的（AiSOC `syslog/sink.go` 注释：tenant 只能来自预配置 token）。绑定方式 = 一个监听端口绑一个数据源，与「接入时由用户选择/登记接入点」的交互一致，不需要独立组件，也不依赖 SO_REUSEPORT（跨 OS/内核不可控，已否决）。
 - **解析库用现成的，不自研**：`leodido/go-syslog/v4`（MIT，RFC5424/3164 + RFC6587 两种分帧）、`ubyte-source/go-cef`（Apache 2.0，零分配，35+ 厂商样本）、`golang.org/x/text`（已在依赖树，GBK/GB18030/Big5/Shift-JIS）。Kafka 客户端 `segmentio/kafka-go`（AiSOC 同款，纯 Go）。
 
+## 术语表
+
+模型里的每个名字只表达一件事；同名不同义是缺陷，不是风格问题。
+
+| 术语 | 英文 | 含义 | 明确不是 |
+|---|---|---|---|
+| **接入点** | `source` | 一条接入登记：传输方式 + 凭据/端口/topic + 绑定的解析规则 + 启用状态 | **不是**厂商适配器。拉取厂商 API 的适配器代码叫 **连接器（connector）**，属后续能力，不能与接入点同名 |
+| **解析规则** | `parse rule` | 线格式 + 字段映射 + severity/time 声明，编译后成为 `normalizer.Engine` | 不是“模板”（模板只做界面预填，不参与解析） |
+| **传输方式** | `transport` | `http` / `syslog` / `kafka` 三种接入方式 | 不是接收器实现，也不是依赖集合 |
+| **接收器** | `receiver` | `httpchannel` / `syslogchannel` / `kafkachannel` 三个监听实现 | — |
+
+命名依据：Splunk 把配置按数据管道**阶段**拆开（`inputs.conf` 管输入、`props.conf`/`transforms.conf` 管解析）；Vector 把 `sources` 与 `transforms` 分成两个配置段，`transform` 用 `inputs` 引用 `source`。两家都把“从哪收”与“怎么解析”当作两类实体，因此这里也分两张表。
+
+## 数据模型（第五组）
+
+两张表：传输方式与解析规则解耦，换规则不改接入，换接入不影响规则复用。
+
+### `ingest.sources`（接入点）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | `uuid` | 主键 | 事件回填为 `metadata.spx.source_id` |
+| `name` | `text` | 非空、唯一 | 展示名，同时作为 OCSF `metadata.log_name` |
+| `transport` | `text` | 非空，`CHECK IN ('http','syslog','kafka')` | 传输方式；**创建后不可变** |
+| `parse_rule_id` | `uuid` | 可空，`REFERENCES ingest.parse_rules(id) ON DELETE RESTRICT` | 空 = 通用接入（原文透传，`class_uid=6003`） |
+| `token_digest` | `bytea` | 可空 | HTTP 令牌的 SHA-256 摘要；明文只在创建响应出现一次 |
+| `syslog_port` | `int` | 可空，`CHECK (syslog_port >= 1024)` | UDP 与 TCP 同端口 |
+| `kafka_brokers` | `text[]` | 可空 | 客户已有总线的 broker 列表 |
+| `kafka_topic` | `text` | 可空 | 外部 topic 名 |
+| `enabled` | `boolean` | 非空，默认 `true` | 停用即不再监听/消费，配置保留 |
+| `created_at` / `updated_at` | `timestamptz` | 非空，默认 `now()` | UTC |
+
+约束：
+
+- **非法状态写不进去**（用 `CHECK`，不用应用层判断）：`transport='http'` 必须有 `token_digest`；`transport='syslog'` 必须有 `syslog_port` 且全表唯一（部分唯一索引）；`transport='kafka'` 必须有 `kafka_brokers` 与 `kafka_topic`。
+- `transport` 不可变：改协议意味着换一条接入点。
+- 删除仍被引用的解析规则时，数据库以 `ON DELETE RESTRICT` 拒绝，接口转 409。
+
+### `ingest.parse_rules`（解析规则）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | `uuid` | 主键 | — |
+| `name` | `text` | 非空、唯一 | 展示名 |
+| `spec` | `jsonb` | 非空 | `normalizer.Rule` 的 JSON 形态；加载时用同一套三层校验编译 |
+| `version` | `int` | 非空，默认 1 | 每次改动自增；事件带 `metadata.spx.rule_version` 便于归因 |
+| `created_at` / `updated_at` | `timestamptz` | 非空，默认 `now()` | UTC |
+
+加载语义：启动时全量加载，之后周期刷新（默认 10s），`SIGHUP` 立即重载；**规则改动对已绑定接入点从下一条消息起生效**，不重启进程。
+
 ## 范围
 
 本计划实现：
@@ -21,13 +71,13 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 2. 三种通道：HTTP 接收、syslog 监听（UDP+TCP）、Kafka 消费转发，全部产出 OCSF 事件。
 3. 解析层：格式探测（JSON/CEF/KV/纯文本）+ 厂商 YAML 解析规则映射（dot-path、severity 值表、常量、时间/消息字段、`kind` 声明），未映射字段进 `unmapped`。
 4. 发布层：批量写唯一出口 topic `spx.ingest.event`，分区键为实体标识，背压阻塞不丢数据。**没有独立的隔离区 topic**：解析失败的事件照常发布到同一 topic，带 `metadata.parse_status = ok | error` 与原因码，已解析字段与原文都保留，下游（CK/correlator）按 parse_status 过滤即可。
-5. 数据源注册（connectors）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与解析规则在注册时落定。
+5. 数据源注册（sources）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与解析规则在注册时落定。
 6. 可观测：结构化日志 + 指标（接收速率、**解析失败率**、映射告警、发布延迟/失败）。
 
 明确不做：
 
 - 告警提升、去重、合并、攻击链——correlator 的职责。
-- 写 ClickHouse / PostgreSQL 业务数据——ingest 不碰业务库；connector 注册表属自身模块表。
+- 写 ClickHouse / PostgreSQL 业务数据——ingest 不碰业务库；source 注册表属自身模块表。
 - OTLP 通道、客户侧 agent/采集器、API 主动拉取（poll/fetch）——后续需求。
 - 面向客户的脚本引擎（Lua/JS）或图灵完备 DSL——声明式解析规则 + Go 内置解析规则覆盖第一版全部 18 家厂商；解析规则语言的表达力边界见行为契约。
 - SO_REUSEPORT、syslog-relay 组件——多实例由部署侧 LB 解决。
@@ -45,16 +95,16 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 ### 通道一：HTTP
 
-- `POST /api/v1/ingest/events/{connector_id}`，鉴权 `Authorization: Bearer <ingest token>`（per-connector，SHA-256 摘要存储，常数时间比较）。
+- `POST /api/v1/ingest/events/{source_id}`，鉴权 `Authorization: Bearer <ingest token>`（per-source，SHA-256 摘要存储，常数时间比较）。
 - 请求体上限 10 MiB（可配）；超限 413。数组批量上限 1000 条。
-- 限流 per-connector：默认 50 req/s、burst 200（Redis 计数；Redis 故障时**拒绝**不放行，与 IAM 登录限流同语义）。
+- 限流 per-source：默认 50 req/s、burst 200（Redis 计数；Redis 故障时**拒绝**不放行，与 IAM 登录限流同语义）。
 - 成功返回 `202`，正文为受理计数；解析与发布在响应之后异步完成，解析失败不改写事件流（事件带 `parse_status=error` 与 `parse_error{stage,reason,message}`），不回传错误给设备（设备重推由去重层兜底）。
 - Content-Type 只接受 `application/json` 与 `text/plain`；其余 415。
 
 ### 通道二：syslog
 
-- 监听器在启动时按已注册的 syslog 接入点逐一绑定（UDP 与 TCP 同端口）；一个端口绑定一个 connector，报文内不读任何身份字段。
-- 端口绑定关系存 connectors 注册表，来自 Console 管理接口；ingest 周期刷新（默认 10s）+ SIGHUP 立即重载。端口变更通过热重载完成，不重启进程。
+- 监听器在启动时按已注册的 syslog 接入点逐一绑定（UDP 与 TCP 同端口）；一个端口绑定一个 source，报文内不读任何身份字段。
+- 端口绑定关系存 sources 注册表，来自 Console 管理接口；ingest 周期刷新（默认 10s）+ SIGHUP 立即重载。端口变更通过热重载完成，不重启进程。
 - RFC5424 / RFC3164 / RFC6587（八位组计数与非透明两种分帧）自动识别；单条上限 64 KiB，超限截断记 warning。
 - CEF 前缀自动识别并路由到对应解析规则；纯 syslog 走 KV/文本解析。
 - UDP 无连接语义，永不向发送方回错误；TCP 侧解析失败仅计数，不断开正常连接。
@@ -62,7 +112,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 ### 通道三：Kafka 消费
 
 - 从已注册的 Kafka 接入点消费外部 topic（客户已有总线场景）；一条接入点 = 一组 brokers + topic + 反序列化解析规则。
-- 消费组 `spx-ingest-<connector_id>`，`offset_reset=earliest`，手动提交：仅当该批事件**已成功发布**到 `spx.ingest.event` 才提交位移。
+- 消费组 `spx-ingest-<source_id>`，`offset_reset=earliest`，手动提交：仅当该批事件**已成功发布**到 `spx.ingest.event` 才提交位移。
 - 无消息身份，解析规则与接入方式完全来自接入点注册（与 syslog 同语义）。
 
 ### 解析与映射
@@ -97,7 +147,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
-- **OCSF 必填属性与私有簿记分家（审查修订，2026-11-15）**：`ocsf/ocsf-schema` 的 `events/base_event.json` 把 `class_uid`、`severity_id`、`category_uid`、`type_uid`、`activity_id`、`metadata` 标为 `required`，`objects/metadata.json` 又要求 `metadata.version`（OCSF schema 版本）与 `metadata.product`。产出事件据此补齐：`category_uid = class_uid/1000`、`type_uid = class_uid*100 + activity_id`（未声明活动时用 OCSF 的 `0` Unknown）、`metadata.version` 与 `metadata.product` 由引擎盖章。**我方簿记（`connector_id`/`parse_status`/`parse_error`/`truncated`/`original_bytes`）放在 `metadata.spx` 扩展命名空间**，不占用 OCSF 标准属性；事件标识映射到 `metadata.uid`。规则若已写 `metadata.*` 则合并保留，不覆盖。
+- **OCSF 必填属性与私有簿记分家（审查修订，2026-11-15）**：`ocsf/ocsf-schema` 的 `events/base_event.json` 把 `class_uid`、`severity_id`、`category_uid`、`type_uid`、`activity_id`、`metadata` 标为 `required`，`objects/metadata.json` 又要求 `metadata.version`（OCSF schema 版本）与 `metadata.product`。产出事件据此补齐：`category_uid = class_uid/1000`、`type_uid = class_uid*100 + activity_id`（未声明活动时用 OCSF 的 `0` Unknown）、`metadata.version` 与 `metadata.product` 由引擎盖章。**我方簿记（`source_id`/`parse_status`/`parse_error`/`truncated`/`original_bytes`）放在 `metadata.spx` 扩展命名空间**，不占用 OCSF 标准属性；事件标识映射到 `metadata.uid`。规则若已写 `metadata.*` 则合并保留，不覆盖。
 - **设备接入与管理面是两条协议边界（审查修订，2026-11-15）**：设备推送（`/api/v1/ingest/events/:connector_id`）**不得继承**管理面的 `middleware.InputBoundary`——后者是给浏览器与管理 API 的 32 KiB + `application/json` 边界，套在设备推送上会把 10 MiB 配置压成 32 KiB、并拒绝设备常用的 `text/plain`。两条边界共用同一监听端口，由 `router.RootHandler` 按路径前缀分流。
 - **解析失败的三层表达（对照 Elastic 与 Vector）**：失败原因拆成三个字段回答三个问题——`stage`（decode/map/limit，哪一层失败）、`reason`（稳定枚举：no_rule / format_mismatch / truncated / engine_panic，供聚合告警）、`message`（人类可读细节，供排查）。**原因码与描述必须分开**：Elastic 用 `event.kind=pipeline_error` + `error.message` + processor tag，Vector 要求错误事件带机器可读的 `error_type` 标签；混成一个字符串则既不能聚合也不能排查。注意 Splunk 的做法相反——它不给事件加解析状态，错误只进 `_internal` 索引；我们不采用，因为事件存储需要能按解析质量做看板。
 - **截断不覆盖规则产出的分类**：失败事件只在缺失字段上兜底（`class_uid`、`severity_id`、`time`、`message`），已解析出的字段与规则声明的类一律保留——头部完整的 CEF 仍属 2004，覆盖成通用类会让下游按 class_uid 路由时找不到它。
@@ -168,7 +218,7 @@ constants:
 - ClickHouse 落库（correlator 计划）后 parse_status 是普通可过滤字段，不单独建库表。
 - 指标：**解析失败率**（parse_status=error 的事件占比），按接入点与原因码维度可下钻。
 
-### 数据源注册（connectors）
+### 数据源注册（sources）
 
 - 模块自有表 `ingest.connectors`：`id, name, kind(http|syslog|kafka), rule_set_id, token_digest(仅 http), listen_port(仅 syslog), kafka_source(仅 kafka), status, created_at`。
 - 管理 API 归 ingest 自有路由（创建/列表/启停/换 token/），用户会话鉴权走 IAM；通道类型创建后不可变（端口/令牌/消费组是基础设施绑定），解析规则可更换——换后从下一条消息起生效，已发布事件不变（依据 Graylog 在运行中的 input 上管理 extractors/pipelines；Splunk 覆盖只影响新数据）。
@@ -358,7 +408,7 @@ YAML 不再是用户界面——它是存储与导出格式（自定义解析规
 
 ### 九、服务命名与页面结构（第五轮：用户定稿）
 
-- **服务名 ingest**（原 ingestor）：目录 `src/apps/ingest`、环境变量前缀 `SPX_INGEST_`、API 前缀 `/api/v1/ingest`（设备推送 `/api/v1/ingest/events/{connector_id}`、管理 `/api/v1/ingest/connectors`）、权限点 `ingest.connectors.read/manage`、表 `ingest.connectors`、消费组 `spx-ingest-<connector_id>`。Kafka 主题原本就是 `spx.ingest.*`，更名后全链路一致。
+- **服务名 ingest**（原 ingestor）：目录 `src/apps/ingest`、环境变量前缀 `SPX_INGEST_`、API 前缀 `/api/v1/ingest`（设备推送 `/api/v1/ingest/events/{source_id}`、管理 `/api/v1/ingest/connectors`）、权限点 `ingest.connectors.read/manage`、表 `ingest.connectors`、消费组 `spx-ingest-<source_id>`。Kafka 主题原本就是 `spx.ingest.*`，更名后全链路一致。
 - **页面结构**：独立「运行指标」页删除，核心可观测并入数据接入页。主导航两个入口：数据接入、解析规则。
 - **「解析规则」命名依据**：华为云安全云脑 SecMaster 对同一概念（对 Logstash filter 的无码化规则封装）即称「解析规则」；Wazuh decoders（解码器）、Graylog extractors（提取器）、Splunk sourcetype（源类型）为各家变体，「解析规则」是中文 SIEM 最通用的叫法。
 - **KPI 砍留依据**：Microsoft Sentinel 数据连接器健康监控关注三个问题——数据是否完整流入、最后收到时间、异常；加上 24h 事件量环比（Splunk notable changes 模式：数据量骤降是断流最强信号）共四卡。分区键分布、发布批量等工程细节不进总览。
