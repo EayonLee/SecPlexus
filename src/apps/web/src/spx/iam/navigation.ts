@@ -1,4 +1,4 @@
-import { ScrollText, ShieldCheck, Users } from "lucide-react";
+import { Database, FileJson, ScrollText, ShieldCheck, Users } from "lucide-react";
 
 import type { PermissionKey } from "@/auth/permissions.gen";
 import { permissions } from "@/auth/permissions.gen";
@@ -30,6 +30,20 @@ export const settingsPages: SettingsPage[] = [
     action: permissions.IAMUsersRead,
     path: "/settings/users",
     icon: Users,
+  },
+  {
+    id: "ingest",
+    title: "ingest",
+    action: permissions.IngestInputRead,
+    path: "/settings/ingest",
+    icon: Database,
+  },
+  {
+    id: "mappings",
+    title: "mappings",
+    action: permissions.IngestMappingRead,
+    path: "/settings/mappings",
+    icon: FileJson,
   },
   {
     id: "audit",

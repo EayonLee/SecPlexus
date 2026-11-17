@@ -27,6 +27,13 @@ const nextConfig = {
   // 用 127.0.0.1 或局域网 IP 打开页面时，脚本请求会被 403 拒绝，
   // 页面只剩服务端渲染的 HTML，React 不会接管，表现为输入框无法输入。
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // ingest 管理 API 走同源反代：浏览器只与 Web 同源通信，
+  // 会话 cookie 与 CSRF 令牌因此不需要跨域放行。
+  async rewrites() {
+    const ingest = process.env.SPX_INGEST_ORIGIN ?? "http://127.0.0.1:8082";
+
+    return [{ source: "/api/v1/ingest/:path*", destination: `${ingest}/api/v1/ingest/:path*` }];
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

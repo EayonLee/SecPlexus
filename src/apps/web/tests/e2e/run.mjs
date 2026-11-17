@@ -22,7 +22,14 @@ const directory = mkdtempSync(path.join(tmpdir(), "spx-e2e-"));
 const name = `spx-e2e-${randomBytes(5).toString("hex")}`;
 const containers = [];
 const children = [];
+// 收尾失败时保留工作目录，供事后读日志；成功则照常清理。
+let keepDirectory = false;
 const listenerPorts = [];
+// 阶段标记：e2e 卡住时不加这个，只能看到一个笼统的终止信号。
+const startedAt = Date.now();
+function stage(label) {
+  console.error(`[e2e +${String(Date.now() - startedAt).padStart(6)}ms] ${label}`);
+}
 let stackReady = false;
 function command(binary, args, options = {}) {
   const result = spawnSync(binary, args, { encoding: "utf8", ...(binary === "pnpm" ? pnpmShell : {}), ...options });
@@ -36,21 +43,37 @@ async function port() {
   await new Promise((resolve) => server.close(resolve));
   return number;
 }
+// 子进程输出保留尾部：启动失败时不回显日志，就只能看到"未就绪"这种没有信息量的报错。
+const outputTails = new WeakMap();
+const tailLimit = 4000;
 function launch(binary, args, env, options = {}) {
   const child = spawn(binary, args, {
     env,
     stdio: ["ignore", "pipe", "pipe"],
     detached: options.detached ?? process.platform !== "win32",
   });
-  child.stdout.resume();
-  child.stderr.resume();
+  let output = "";
+  const collect = (chunk) => {
+    output += chunk.toString();
+    if (output.length > tailLimit) output = output.slice(-tailLimit);
+  };
+  child.stdout.on("data", collect);
+  child.stderr.on("data", collect);
+  outputTails.set(child, () => output);
   children.push(child);
   return child;
+}
+function tailOf(child) {
+  const read = outputTails.get(child);
+  return read ? read().trim() : "";
 }
 async function ready(url, child) {
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`Test process exited before readiness: ${new URL(url).pathname}`);
+    if (child.exitCode !== null) {
+      const tail = tailOf(child);
+      throw new Error(`Test process exited before readiness: ${new URL(url).pathname}` + (tail ? `\n--- child output ---\n${tail}` : ""));
+    }
     try {
       if ((await fetch(url)).ok) return;
     } catch {
@@ -75,6 +98,8 @@ try {
   const password = randomBytes(24).toString("hex");
   const adminUsername = `e2e_${randomBytes(8).toString("hex")}`;
   const credential = randomBytes(32).toString("hex");
+  // 每个 service client 必须有独立凭证：共用一个会让授权身份不确定。
+  const ingestCredential = randomBytes(32).toString("hex");
   const env = { ...systemEnv, POSTGRES_PASSWORD: pgPassword };
   const pg = `${name}-pg`;
   const redis = `${name}-redis`;
@@ -157,6 +182,8 @@ try {
     SPX_IAM_BOOTSTRAP_PASSWORD: password,
     SPX_IAM_CSRF_KEY: csrf,
     SPX_CONSOLE_IAM_TOKEN: credential,
+    // IAM 的 service_clients 含 ingest 条目：缺它的凭证时 IAM 拒绝启动。
+    SPX_INGEST_IAM_TOKEN: ingestCredential,
     SPX_IAM_LOG_FILE: path.join(directory, "iam-one.log"),
   };
   const consoleEnv = {
@@ -171,12 +198,12 @@ try {
     SPX_IAM_PORT: String(iamPort),
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort),
-    SPX_WEB_BIND_HOST: "127.0.0.1",
+    SPX_WEB_HOST: "127.0.0.1",
     SPX_WEB_PORT: String(webPort),
-    SPX_IAM_BIND_PORT: String(iamPort),
-    SPX_CONSOLE_BIND_PORT: String(consolePort),
-    SPX_IAM_BIND_HOST: "127.0.0.1",
-    SPX_CONSOLE_BIND_HOST: "127.0.0.1",
+    SPX_IAM_PORT: String(iamPort),
+    SPX_CONSOLE_PORT: String(consolePort),
+    SPX_IAM_HOST: "127.0.0.1",
+    SPX_CONSOLE_HOST: "127.0.0.1",
   };
   // Root startup derives backend URLs from actual module ports. Use one DB
   // connection for initialization, HTTP replicas and maintenance.
@@ -202,7 +229,7 @@ try {
     ...iamEnv,
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
-    SPX_IAM_BIND_HOST: "127.0.0.1",
+    SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
   });
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
@@ -210,7 +237,7 @@ try {
     ...consoleEnv,
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort2),
-    SPX_CONSOLE_BIND_HOST: "127.0.0.1",
+    SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
@@ -252,6 +279,7 @@ try {
       process.once("SIGTERM", finish);
     });
   } else {
+    stage("playwright:start");
     const child = spawn(
       "pnpm",
       [
@@ -287,7 +315,9 @@ try {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code ?? 1));
     });
+      stage(`playwright:exit code=${process.exitCode}`);
   }
+  stage("sse:start");
   // Exercise the actual Console SSE handler while shutting down its owned replica.
   const { request } = await import("@playwright/test");
   const api = await request.newContext({ baseURL: publicURL });
@@ -305,29 +335,61 @@ try {
       headers: { Cookie: cookies, Origin: publicURL },
       signal: AbortSignal.timeout(8000),
     });
-    if (stream.status !== 200 || !stream.body) throw new Error("Owned Console event stream did not open.");
+    if (stream.status !== 200 || !stream.body) {
+      const detail = (await stream.text().catch(() => "")).slice(0, 300);
+      console.log("E2E work directory kept for diagnosis:", directory);
+      process.env.SPX_E2E_KEEP_DIR = directory;
+      keepDirectory = true;
+      throw new Error(`Owned Console event stream did not open. status=${stream.status} body=${detail}`);
+    }
     const reader = stream.body.getReader();
+    // 排空必须有时限：卡住时应报出「流没关闭」，而不是让整个 e2e 等到外部超时被杀。
+    // 关闭所有者副本时必须观察到流结束，并且要区分两种结束方式：
+    //   * 优雅关闭（POSIX 的 SIGTERM）→ 干净的 EOF（done）；
+    //   * 强制终止（Windows 无 SIGTERM 语义）→ 连接中断，客户端读到 TypeError: terminated。
+    // 两者都算「流已结束」；卡住不结束才是缺陷，因此下面用有界等待。
+    const drainWithDeadline = async (budgetMs) => {
+      const deadline = Date.now() + budgetMs;
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error("Console stream did not close after shutdown.");
+        const outcome = await Promise.race([
+          reader
+            .read()
+            .then((value) => ({ done: value.done }))
+            .catch((error) => ({ aborted: String(error) })),
+          new Promise((resolve) => setTimeout(() => resolve({ stalled: true }), remaining)),
+        ]);
+        if (outcome.stalled) throw new Error("Console stream did not close after shutdown.");
+        if (outcome.aborted) return { aborted: outcome.aborted };
+        if (outcome.done) return { aborted: "" };
+      }
+    };
+
     const first = await reader.read();
     if (!new TextDecoder().decode(first.value).includes("authorized"))
       throw new Error("Console stream did not authorize.");
     const closed = new Promise((resolve) => console2.once("exit", (code, signal) => resolve({ code, signal })));
-    // Windows has no SIGTERM; Node terminates the process directly, so only POSIX
-    // can assert the graceful zero exit. The stream must still close on both.
+    // 强制终止与优雅终止都算「副本已停」；只有 POSIX 才要求零退出码。
     if (process.platform === "win32") console2.kill();
     else console2.kill("SIGTERM");
-    while (!(await reader.read()).done) {
-      /* Read through the final event until normal EOF. */
-    }
+    const drained = await drainWithDeadline(15000);
+    if (process.platform !== "win32" && drained.aborted)
+      throw new Error(`Console stream aborted instead of closing cleanly: ${drained.aborted}`);
     const exit = await closed;
     if (process.platform !== "win32" && (exit.code !== 0 || exit.signal))
       throw new Error("Console needed forced shutdown.");
-    console.log("Actual Console SSE observed cancellation and ended before normal process exit.");
+    stage(`sse:closed${drained.aborted ? " (aborted)" : ""}`);
+    console.log(
+      `Actual Console SSE ended when its owned replica stopped (${drained.aborted ? "connection aborted" : "clean EOF"}).`,
+    );
   } finally {
     await api.dispose();
   }
+  stage("logs:scan");
   for (const filename of ["iam-one.log", "iam-two.log", "console-one.log", "console-two.log"]) {
     const data = readFileSync(path.join(directory, filename), "utf8");
-    if (![pgPassword, password, credential, csrf].every((value) => !data.includes(value)))
+    if (![pgPassword, password, credential, ingestCredential, csrf].every((value) => !data.includes(value)))
       throw new Error("A secret reached application logs.");
     if (
       !data
@@ -378,6 +440,6 @@ try {
       process.exitCode = 1;
     }
   }
-  rmSync(directory, { recursive: true, force: true });
+  if (!keepDirectory) rmSync(directory, { recursive: true, force: true });
   if (ownsRootEnv) rmSync(".env", { force: true });
 }
