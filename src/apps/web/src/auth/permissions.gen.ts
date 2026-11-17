@@ -3,6 +3,7 @@ export const permissions = {
   ConsoleEventsRead: "console.events.read",
   IAMAuditRead: "iam.audit.read",
   IAMAuditWrite: "iam.audit.write",
+  IAMPermissionsRead: "iam.permissions.read",
   IAMRolesManage: "iam.roles.manage",
   IAMRolesRead: "iam.roles.read",
   IAMUsersManage: "iam.users.manage",

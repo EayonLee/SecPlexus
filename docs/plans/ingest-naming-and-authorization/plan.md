@@ -28,15 +28,15 @@ IAM 基线角色 + 权限目录 ────────────────
 - [x] 失败测试先行：无会话凭据 → 401；会话有效但缺动作 → 403；IAM 不可达 → 503（不放行、不误判为 401）。
 - [x] `iamclient.Session()`：gin 中间件，取会话并调用既有 `Authorize` RPC；成功把主体（用户、会话标识、权限集合）写入 context，供业务方读取展示用信息。
 - [x] `iamclient.Require(action)`：在会话基础上校验单个动作。
-- [ ] `iamclient.ValidateActions(ctx, actions...)`：启动期拿权限目录比对，缺动作则拒绝启动并列出缺失键。
-- [ ] 复用既有超时、错误映射与日志约定，不新建第二套鉴权栈。
+- [x] `iamclient.ValidateActions(ctx, actions...)`：启动期拿权限目录比对，缺动作则拒绝启动并列出缺失键。
+- [x] 复用既有超时、错误映射与日志约定，不新建第二套鉴权栈。
 
 ## 第三组：IAM 数据侧
 
 - [x] 失败测试先行（集成）：基线角色 `authenticated` 存在且不可删除；撤销其某项权限后，原先"登录即可"的操作返回 403。
 - [x] 迁移增加基线角色（标记 `builtin`），每个已登录用户自动获得其权限。
 - [x] 权限键遵循既有 `module.resource.action` 三段格式，并与 flat-authorization 计划已有的键风格一致；新增 `ingest.input.read/write`、`ingest.mapping.read/write`。
-- [ ] 目录权威来源仍是代码里的 `permissions.json`，启动时同步进 `iam.permissions`；同步完成后校验目录非空，空目录拒绝启动（否则新环境所有请求都会 403）。
+- [x] 目录权威来源仍是代码里的 `permissions.json`，启动时同步进 `iam.permissions`；同步完成后校验目录非空，空目录拒绝启动（否则新环境所有请求都会 403）。
 - [x] 基线角色权限变更走数据库，不在服务代码里写分支；提供"某用户拥有哪些权限"的查询路径（管理面展示用）。
 ## 第四组：业务方接线（Console 与 Ingest）
 
@@ -48,13 +48,13 @@ IAM 基线角色 + 权限目录 ────────────────
 - [x] `iamclient.Guard(action, targetType)`：一个中间件完成会话、授权、审计三件事；`outcome` 按响应状态映射（2xx/403/其余），`decision_id` 从授权决策透传，`request_id` 取既有中间件。
 - [x] 业务方不再拼审计字段：`action` 用生成常量、`target_type` 用闭集常量、`target_id` 取路由参数；中间件不采集请求体。
 - [ ] 失败语义：审计写失败不静默——高风险动作返回 503 且记 Error，业务可能已生效，作为已知限制写入 spec。
-- [ ] 测试断言：日志与审计中不出现令牌明文；`denied` 与 `failure` 的 `outcome` 取值正确；`target_type` 非法值被拒绝。
-- [ ] 断言改名后表与列注释仍存在。
+- [x] 测试断言：日志与审计中不出现令牌明文；`denied` 与 `failure` 的 `outcome` 取值正确；`target_type` 非法值被拒绝。
+- [x] 断言改名后表与列注释仍存在。
 - [x] **Ingest 重构**：管理路由挂 `client.Session()` + 按路由 `Require`；设备推送路由保持 Bearer 令牌鉴权，不经过 IAM。
 - [x] 白名单在各自 `internal/router` 显式登记（健康探针、IAM 登录注册、设备接入），并有测试证明其余路由都需要会话。
-- [ ] 两服务启动期调用 `client.ValidateActions`，动作目录漂移即拒绝启动。
-- [ ] 审计范围按 spec 2.7 执行：只审计管理写操作与授权拒绝；读操作与设备数据接入不写审计（附测试证明设备推送不产生审计行）。
-- [ ] `reason_code` 使用既有 `result` 码常量，不新增词表。
+- [x] 两服务启动期调用 `client.ValidateActions`，动作目录漂移即拒绝启动。
+- [x] 审计范围按 spec 2.7 执行：只审计管理写操作与授权拒绝；读操作与设备数据接入不写审计（附测试证明设备推送不产生审计行）。
+- [x] `reason_code` 使用既有 `result` 码常量，不新增词表。
 - [x] Console 的 SSE 路由（`/api/v1/console/events`）同样挂会话守卫：长连接在握手阶段校验，失败返回 401 而非建立空流。
 - [ ] 部署顺序：`00003` 改名迁移先于新版本代码上线（expand 阶段兼容旧名，contract 阶段移除旧名），在 plan 记录两阶段执行顺序。
 
@@ -103,3 +103,16 @@ go vet ./src/...
 | 改名后表与列注释断言 | 未做 | 可用集成查询 `pg_description` 实现，属于补充测试 |
 | 部署顺序（expand/contract 两阶段） | 文档化，未演练 | 需要真实部署环境 |
 | 商城锁 `audit_events` 与业务写入的原子性 | 已知限制 | 见 spec 2.7：跨服务写入无法与本服务事务同原子，已在 spec 记录 |
+
+## 实施状态（本轮核对）
+
+已完成并验证：鉴权目录漂移检测（`iam.permissions.read` + `/api/v1/iam/permission-catalog` +
+`iamclient.ValidateActions`，漂移即拒绝启动、IAM 不可达只告警）、空目录拒绝启动、
+表与列注释断言、设备推送不写审计的回归测试、审计范围收敛、`reason_code` 复用 result 码。
+
+仍开放：
+
+| 条目 | 原因 |
+|---|---|
+| 审计写失败返回 503 | 现取 fail-open（Kubernetes admission webhook 的 `failurePolicy: Ignore` 同语义），改为阻断需要事务性投递 |
+| 部署 expand/contract 两阶段顺序 | 迁移已合并为单基线且未部署，前提消失，记作不适用 |

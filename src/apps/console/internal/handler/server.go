@@ -75,7 +75,7 @@ func (s *Server) Events(c *gin.Context) {
 		case <-c.Request.Context().Done():
 			return
 		case <-ticker.C:
-			next, err := s.IAM.Authorize(c.Request.Context(), c.Request, iamclient.PermissionIAMUsersRead)
+			next, err := s.IAM.Authorize(c.Request.Context(), c.Request, iamclient.PermissionConsoleEventsRead)
 			if err != nil || !next.Allowed {
 				reason = "access_revoked"
 				if err != nil {
