@@ -57,6 +57,7 @@ func Handler(server *handler.Server) http.Handler {
 	}
 	engine.POST("/api/v1/iam/authorize", server.Errors, middleware.InputBoundary(nil), server.AuthorizeRequest)
 	engine.POST("/api/v1/iam/audit-events", server.Errors, middleware.InputBoundary(nil), server.PostAuditEvent)
+	engine.GET("/api/v1/iam/permission-catalog", server.Errors, server.PermissionCatalog)
 	user := engine.Group("")
 	user.Use(iammiddleware.Session(server.Service.Sessions), server.Errors, server.Security.GinProtect(), func(c *gin.Context) {
 		if c.FullPath() == "/api/v1/iam/auth/login" || c.FullPath() == "/api/v1/iam/auth/reauthenticate" {

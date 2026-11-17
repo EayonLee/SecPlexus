@@ -5,6 +5,7 @@ const (
 	PermissionConsoleEventsRead  = "console.events.read"
 	PermissionIAMAuditRead       = "iam.audit.read"
 	PermissionIAMAuditWrite      = "iam.audit.write"
+	PermissionIAMPermissionsRead = "iam.permissions.read"
 	PermissionIAMRolesManage     = "iam.roles.manage"
 	PermissionIAMRolesRead       = "iam.roles.read"
 	PermissionIAMUsersManage     = "iam.users.manage"

@@ -209,6 +209,11 @@ func (c Config) ValidateSecurity(required bool) error {
 		return errors.New("service_clients must contain at least one client")
 	}
 	catalog := authorization.Catalog()
+	// 空目录会让所有授权都失败（找不到权限键即拒绝），新环境将完全不可用。
+	// 这类部署错误必须在启动时暴露，而不是让每个请求都 403。
+	if required && len(catalog) == 0 {
+		return errors.New("permission catalog is empty; refusing to start")
+	}
 	// 两个服务共用同一凭证时，授权结论取决于遍历顺序，身份不确定。
 	// 这是配置错误，必须启动即拒绝，而不是让同一个 Token 随机以某个服务身份出现。
 	owners := make(map[string]string, len(c.ServiceClients))

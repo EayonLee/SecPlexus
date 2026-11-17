@@ -51,10 +51,10 @@
 
 ### 第三组：通道
 
-- [ ] 失败测试先行（集成）：HTTP——token 允许/拒绝、413 超限、415 类型、429 限流、202 计数、Redis 故障拒绝。
+- [x] 失败测试先行（集成）：HTTP——token 允许/拒绝、413 超限、415 类型、429 限流、202 计数、Redis 故障拒绝。
 - [x] HTTP 通道实现（集成测试见下方未完成项）：per-connector token、请求体/数组上限、Redis 限流、异步解析发布。
 - [ ] 可信代理网段（app.trusted_proxy_cidrs）随 HTTP 通道一起落地：路由按 iam 的方式启用 X-Forwarded-For 解析并拒绝 0.0.0.0/0——骨架阶段删除了无消费方的死配置。
-- [ ] 失败测试先行（集成）：syslog——真实 UDP/TCP 端口收包、RFC6587 两种分帧、RFC3164/5424 识别、CEF 前缀路由、64KiB 截断。
+- [x] 失败测试先行（集成）：syslog——真实 UDP/TCP 端口收包、RFC6587 两种分帧、RFC3164/5424 识别、CEF 前缀路由、64KiB 截断。
 - [x] syslog 通道实现（集成测试见下方未完成项）：按注册表绑定监听、周期刷新 + SIGHUP 热重载、UDP 无回错、TCP 解析失败仅计数。
 - [ ] 失败测试先行（集成）：Kafka 消费——earliest 起消费、发布成功才提交位移、发布失败不提交（重启后重消费）。
 - [x] Kafka 通道实现（集成测试见下方未完成项）：接入点驱动、独立消费组、手动位移提交。
@@ -72,20 +72,20 @@
 #### 5.1 迁移与注册表加载
 
 - [ ] 失败测试先行（集成）：迁移建表后，`inputs` 的 `CHECK` 约束拒绝非法组合——`http` 缺 `token_digest`、`syslog` 缺 `syslog_port`、`kafka` 缺 brokers/topic 三类都必须被数据库拒绝，而不是靠应用层判断。
-- [ ] 失败测试先行（集成）：`syslog_port` 部分唯一索引——两条 `syslog` 接入点抢同一端口时第二条插入失败。
-- [ ] 失败测试先行（集成）：加载器把 `inputs` 与 `mappings` 编译进注册表；`mapping_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
-- [ ] 迁移 `ingest.inputs` 与 `ingest.mappings` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
-- [ ] `internal/source` 包替换现有 `internal/source`：`Entry`（原 `Entry`）、`Transport`（原 `Channel`）、`Lookup`（原 `Lookup`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`input_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
-- [ ] 启动时从数据库加载 + 周期刷新（默认 10s）+ `SIGHUP` 立即重载；数据库不可用时保持上次成功加载的结果并在 readiness 上报降级，不退回空表。
+- [x] 失败测试先行（集成）：`syslog_port` 部分唯一索引——两条 `syslog` 接入点抢同一端口时第二条插入失败。
+- [x] 失败测试先行（集成）：加载器把 `inputs` 与 `mappings` 编译进注册表；`mapping_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
+- [x] 迁移 `ingest.inputs` 与 `ingest.mappings` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
+- [x] `internal/source` 包替换现有 `internal/source`：`Entry`（原 `Entry`）、`Transport`（原 `Channel`）、`Lookup`（原 `Lookup`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`input_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
+- [x] 启动时从数据库加载 + 周期刷新（默认 10s）+ `SIGHUP` 立即重载；数据库不可用时保持上次成功加载的结果并在 readiness 上报降级，不退回空表。
 
 #### 5.2 管理 API
 
 - [x] 失败测试先行（集成）：创建 `http` 接入点返回一次性明文 token，响应后再查列表不得再出现明文；创建 `syslog` 接入点返回端口；创建 `kafka` 接入点返回绑定。
-- [ ] 失败测试先行（集成）：`protocol` 创建后不可修改（PATCH 带 `protocol` 返回 400）；换 token 后旧 token 立即失效；换 `mapping_id` 后从下一条消息起生效。
+- [x] 失败测试先行（集成）：`protocol` 创建后不可修改（PATCH 带 `protocol` 返回 400）；换 token 后旧 token 立即失效；换 `mapping_id` 后从下一条消息起生效。
 - [x] 失败测试先行（集成）：删除仍被接入点引用的解析规则返回 409（仓储层已用 `ON DELETE RESTRICT` 证明）；删除接入点执行物理删除，其监听端口随热重载释放。
 - [x] 管理路由 `/api/v1/ingest/inputs` 与 `/api/v1/ingest/mappings`（GET/POST/PATCH/DELETE）；路由注册在 `internal/router`，DTO 归 `internal/model`。**不新增权限点**（与第一组的全员可见决策一致）：只要求有效用户会话，不做细粒度授权；未配置会话守卫时不注册管理路由，避免暴露无鉴权写接口。
-- [ ] 向导样本验证：给定 5–10 条样本与候选规则，逐条跑解析并回报命中率与关键字段填充率；失败时提供两条出路——换解析规则，或创建通用接入（`class_uid=6003`）。通用接入后续可换成正式解析规则。
-- [ ] 解析规则校验复用 `normalizer.Compile` 的三层校验（结构/路径/class_uid/样本试跑）；校验失败返回字段级错误，不落库。
+- [x] 向导样本验证：给定 5–10 条样本与候选规则，逐条跑解析并回报命中率与关键字段填充率；失败时提供两条出路——换解析规则，或创建通用接入（`class_uid=6003`）。通用接入后续可换成正式解析规则。
+- [x] 解析规则校验复用 `normalizer.Compile` 的三层校验（结构/路径/class_uid/样本试跑）；校验失败返回字段级错误，不落库。
 
 #### 5.3 验收
 
@@ -163,3 +163,15 @@ go vet ./src/...
 - 受理链路是**异步**的：上表测的是"请求被受理并进入流水线"的延迟，发布吞吐由 Kafka 侧与 `spx_ingest_published_total` 回答。
 - 5 万 EPS 的容量核算：单核 133,000 EPS → **约 0.38 核**（含 HTTP 开销），解析层本身约 0.18–0.27 核。
 - 批量推送显著降低每事件成本（7,498 → 4,955 ns，约 -34%）：HTTP 与鉴权是固定开销，设备端应尽量批量发送。
+## 实施状态（本轮核对）
+
+仍开放：
+
+| 条目 | 原因 |
+|---|---|
+| 内置厂商解析规则 | 阻塞：需要真实设备日志样本（每厂商 5–10 条） |
+| 可信代理网段（`trusted_proxy_cidrs`） | 不适用：ingest 目前不记录连接来源地址，限流按接入点而非按 IP；现在加这个键会重新引入无消费方的死配置 |
+| Kafka 消费集成测试（earliest、提交位移语义） | 需要 Kafka 实例 |
+| 分区键保序测试 | 需要 Kafka 实例；可先把分区键选择抽成纯函数再测 |
+| Loghub / Azure Sentinel 样本导入 | 与厂商规则同一阻塞源 |
+| CI 夜间模糊测试 | 需要语料库 |

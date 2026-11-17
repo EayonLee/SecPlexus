@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -316,4 +317,25 @@ func (s *Server) PostAuditEvent(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// PermissionCatalog 向受信服务返回权限目录键，用于启动期动作漂移检测。
+//
+// 与面向用户的 /api/v1/iam/permissions 分开：那个返回带可委派性的投影，
+// 需要用户会话；这个只需要"目录里有哪些键"，调用方是服务凭证。
+func (s *Server) PermissionCatalog(c *gin.Context) {
+	if !s.Security.ServiceClient(c.Request, iamclient.PermissionIAMPermissionsRead) {
+		httpx.Reject(c, authorization.ErrDenied)
+
+		return
+	}
+
+	catalog := authorization.Catalog()
+	keys := make([]string, 0, len(catalog))
+	for _, permission := range catalog {
+		keys = append(keys, permission.Key)
+	}
+
+	slices.Sort(keys)
+	result.Success(c.Writer, map[string]any{"keys": keys})
 }

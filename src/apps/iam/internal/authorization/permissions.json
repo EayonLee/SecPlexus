@@ -24,6 +24,14 @@
     "status": "active"
   },
   {
+    "key": "iam.permissions.read",
+    "description": "读取权限目录（服务启动期漂移检测）",
+    "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
     "key": "iam.roles.manage",
     "description": "创建、修改、删除角色与角色权限",
     "risk_level": "high",

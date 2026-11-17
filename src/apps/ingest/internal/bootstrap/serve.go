@@ -150,6 +150,18 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	defer iam.Close()
 
+	// 启动期校验动作键还在 IAM 目录里：缺失时管理请求会在运行期静默 403。
+	if err = iam.ValidateActions(startup, ingestActions...); err != nil {
+		// 目录漂移是配置错误，必须停在启动期；IAM 暂时不可达则先启动，
+		// 请求会因为拿不到授权结论返回 503，依赖恢复后自动可用。
+		if errors.Is(err, iamclient.ErrCatalogDrift) {
+			return err
+		}
+
+		logging.From(context.Background()).Warn("Could not verify the permission catalog at startup",
+			"event", "iam.catalog_unverified", "error", logging.Error(err))
+	}
+
 	channels := router.Deps{
 		Registry: registry,
 		Limiter:  limiter,
@@ -270,4 +282,12 @@ func producerSecurity(kafkaConfig config.Kafka) kafka.Security {
 		PasswordEnv: kafkaConfig.SASLPasswordEnv,
 		CAFile:      kafkaConfig.TLSCAFile,
 	}
+}
+
+// ingestActions 是 Ingest 依赖的权限键：新增路由时必须同步加入。
+var ingestActions = []string{
+	iamclient.PermissionIngestInputRead,
+	iamclient.PermissionIngestInputWrite,
+	iamclient.PermissionIngestMappingRead,
+	iamclient.PermissionIngestMappingWrite,
 }
