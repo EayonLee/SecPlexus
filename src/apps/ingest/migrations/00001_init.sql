@@ -1,13 +1,8 @@
 -- +goose Up
--- 数据接入基线：解析映射、接入点、拉模式连接器。
+-- 数据接入基线：解析映射与接入点。
 --
--- 设计依据：
---   * Splunk 把"从哪收"(inputs.conf)与"怎么解析"(props.conf/transforms.conf)拆成两类配置，
---     并按接入类型分 stanza、各自带专属键 —— 协议专属设置是业界常态。
---   * Graylog 的 Input 用 `type` + `configuration: Map<String,Object>` 表达这些专属设置，
---     而不是给每个输入类型加一批固定列。
--- 因此这里用 `configuration jsonb` 承载协议专属设置，形状由 Go 侧按 protocol 校验；
--- 新增一种协议不改表结构。
+-- 协议专属设置放在 configuration jsonb 里，形状由 Go 侧按 protocol 校验：
+-- 每加一种协议都要改表结构的设计会把这个模块锁死在三种协议上。
 
 CREATE SCHEMA IF NOT EXISTS ingest;
 
@@ -36,7 +31,7 @@ CREATE TABLE ingest.inputs (
     -- 空表示通用接入：原文透传、class_uid=6003，映射可后续补上。
     mapping_id uuid REFERENCES ingest.mappings (id) ON DELETE RESTRICT,
     -- 协议专属设置（http: token_sha256；syslog: port；kafka: brokers/topic）。
-    -- 不建协议专属列：加协议就要改表，而这是 Graylog/Splunk 都没有的约束。
+    -- 不建协议专属列：加一种协议就要改表，属于可避免的耦合。
     configuration jsonb NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(configuration) = 'object'),
     -- 停用即不再监听/消费，配置保留，重新启用无需重启进程。
@@ -53,6 +48,28 @@ CREATE INDEX inputs_mapping_idx ON ingest.inputs (mapping_id) WHERE mapping_id I
 -- 一个端口只能绑一个 syslog 接入点；用表达式索引而不是专用列。
 CREATE UNIQUE INDEX inputs_syslog_port_key ON ingest.inputs ((configuration->>'port'))
     WHERE protocol = 'syslog' AND configuration ? 'port';
+
+-- 表与业务列注释：数据库是运维与排障的第一现场，
+-- 没有注释的列只能靠读代码猜含义，改配置时尤其危险。
+COMMENT ON TABLE ingest.mappings IS '解析映射：把原始报文翻译成 OCSF 字段的规则';
+COMMENT ON COLUMN ingest.mappings.id IS '映射标识';
+COMMENT ON COLUMN ingest.mappings.name IS '展示名；全局唯一，接入点按名字引用';
+COMMENT ON COLUMN ingest.mappings.name_normalized IS '小写去空格的名称，用于唯一索引';
+COMMENT ON COLUMN ingest.mappings.definition IS '映射定义 JSON；加载时按结构与样本试跑校验';
+COMMENT ON COLUMN ingest.mappings.version IS '版本号，每次改动自增；事件按版本归因解析质量';
+COMMENT ON COLUMN ingest.mappings.created_at IS '创建时间（UTC）';
+COMMENT ON COLUMN ingest.mappings.updated_at IS '最后修改时间（UTC）';
+
+COMMENT ON TABLE ingest.inputs IS '接入点：一个协议加一份配置，决定从哪收数据';
+COMMENT ON COLUMN ingest.inputs.id IS '接入点标识；事件写入 metadata.spx.input_id';
+COMMENT ON COLUMN ingest.inputs.name IS '展示名；同时作为 OCSF metadata.log_name';
+COMMENT ON COLUMN ingest.inputs.name_normalized IS '小写去空格的名称，用于唯一索引';
+COMMENT ON COLUMN ingest.inputs.protocol IS '接入协议：http / syslog / kafka；创建后不可修改';
+COMMENT ON COLUMN ingest.inputs.mapping_id IS '解析映射；为空表示通用接入，原文透传且 class_uid=6003';
+COMMENT ON COLUMN ingest.inputs.configuration IS '协议专属设置（http: token_sha256；syslog: port；kafka: brokers/topic）';
+COMMENT ON COLUMN ingest.inputs.enabled IS '是否启用；停用即停止监听或消费，配置保留';
+COMMENT ON COLUMN ingest.inputs.created_at IS '创建时间（UTC）';
+COMMENT ON COLUMN ingest.inputs.updated_at IS '最后修改时间（UTC）';
 
 -- +goose Down
 DROP TABLE IF EXISTS ingest.inputs;

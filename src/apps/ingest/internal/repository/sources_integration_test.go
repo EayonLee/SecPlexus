@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,12 +45,23 @@ func testDSN(t *testing.T) string {
 	return built
 }
 
+// 每个测试进程只迁移一次：CI 给的是全新空库，用例自己负责把它建起来，
+// 否则这套测试只能在"已经被人工迁移过"的机器上通过。
+var migrateOnce sync.Once
+
+var migrateErr error
+
 // openPool 建立连接池并在测试结束后关闭。
 func openPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	migrateOnce.Do(func() { migrateErr = repository.Migrate(ctx, testDSN(t)) })
+	if migrateErr != nil {
+		t.Fatalf("应用迁移失败: %v", migrateErr)
+	}
 
 	pool, err := pgxpool.New(ctx, testDSN(t))
 	if err != nil {
@@ -75,7 +87,7 @@ func uniqueName(t *testing.T, suffix string) string {
 
 // 回归：每种传输方式缺字段都必须被数据库拒绝，而不是靠应用层判断。
 // 协议必填字段由用例层校验：configuration 是 JSON，数据库无法表达「每种协议必填什么」。
-// 依据：Graylog 也是按输入类型校验 configuration，而不是给每种类型加固定列。
+// 协议专属设置按类型校验，而不是给每种类型加固定列：加协议不应改表结构。
 func TestInputConfigurationIsValidatedPerProtocol(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
