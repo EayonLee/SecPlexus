@@ -13,6 +13,45 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - **syslog 无身份，绑定必须来自服务端**。syslog 没有认证与 header，报文内任何 tenant 字段都是可伪造的（AiSOC `syslog/sink.go` 注释：tenant 只能来自预配置 token）。绑定方式 = 一个监听端口绑一个数据源，与「接入时由用户选择/登记接入点」的交互一致，不需要独立组件，也不依赖 SO_REUSEPORT（跨 OS/内核不可控，已否决）。
 - **解析库用现成的，不自研**：`leodido/go-syslog/v4`（MIT，RFC5424/3164 + RFC6587 两种分帧）、`ubyte-source/go-cef`（Apache 2.0，零分配，35+ 厂商样本）、`golang.org/x/text`（已在依赖树，GBK/GB18030/Big5/Shift-JIS）。Kafka 客户端 `segmentio/kafka-go`（AiSOC 同款，纯 Go）。
 
+## 来源字符集（乱码修复）
+
+映射里声明 `encoding`（如 `gbk`、`gb18030`、`big5`、`shift_jis`），引擎在**解析之前**把报文转成 UTF-8。
+
+| 取值 | 说明 |
+|---|---|
+| 空 / `utf-8` | 不解码，原样处理 |
+| `gbk` / `gb18030` | 国产设备常见 |
+| `big5` | 台系设备 |
+| `shift_jis` / `euc-jp` / `euc-kr` | 日韩设备 |
+| `windows-1252` / `iso-8859-1` | 西文兜底 |
+
+**为什么在解析之前**：按错误字符集解析出的字段是乱码，后续任何字段映射都救不回来。
+
+**为什么放在映射而不是通道**：与 Splunk 把 `CHARSET` 写在 `props.conf`（按 sourcetype）一致——字符集属于解析配置，换规则就该换字符集。
+
+未知字符集在 `Compile` 阶段被拒绝，不会等到运行期第一条报文才失败。
+
+## 死信 topic（解析失败事件分流）
+
+解析失败事件固定发到 `kafka.parse_failure_topic`（默认 `spx.ingest.parse-failures`），正常事件发 `kafka.event_topic`（默认 `spx.ingest.events`）。两者都是必填配置，不再有「留空就混发」的语义——Splunk 同样把解析错误写进 `_internal` 而非业务索引。
+
+| 场景 | 行为 |
+|---|---|
+| 配置了死信 topic | 失败事件分流；`metadata.spx.parse.outcome` 仍随事件发布 |
+| 未配置 | 保持旧语义：同 topic + `parse.outcome` 区分 |
+
+依据：Splunk 的 `_internal` 索引与 Vector/Fluent Bit 的 isolated error output 都把"坏数据"与"正常数据"分成两条留存路径——混在一起会让坏数据占掉正常事件的保留期与带宽，也让下游过滤变成常态开销。
+
+重放：死信 topic 可被下游消费者重新投喂给 ingest（`kafka` 协议接入点指向该 topic），无需专门的补数工具。
+
+## 关于历史迁移里的旧名
+
+`00001_sources.sql`、`00002_table_comments.sql`、`00003_rename_to_inputs_and_mappings.sql` 三个迁移里仍出现 `sources` / `parse_rules` 等旧名，这是**故意的**：
+
+- 迁移是版本化历史记录，改已应用的文件会让数据库状态与代码不一致；
+- 00003 的作用正是把旧名改成新名，它必须同时写出旧名与新名；
+- 现行代码、API、文档与新增迁移一律只用新名（`inputs` / `mappings` / `protocol` / `parse.outcome`）。
+
 ## 术语表
 
 模型里的每个名字只表达一件事；同名不同义是缺陷，不是风格问题。
@@ -21,23 +60,23 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 |---|---|---|---|
 | **接入点** | `source` | 一条接入登记：传输方式 + 凭据/端口/topic + 绑定的解析规则 + 启用状态 | **不是**厂商适配器。拉取厂商 API 的适配器代码叫 **连接器（connector）**，属后续能力，不能与接入点同名 |
 | **解析规则** | `parse rule` | 线格式 + 字段映射 + severity/time 声明，编译后成为 `normalizer.Engine` | 不是“模板”（模板只做界面预填，不参与解析） |
-| **传输方式** | `transport` | `http` / `syslog` / `kafka` 三种接入方式 | 不是接收器实现，也不是依赖集合 |
+| **传输方式** | `protocol` | `http` / `syslog` / `kafka` 三种接入方式 | 不是接收器实现，也不是依赖集合 |
 | **接收器** | `receiver` | `httpchannel` / `syslogchannel` / `kafkachannel` 三个监听实现 | — |
 
-命名依据：Splunk 把配置按数据管道**阶段**拆开（`inputs.conf` 管输入、`props.conf`/`transforms.conf` 管解析）；Vector 把 `sources` 与 `transforms` 分成两个配置段，`transform` 用 `inputs` 引用 `source`。两家都把“从哪收”与“怎么解析”当作两类实体，因此这里也分两张表。
+命名依据：Splunk 把配置按数据管道**阶段**拆开（`inputs.conf` 管输入、`props.conf`/`transforms.conf` 管解析）；Vector 把 `inputs` 与 `transforms` 分成两个配置段，`transform` 用 `inputs` 引用 `source`。两家都把“从哪收”与“怎么解析”当作两类实体，因此这里也分两张表。
 
 ## 数据模型（第五组）
 
 两张表：传输方式与解析规则解耦，换规则不改接入，换接入不影响规则复用。
 
-### `ingest.sources`（接入点）
+### `ingest.inputs`（接入点）
 
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | `uuid` | 主键 | 事件回填为 `metadata.spx.source_id` |
 | `name` | `text` | 非空、唯一 | 展示名，同时作为 OCSF `metadata.log_name` |
-| `transport` | `text` | 非空，`CHECK IN ('http','syslog','kafka')` | 传输方式；**创建后不可变** |
-| `parse_rule_id` | `uuid` | 可空，`REFERENCES ingest.parse_rules(id) ON DELETE RESTRICT` | 空 = 通用接入（原文透传，`class_uid=6003`） |
+| `protocol` | `text` | 非空，`CHECK IN ('http','syslog','kafka')` | 传输方式；**创建后不可变** |
+| `mapping_id` | `uuid` | 可空，`REFERENCES ingest.mappings(id) ON DELETE RESTRICT` | 空 = 通用接入（原文透传，`class_uid=6003`） |
 | `token_digest` | `bytea` | 可空 | HTTP 令牌的 SHA-256 摘要；明文只在创建响应出现一次 |
 | `syslog_port` | `int` | 可空，`CHECK (syslog_port >= 1024)` | UDP 与 TCP 同端口 |
 | `kafka_brokers` | `text[]` | 可空 | 客户已有总线的 broker 列表 |
@@ -48,16 +87,16 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 约束：
 
 - **非法状态写不进去**（用 `CHECK`，不用应用层判断）：`transport='http'` 必须有 `token_digest`；`transport='syslog'` 必须有 `syslog_port` 且全表唯一（部分唯一索引）；`transport='kafka'` 必须有 `kafka_brokers` 与 `kafka_topic`。
-- `transport` 不可变：改协议意味着换一条接入点。
+- `protocol` 不可变：改协议意味着换一条接入点。
 - 删除仍被引用的解析规则时，数据库以 `ON DELETE RESTRICT` 拒绝，接口转 409。
 
-### `ingest.parse_rules`（解析规则）
+### `ingest.mappings`（解析规则）
 
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | `uuid` | 主键 | — |
 | `name` | `text` | 非空、唯一 | 展示名 |
-| `spec` | `jsonb` | 非空 | `normalizer.Rule` 的 JSON 形态；加载时用同一套三层校验编译 |
+| `definition` | `jsonb` | 非空 | `normalizer.Mapping` 的 JSON 形态；加载时用同一套三层校验编译 |
 | `version` | `int` | 非空，默认 1 | 每次改动自增；事件带 `metadata.spx.rule_version` 便于归因 |
 | `created_at` / `updated_at` | `timestamptz` | 非空，默认 `now()` | UTC |
 
@@ -70,7 +109,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 1. `ingest` 服务骨架：`src/apps/ingest`，Go + Gin，模块自有 `config.yaml`、迁移与启动，经 `iamclient` 接入 IAM。
 2. 三种通道：HTTP 接收、syslog 监听（UDP+TCP）、Kafka 消费转发，全部产出 OCSF 事件。
 3. 解析层：格式探测（JSON/CEF/KV/纯文本）+ 厂商 YAML 解析规则映射（dot-path、severity 值表、常量、时间/消息字段、`kind` 声明），未映射字段进 `unmapped`。
-4. 发布层：批量写唯一出口 topic `spx.ingest.event`，分区键为实体标识，背压阻塞不丢数据。**没有独立的隔离区 topic**：解析失败的事件照常发布到同一 topic，带 `metadata.parse_status = ok | error` 与原因码，已解析字段与原文都保留，下游（CK/correlator）按 parse_status 过滤即可。
+4. 发布层：批量写唯一出口 topic `spx.ingest.event`，分区键为实体标识，背压阻塞不丢数据。**没有独立的隔离区 topic**：解析失败的事件照常发布到同一 topic，带 `metadata.parse.outcome = ok | error` 与原因码，已解析字段与原文都保留，下游（CK/correlator）按 parse.outcome 过滤即可。
 5. 数据源注册（sources）最小闭环：HTTP token、syslog 端口绑定、Kafka topic 绑定；通道类型与解析规则在注册时落定。
 6. 可观测：结构化日志 + 指标（接收速率、**解析失败率**、映射告警、发布延迟/失败）。
 
@@ -98,13 +137,13 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - `POST /api/v1/ingest/events/{source_id}`，鉴权 `Authorization: Bearer <ingest token>`（per-source，SHA-256 摘要存储，常数时间比较）。
 - 请求体上限 10 MiB（可配）；超限 413。数组批量上限 1000 条。
 - 限流 per-source：默认 50 req/s、burst 200（Redis 计数；Redis 故障时**拒绝**不放行，与 IAM 登录限流同语义）。
-- 成功返回 `202`，正文为受理计数；解析与发布在响应之后异步完成，解析失败不改写事件流（事件带 `parse_status=error` 与 `parse_error{stage,reason,message}`），不回传错误给设备（设备重推由去重层兜底）。
+- 成功返回 `202`，正文为受理计数；解析与发布在响应之后异步完成，解析失败不改写事件流（事件带 `parse.outcome=error` 与 `parse_error{stage,reason,message}`），不回传错误给设备（设备重推由去重层兜底）。
 - Content-Type 只接受 `application/json` 与 `text/plain`；其余 415。
 
 ### 通道二：syslog
 
 - 监听器在启动时按已注册的 syslog 接入点逐一绑定（UDP 与 TCP 同端口）；一个端口绑定一个 source，报文内不读任何身份字段。
-- 端口绑定关系存 sources 注册表，来自 Console 管理接口；ingest 周期刷新（默认 10s）+ SIGHUP 立即重载。端口变更通过热重载完成，不重启进程。
+- 端口绑定关系存 inputs 注册表，来自 Console 管理接口；ingest 周期刷新（默认 10s）+ SIGHUP 立即重载。端口变更通过热重载完成，不重启进程。
 - RFC5424 / RFC3164 / RFC6587（八位组计数与非透明两种分帧）自动识别；单条上限 64 KiB，超限截断记 warning。
 - CEF 前缀自动识别并路由到对应解析规则；纯 syslog 走 KV/文本解析。
 - UDP 无连接语义，永不向发送方回错误；TCP 侧解析失败仅计数，不断开正常连接。
@@ -128,7 +167,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 ```
 原始字节 → 【第 1 层：线格式解析 wire parser】→ 扁平 map
-         → 【第 2 层：规则映射 rule mapping】  → OCSF 事件 + parse_status
+         → 【第 2 层：规则映射 rule mapping】  → OCSF 事件 + parse.outcome
 ```
 
 第 1 层把字节变成扁平 map，不含任何 OCSF 知识；第 2 层把扁平 map 投影到 OCSF，不含任何线格式知识。两层各自独立测试、独立复用。
@@ -147,12 +186,12 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
-- **OCSF 必填属性与私有簿记分家（审查修订，2026-11-15）**：`ocsf/ocsf-schema` 的 `events/base_event.json` 把 `class_uid`、`severity_id`、`category_uid`、`type_uid`、`activity_id`、`metadata` 标为 `required`，`objects/metadata.json` 又要求 `metadata.version`（OCSF schema 版本）与 `metadata.product`。产出事件据此补齐：`category_uid = class_uid/1000`、`type_uid = class_uid*100 + activity_id`（未声明活动时用 OCSF 的 `0` Unknown）、`metadata.version` 与 `metadata.product` 由引擎盖章。**我方簿记（`source_id`/`parse_status`/`parse_error`/`truncated`/`original_bytes`）放在 `metadata.spx` 扩展命名空间**，不占用 OCSF 标准属性；事件标识映射到 `metadata.uid`。规则若已写 `metadata.*` 则合并保留，不覆盖。
-- **设备接入与管理面是两条协议边界（审查修订，2026-11-15）**：设备推送（`/api/v1/ingest/events/:connector_id`）**不得继承**管理面的 `middleware.InputBoundary`——后者是给浏览器与管理 API 的 32 KiB + `application/json` 边界，套在设备推送上会把 10 MiB 配置压成 32 KiB、并拒绝设备常用的 `text/plain`。两条边界共用同一监听端口，由 `router.RootHandler` 按路径前缀分流。
+- **OCSF 必填属性与私有簿记分家（审查修订，2026-11-15）**：`ocsf/ocsf-schema` 的 `events/base_event.json` 把 `class_uid`、`severity_id`、`category_uid`、`type_uid`、`activity_id`、`metadata` 标为 `required`，`objects/metadata.json` 又要求 `metadata.version`（OCSF schema 版本）与 `metadata.product`。产出事件据此补齐：`category_uid = class_uid/1000`、`type_uid = class_uid*100 + activity_id`（未声明活动时用 OCSF 的 `0` Unknown）、`metadata.version` 与 `metadata.product` 由引擎盖章。**我方簿记（`source_id`/`parse.outcome`/`parse_error`/`truncated`/`original_bytes`）放在 `metadata.spx` 扩展命名空间**，不占用 OCSF 标准属性；事件标识映射到 `metadata.uid`。规则若已写 `metadata.*` 则合并保留，不覆盖。
+- **设备接入与管理面是两条协议边界（审查修订，2026-11-15）**：设备推送（`/api/v1/ingest/events/:input_id`）**不得继承**管理面的 `middleware.InputBoundary`——后者是给浏览器与管理 API 的 32 KiB + `application/json` 边界，套在设备推送上会把 10 MiB 配置压成 32 KiB、并拒绝设备常用的 `text/plain`。两条边界共用同一监听端口，由 `router.RootHandler` 按路径前缀分流。
 - **解析失败的三层表达（对照 Elastic 与 Vector）**：失败原因拆成三个字段回答三个问题——`stage`（decode/map/limit，哪一层失败）、`reason`（稳定枚举：no_rule / format_mismatch / truncated / engine_panic，供聚合告警）、`message`（人类可读细节，供排查）。**原因码与描述必须分开**：Elastic 用 `event.kind=pipeline_error` + `error.message` + processor tag，Vector 要求错误事件带机器可读的 `error_type` 标签；混成一个字符串则既不能聚合也不能排查。注意 Splunk 的做法相反——它不给事件加解析状态，错误只进 `_internal` 索引；我们不采用，因为事件存储需要能按解析质量做看板。
 - **截断不覆盖规则产出的分类**：失败事件只在缺失字段上兜底（`class_uid`、`severity_id`、`time`、`message`），已解析出的字段与规则声明的类一律保留——头部完整的 CEF 仍属 2004，覆盖成通用类会让下游按 class_uid 路由时找不到它。
 - **报文大小上限与截断语义（证据驱动）**：行业默认值各不相同——RFC5424 要求接收方 **MUST 支持 480 字节**、**SHOULD 支持 2048**，且规定「若截断，MUST 截在末尾」；RFC5426 对 UDP 的 IPv4 要求 480、IPv6 要求 1180；rsyslog 默认 **8 KiB**（`$MaxMessageSize`，官方注明不要低于 1k）；Splunk 默认 **10 000 字节/行**（`TRUNCATE`，0 表示永不截断）；Vector 默认 **102 400 字节**（`max_length`）。我们的取值：syslog 单条 **64 KiB**（远高于各规范下限，覆盖含结构化数据的 Windows 事件日志），HTTP 请求体 **10 MiB**（对齐 Splunk 事件量级与常见批量推送），Kafka 单条由 broker 的 `message.max.bytes` 约束。
-- **截断必须可观测，且不得伪装成解析成功**：截断不只写日志，事件元数据写入 `metadata.truncated=true` 与 `metadata.original_bytes`；同时该事件的 `parse_status` **强制为 error**（原因码 `truncated`）。理由是结构化格式在中间被切断后，剩余字段看起来完全合法却缺了尾部字段——CEF 的 `src`/`dst` 恰好在扩展区末尾，把半条 CEF 当成功解析会产出看似正常实则错误的字段。RFC5424 允许「截断」或「丢弃」，我们选择截断并显式标注，兼顾可排查与可追责。
+- **截断必须可观测，且不得伪装成解析成功**：截断不只写日志，事件元数据写入 `metadata.truncated=true` 与 `metadata.original_bytes`；同时该事件的 `parse.outcome` **强制为 error**（原因码 `truncated`）。理由是结构化格式在中间被切断后，剩余字段看起来完全合法却缺了尾部字段——CEF 的 `src`/`dst` 恰好在扩展区末尾，把半条 CEF 当成功解析会产出看似正常实则错误的字段。RFC5424 允许「截断」或「丢弃」，我们选择截断并显式标注，兼顾可排查与可追责。
 - **持续化验证（语料 + 模糊测试）**：解析层的形态回归由 `internal/parser/testdata/corpus/` 的语料库守护，按「模式 + 参数」组织变体（KV 的默认分隔符与冒号逗号是两套变体），每条样本走真实的 `Split → Parse` 流程；同一批语料同时是 Go 原生模糊测试的种子（`FuzzParseEveryMode`、`FuzzSplitNeverPanics`、`FuzzSplitFrames`、`FuzzFlattenNeverPanics`）。持续测试的公共性质：不 panic、零字段不得返回成功、分帧必须有界且推进、单帧不超上限。实测 30 秒完成 213 万次执行、零违规。语料可扩充的公开数据集见 `testdata/corpus/README.md`（Loghub、Azure Sentinel Sample Data、OCSF schema events、panw-fw-samples、log-zoo），导入时需注明来源与许可。
 - **event_id 语义（审查修订）**：UUIDv5 按（接入点, 接收序号, 原始字节）计算——内容相同的重复事件（暴力破解的第 1 次与第 50 次尝试）是独立事件，绝不能被 ID 去重吞掉；重试去重由查询层按（接入点, 内容, 时间窗）处理。
 - **未映射字段脱敏（审查修订）**：unmapped 里命中敏感名单（password/token/api_key/secret/cookie/credential 等，分隔符归一后包含匹配）的值替换为 `[REDACTED]`，键名保留供规则作者发现；设备日志里的凭证不得进入事件存储。
@@ -166,16 +205,16 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - **批处理贯穿全链**：接收→解析→发布全程按批流转（batch 500 条或 2 秒先到为准）。5w EPS 下每批 500 条 = 100 批/秒，每批一次 Kafka produce 调用（摊薄 syscall 与网络往返）。
 - **零分配热路径**：sync.Pool 复用扁平 map 与 OCSF map；字符串字段引用原始字节切片（[]byte → string 零拷贝转换 unsafe 仅限标准模式已支持的场合，默认用 string(bytes) 让编译器优化）；正则预编译缓存 *regexp.Regexp，运行期零编译。GC 目标：稳态下 < 10% CPU 花在 GC。
 - **正则安全**：Go regexp 是 RE2 线性引擎，无灾难性回溯——恶意样本不会拖垮 worker（结构性优势，不需要超时机制）。
-- **panic 隔离**：每批（非每条）包 recover——单批坏消息只丢该批的 parse_status，worker 不崩。批内逐条解析失败已由 error 返回值覆盖，panic 是引擎 bug 兜底。
+- **panic 隔离**：每批（非每条）包 recover——单批坏消息只丢该批的 parse.outcome，worker 不崩。批内逐条解析失败已由 error 返回值覆盖，panic 是引擎 bug 兜底。
 - **流式解码**：NDJSON 用 json.Decoder 逐条解码，不整包 Unmarshal；大 body 不翻倍占内存。
 - **分发 O(1)**：Parser 注册为 map[string]Parser（Parser interface { Parse(raw []byte) (map[string]any, error) }），新增模式实现接口注册即可。
 - **优雅停机顺序**：停接收（通道关闭）→ 排空在途解析 → 发布剩余批次 → 提交 Kafka 位移 → 退出。禁止直接退出丢在途数据。
 - **资源上限**：worker goroutine 数与 channel 缓冲可配（`SPX_INGEST_WORKERS`/`SPX_INGEST_BUFFER`）；单条上限 64 KiB（syslog）/10 MiB（HTTP）已定；**不落盘原则不变**——Kafka 是唯一缓冲层。
 - **背压语义不变**：Kafka 不可用阻塞接收，不丢数据。
-- **可用性**：Kafka 不可用时接收阻塞（已有）；解析引擎 bug 只影响 parse_status 不丢事件（已有）；单 worker panic 由 recover 兜底并重启该 worker（worker 池模式：panic 后向池重新提交 worker）。健康检查暴露 workers/busy/batchBacklog 三个指标。
+- **可用性**：Kafka 不可用时接收阻塞（已有）；解析引擎 bug 只影响 parse.outcome 不丢事件（已有）；单 worker panic 由 recover 兜底并重启该 worker（worker 池模式：panic 后向池重新提交 worker）。健康检查暴露 workers/busy/batchBacklog 三个指标。
 - **可维护性**：五模式各自一个文件（parser/json.go、parser/cef.go、parser/kv.go、parser/regex.go、parser/delim.go）+ registry.go 注册 + parser_test.go 表驱动；新增模式 = 新文件 + 一行注册，不改既有代码（开闭原则）。
 
-**样本驱动校验**：解析规则必须携带多条真实样本（规则内嵌 `samples` 数组），保存与加载时全部样本逐条过解析引擎，任何一条失败即拒绝——规则质量由样本守护，不靠人眼。「通用接入」= 不挂规则运行引擎：只做格式探测与原文透传，事件带 parse_status=error（原因码 format_mismatch），可查询、后续可换正式解析规则。
+**样本驱动校验**：解析规则必须携带多条真实样本（规则内嵌 `samples` 数组），保存与加载时全部样本逐条过解析引擎，任何一条失败即拒绝——规则质量由样本守护，不靠人眼。「通用接入」= 不挂规则运行引擎：只做格式探测与原文透传，事件带 parse.outcome=error（原因码 format_mismatch），可查询、后续可换正式解析规则。
 
 厂商解析规则（YAML，仓库内置、随二进制分发）：
 
@@ -213,10 +252,10 @@ constants:
 
 ### 解析状态（无隔离区）
 
-- **所有事件进同一个 `spx.ingest.event`**。事件携带 `metadata.parse_status = ok | error` 与 `metadata.parse_errors[]`（字段 + 原因码：`format_mismatch`/`source_missing`/`severity_unmapped`/`time_invalid`/`oversize_truncated`）。
-- 解析异常的事件**不是废数据**：能解析出哪些字段就有哪些字段，原文保留在 message/unmapped，照样可查询；只是解析状态为 error，大部分业务按 `parse_status=ok` 过滤即可。
-- ClickHouse 落库（correlator 计划）后 parse_status 是普通可过滤字段，不单独建库表。
-- 指标：**解析失败率**（parse_status=error 的事件占比），按接入点与原因码维度可下钻。
+- **所有事件进同一个 `spx.ingest.event`**。事件携带 `metadata.parse.outcome = ok | error` 与 `metadata.parse_errors[]`（字段 + 原因码：`format_mismatch`/`source_missing`/`severity_unmapped`/`time_invalid`/`oversize_truncated`）。
+- 解析异常的事件**不是废数据**：能解析出哪些字段就有哪些字段，原文保留在 message/unmapped，照样可查询；只是解析状态为 error，大部分业务按 `parse.outcome=ok` 过滤即可。
+- ClickHouse 落库（correlator 计划）后 parse.outcome 是普通可过滤字段，不单独建库表。
+- 指标：**解析失败率**（parse.outcome=error 的事件占比），按接入点与原因码维度可下钻。
 
 ### 数据源注册（sources）
 
@@ -277,7 +316,7 @@ constants:
 | 发布：500 条 / 2s 批量 | 详情「发布」页签 |
 | 发布：Kafka 不可用则背压不丢 | 「发布」页签背压行；背压发生时列表横幅报警 |
 | 确定性 `event_id`（UUIDv5） | 第 2 步与「发布」页签均标注来源 |
-| 解析状态 parse_status + 原因码（无隔离区） | 数据接入页 KPI「解析失败率」；「收到的消息」行内 parse ok/parse error 与原因码 |
+| 解析状态 parse.outcome + 原因码（无隔离区） | 数据接入页 KPI「解析失败率」；「收到的消息」行内 parse ok/parse error 与原因码 |
 | 可观测：接入点运行状况／事件吞吐／解析失败率／24h 事件量环比 | 数据接入页顶部指标卡（沿用独立页时的 stat+sparkline 布局）+ 列表「最近收到」子行 |
 | connectors 列表/启停/换令牌/换绑定 | 列表行内启停；详情概览可轮换令牌、重载绑定 |
 | 解析规则加载即校验，非法解析规则启动失败 | 解析规则详情「校验：通过」并注明校验范围 |
@@ -355,7 +394,7 @@ constants:
 
 **解析引擎（代码，不自研 DSL）**：
 
-- 引擎 = Go 包 `internal/normalizer` 的求值器：格式探测 → dot-path 读写 → severity 值表归一 → 时间格式解析 → unmapped 收集 → parse_status/parse_errors 标注。
+- 引擎 = Go 包 `internal/normalizer` 的求值器：格式探测 → dot-path 读写 → severity 值表归一 → 时间格式解析 → unmapped 收集 → parse.outcome/parse_errors 标注。
 - **不引入 VRL/Lua/表达式语言**。行业事实：Vector 用 VRL（Rust 编译进二进制，Go 无法复用）；Fluent Bit 用 Lua（图灵完备，审计面大）；Logstash filter 是 JRuby。我们的声明式 YAML + Go 求值器覆盖全部 18 家场景（spec 已排除图灵完备 DSL），这是**有意的能力边界**，不是缺失。
 - 库依赖维持原判：`leodido/go-syslog/v4`（RFC 解析）、`ubyte-source/go-cef`（CEF）、KV 自写（多分隔符探测）。grok 场景（`elastic/go-grok`）仅在真实样本证明需要时引入。
 

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
+
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
@@ -16,16 +18,19 @@ import (
 
 // Options 是 Kafka 生产者参数。
 type Options struct {
-	Brokers []string      // broker 地址列表。
-	Topic   string        // 唯一发布 topic。
-	Timeout time.Duration // 单次生产的超时；默认 10 秒。
+	Brokers           []string       // broker 地址列表。
+	EventTopic        string         // 归一化成功事件的 topic。
+	ParseFailureTopic string         // 解析失败事件的 topic。
+	Security          kafka.Security // 传输与身份安全配置。
+	Timeout           time.Duration  // 单次生产的超时；默认 10 秒。
 }
 
 // Kafka 是 pipeline.Publisher 的 Kafka 实现。
 type Kafka struct {
-	client  *kgo.Client
-	topic   string
-	timeout time.Duration
+	client            *kgo.Client
+	eventTopic        string
+	parseFailureTopic string
+	timeout           time.Duration
 }
 
 // NewKafka 创建生产者并校验连通性。
@@ -34,7 +39,7 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 	if len(options.Brokers) == 0 {
 		return nil, errors.New("kafka brokers are required")
 	}
-	if options.Topic == "" {
+	if options.EventTopic == "" {
 		return nil, errors.New("kafka topic is required")
 	}
 
@@ -43,16 +48,23 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		timeout = 10 * time.Second
 	}
 
-	client, err := kgo.NewClient(
+	securityOptions, err := kafka.Options(options.Security)
+	if err != nil {
+		return nil, err
+	}
+
+	// 等所有同步副本确认：单副本确认在 broker 掉盘时会丢事件。
+	// franz-go 默认就是 -1，这里显式钉住——数据持久性决策不依赖库的默认值。
+	// 幂等写入同样是默认开启的，无需额外选项；重试不会造成重复。
+	clientOptions := append([]kgo.Opt{
 		kgo.SeedBrokers(options.Brokers...),
-		// 等所有同步副本确认：单副本确认在 broker 掉盘时会丢事件。
-		// franz-go 默认就是 -1，这里显式钉住——数据持久性决策不依赖库的默认值。
-		// 幂等写入同样是默认开启的，无需额外选项；重试不会造成重复。
 		kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.ProducerBatchMaxBytes(4<<20),
+		kgo.ProducerBatchMaxBytes(4 << 20),
 		kgo.RecordRetries(5),
 		kgo.ProduceRequestTimeout(timeout),
-	)
+	}, securityOptions...)
+
+	client, err := kgo.NewClient(clientOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +78,7 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		return nil, fmt.Errorf("kafka is unreachable: %w", err)
 	}
 
-	return &Kafka{client: client, topic: options.Topic, timeout: timeout}, nil
+	return &Kafka{client: client, eventTopic: options.EventTopic, parseFailureTopic: options.ParseFailureTopic, timeout: timeout}, nil
 }
 
 // Publish 同步发送一批事件；返回 nil 表示全部已被 Kafka 确认。
@@ -81,7 +93,7 @@ func (k *Kafka) Publish(ctx context.Context, events []pipeline.Event) error {
 	for index := range events {
 		event := &events[index]
 		records = append(records, &kgo.Record{
-			Topic: k.topic,
+			Topic: k.topicFor(event),
 			Key:   []byte(event.PartitionKey),
 			Value: event.Body,
 		})
@@ -96,6 +108,18 @@ func (k *Kafka) Publish(ctx context.Context, events []pipeline.Event) error {
 	}
 
 	return nil
+}
+
+// topicFor 选择事件应该发到哪个 topic。
+//
+// 单独成函数是为了能直接测试分流规则：构造真实 Kafka 客户端代价太高，
+// 而"失败事件去哪"是必须被钉住的行为。
+func (k *Kafka) topicFor(event *pipeline.Event) string {
+	if event.DeadLetter && k.parseFailureTopic != "" {
+		return k.parseFailureTopic
+	}
+
+	return k.eventTopic
 }
 
 // Close 冲刷未完成的生产请求并关闭连接。

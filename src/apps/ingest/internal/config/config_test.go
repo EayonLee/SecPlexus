@@ -27,7 +27,7 @@ func configFile(t *testing.T) string {
 // serveEnv 提供运行服务所需的必填环境变量。
 func serveEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("SPX_KAFKA_BROKERS", "127.0.0.1:9092")
+	t.Setenv("SPX_INGEST_KAFKA_BROKERS", "127.0.0.1:9092")
 }
 
 func TestConfigurationPrecedence(t *testing.T) {
@@ -43,7 +43,7 @@ func TestConfigurationPrecedence(t *testing.T) {
 	}
 
 	// 通道与 topic 的默认值来自 YAML，不来自 Go 代码。
-	if cfg.Kafka.Topic != "spx.ingest.event" {
+	if cfg.Output.Kafka.EventTopic != "spx.ingest.events" {
 		t.Fatal("incorrect kafka topic default")
 	}
 	if cfg.IAM.BaseURL != "http://127.0.0.1:8081" {
@@ -89,7 +89,7 @@ func TestCheckConfigRequiresKafkaBrokers(t *testing.T) {
 // 管理 API 落地前 token 不强制，但填了就必须是合法格式——避免部署期埋下无效凭证。
 func TestLoadRejectsMalformedIAMToken(t *testing.T) {
 	file := configFile(t)
-	t.Setenv("SPX_KAFKA_BROKERS", "127.0.0.1:9092")
+	t.Setenv("SPX_INGEST_KAFKA_BROKERS", "127.0.0.1:9092")
 	t.Setenv("SPX_INGEST_IAM_TOKEN", "short")
 
 	if _, err := Load(file); err == nil || !strings.Contains(err.Error(), "32–512 bytes") {

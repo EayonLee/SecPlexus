@@ -29,9 +29,14 @@ type Service struct {
 func (s *Service) Authorize(ctx context.Context, action string) (decision iamclient.CapabilityDecision, err error) {
 	ctx = logging.With(ctx, "operation", "iam.authorize", "action", action)
 	started := time.Now()
+	// 被拒主体与被拒分支必须可诊断：只有 action 的拒绝日志无法回答"谁缺什么"。
+	var subject string
+	var deniedBy error
 	defer func() {
 		if err != nil || !decision.Allowed {
-			logging.From(ctx).Warn("Permission check denied", "event", "iam.authorization_rejected", "duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
+			logging.From(ctx).Warn("Permission check denied", "event", "iam.authorization_rejected",
+				"user_id", subject, "reason", denialReason(deniedBy),
+				"duration_ms", time.Since(started).Milliseconds(), "error", logging.Error(err))
 		} else {
 			logging.From(ctx).Debug(
 				"Permission check allowed",
@@ -45,10 +50,16 @@ func (s *Service) Authorize(ctx context.Context, action string) (decision iamcli
 	err = s.Store.Transaction(ctx, func(tx *sql.Tx) error {
 		p, err := s.resolve(ctx, tx)
 		if err != nil {
+			deniedBy = err
+
 			return err
 		}
 
+		subject = p.UserID
+
 		if err := s.authorizeTx(ctx, tx, p, action); err != nil {
+			deniedBy = err
+
 			return err
 		}
 
@@ -92,6 +103,14 @@ func (s *Service) authorizeTx(ctx context.Context, tx *sql.Tx, p iamclient.Princ
 	if err != nil {
 		return err
 	}
+
+	// 基线角色：所有已登录用户共享的最小读取权限，来自数据库而非代码分支。
+	baseline, err := repository.BaselinePermissions(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	permissions = append(permissions, baseline...)
 
 	now, err := repository.DatabaseTime(ctx, tx)
 	if err != nil {
@@ -199,4 +218,20 @@ func (s *Service) Manage(ctx context.Context, action, requestID, targetType stri
 		return nil
 	})
 	return err
+}
+
+// denialReason 把拒绝原因归到稳定分类，便于日志检索与告警。
+func denialReason(err error) string {
+	switch {
+	case err == nil:
+		return "unknown"
+	case errors.Is(err, repository.ErrUnauthenticated):
+		return "unauthenticated"
+	case errors.Is(err, authorization.ErrDenied):
+		return "permission_denied"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "evaluation_failed"
+	}
 }

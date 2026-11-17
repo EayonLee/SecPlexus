@@ -291,3 +291,26 @@ group.POST("/inputs",
 4. 启动期校验路由声明的动作全部存在于权限目录；
 5. 数据库查询可直接回答：某用户拥有哪些权限、某权限被哪些角色持有。
 
+
+## 协议专属配置：为什么用 configuration jsonb 而不是固定列
+
+旧设计在 ingest.inputs 上给每种协议开专用列：token_digest、syslog_port、kafka_brokers、kafka_topic。
+问题不是「有协议专属字段」，而是把它们变成了固定列：加一种协议就要改表、改 CHECK、改索引。
+
+业界做法（已核对）：
+
+| 产品 | 表达方式 |
+|---|---|
+| Splunk inputs.conf | 按接入类型分 stanza，每类有自己的键（monitor、udp、HEC 的 jsonParser 等） |
+| Graylog | 输入模型是 type + configuration: Map<String,Object>（InputImpl.FIELD_CONFIGURATION），协议差异全在这个 map 里 |
+| Airflow | 连接表用 extra JSON 承载类型专属设置 |
+
+因此本平台改为：
+
+    protocol text NOT NULL CHECK (protocol IN ('http','syslog','kafka')),
+    configuration jsonb NOT NULL DEFAULT '{}'::jsonb
+
+- 协议专属设置放进 configuration（http: token_sha256；syslog: port；kafka: brokers/topic），形状由 Go 侧按 protocol 校验；
+- syslog 端口唯一性用表达式索引保证，不再需要专用列：ON ((configuration->>'port')) WHERE protocol = 'syslog'；
+- 表名与列名不再出现任何协议或厂商专名；
+- 迁移历史按「未部署、不做历史兼容」合并为单条基线 00001_init.sql。

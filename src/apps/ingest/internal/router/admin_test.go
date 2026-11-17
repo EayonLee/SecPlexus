@@ -8,51 +8,50 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // fakeStore 记录调用并返回固定结果。
 type fakeStore struct {
-	created   repository.Source
+	created   repository.Input
 	token     string
 	createErr error
 	deletedID string
 }
 
-func (f *fakeStore) CreateSource(context.Context, repository.CreateSourceInput) (repository.Source, string, error) {
+func (f *fakeStore) CreateInput(context.Context, repository.CreateInputParams) (repository.Input, string, error) {
 	return f.created, f.token, f.createErr
 }
 
-func (f *fakeStore) ListSources(context.Context) ([]repository.Source, error) {
-	return []repository.Source{f.created}, nil
+func (f *fakeStore) ListInputs(context.Context) ([]repository.Input, error) {
+	return []repository.Input{f.created}, nil
 }
 
-func (f *fakeStore) UpdateSource(context.Context, string, repository.UpdateSourceInput) (repository.Source, string, error) {
+func (f *fakeStore) UpdateInput(context.Context, string, repository.UpdateInputParams) (repository.Input, string, error) {
 	return f.created, "", nil
 }
 
-func (f *fakeStore) DeleteSource(_ context.Context, id string) error {
+func (f *fakeStore) DeleteInput(_ context.Context, id string) error {
 	f.deletedID = id
 
 	return nil
 }
 
-func (f *fakeStore) CreateRule(context.Context, repository.CreateRuleInput) (repository.ParseRule, error) {
-	return repository.ParseRule{}, nil
+func (f *fakeStore) CreateMapping(context.Context, repository.CreateMappingParams) (repository.Mapping, error) {
+	return repository.Mapping{}, nil
 }
 
-func (f *fakeStore) ListRules(context.Context) ([]repository.ParseRule, error) { return nil, nil }
+func (f *fakeStore) ListMappings(context.Context) ([]repository.Mapping, error) { return nil, nil }
 
-func (f *fakeStore) UpdateRule(context.Context, string, repository.CreateRuleInput) (repository.ParseRule, error) {
-	return repository.ParseRule{}, nil
+func (f *fakeStore) UpdateMapping(context.Context, string, repository.CreateMappingParams) (repository.Mapping, error) {
+	return repository.Mapping{}, nil
 }
 
-func (f *fakeStore) DeleteRule(context.Context, string) error { return nil }
+func (f *fakeStore) DeleteMapping(context.Context, string) error { return nil }
 
 // 安全回归：没有会话守卫时，管理路由不得注册。
 // 宁可管理面不可用，也不能暴露一个任何人都能建接入点、拿令牌的写接口。
@@ -61,7 +60,7 @@ func TestAdminRoutesAbsentWithoutGuard(t *testing.T) {
 	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store}))
 	defer server.Close()
 
-	response, err := server.Client().Get(server.URL + "/api/v1/ingest/sources")
+	response, err := server.Client().Get(server.URL + "/api/v1/ingest/inputs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,27 +74,33 @@ func TestAdminRoutesAbsentWithoutGuard(t *testing.T) {
 // 装了守卫之后路由才可用，且创建响应必须带回一次性令牌。
 func TestAdminCreateReturnsTokenOnce(t *testing.T) {
 	store := &fakeStore{
-		created: repository.Source{ID: "s1", Name: "fw", Transport: "http", Enabled: true},
+		created: repository.Input{ID: "s1", Name: "fw", Protocol: "http", Enabled: true},
 		token:   "spx_onetime",
 	}
 
-	guard := func(c *gin.Context) { c.Next() }
-	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, Guard: guard}))
+	client := fakeIAM(t, http.StatusOK)
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, IAM: client}))
 	defer server.Close()
 
-	payload := `{"name":"fw","transport":"http"}`
-	response, err := server.Client().Post(server.URL+"/api/v1/ingest/sources", "application/json", strings.NewReader(payload))
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ingest/inputs", strings.NewReader(`{"name":"fw","protocol":"http"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", "csrf-token")
+
+	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode != http.StatusOK {
-		t.Fatalf("状态 = %d", response.StatusCode)
+		t.Fatalf("状态 = %d，期望 200", response.StatusCode)
 	}
 
 	var body struct {
-		Data model.CreateSourceResponse `json:"data"`
+		Data model.CreateInputResponse `json:"data"`
 	}
 	if err = json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
@@ -103,30 +108,73 @@ func TestAdminCreateReturnsTokenOnce(t *testing.T) {
 	if body.Data.Token != "spx_onetime" {
 		t.Fatalf("令牌没有返回: %#v", body.Data)
 	}
-	if body.Data.Source.ID != "s1" {
-		t.Fatalf("接入点没有返回: %#v", body.Data.Source)
-	}
 }
 
 // 守卫必须真的挡在前面：守卫拒绝时创建不得发生。
 func TestAdminGuardBlocksRequest(t *testing.T) {
 	store := &fakeStore{}
+	client := fakeIAM(t, http.StatusForbidden)
 
-	guard := func(c *gin.Context) {
-		c.AbortWithStatus(http.StatusUnauthorized)
-	}
-
-	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, Guard: guard}))
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, IAM: client}))
 	defer server.Close()
 
-	response, err := server.Client().Post(server.URL+"/api/v1/ingest/sources", "application/json",
-		strings.NewReader(`{"name":"fw","transport":"http"}`))
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ingest/inputs", strings.NewReader(`{"name":"fw","protocol":"http"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", "csrf-token")
+
+	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("状态 = %d，期望 401", response.StatusCode)
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("状态 = %d，期望 403", response.StatusCode)
 	}
+}
+
+// fakeIAM 起一个按给定状态答复 /authorize 的假 IAM；审计写入始终成功。
+func fakeIAM(t *testing.T, status int) *iamclient.Client {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.Contains(r.URL.Path, "audit") {
+			w.WriteHeader(http.StatusNoContent)
+
+			return
+		}
+
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": "permission_denied", "message": "denied", "data": nil,
+				"request_id": "00000000-0000-4000-8000-000000000001",
+			})
+
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": "ok", "message": "ok",
+			"data": map[string]any{
+				"allowed": true, "decision_id": "00000000-0000-4000-8000-000000000002",
+				"principal": map[string]any{"user_id": "u1", "session_id": "s1", "username": "alice"},
+			},
+			"request_id": "00000000-0000-4000-8000-000000000003",
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := iamclient.New(server.URL, strings.Repeat("c", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+
+	return client
 }

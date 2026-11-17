@@ -57,7 +57,9 @@
     "settingsHome": "个人资料",
     "settingsNavigation": "设置导航",
     "audit": "审计日志",
-    "users": "用户管理"
+    "users": "用户管理",
+    "ingest": "数据接入",
+    "mappings": "解析映射"
   },
   "Appearance": {
     "title": "主题设置",
@@ -304,5 +306,50 @@
     "description": "一体化 AI 安全平台：防护、运营、响应。",
     "loginTitle": "登录 · SecPlexus",
     "dashboardTitle": "安全智驾工作台 · SecPlexus"
+  },
+  "Ingest": {
+    "title": "数据接入",
+    "create": "新建",
+    "name": "名称",
+    "namePlaceholder": "例如：边界防火墙",
+    "protocol": "协议",
+    "port": "端口",
+    "endpoint": "接入点",
+    "status": "状态",
+    "enabled": "已启用",
+    "disabled": "已停用",
+    "delete": "删除",
+    "none": "未配置",
+    "tokenOnce": "请立即复制该令牌。它只显示一次，之后无法找回。",
+    "loadFailed": "无法加载数据接入",
+    "loadFailedDescription": "请稍后重试或检查 ingest 服务。",
+    "ingest": "数据接入",
+    "rename": "重命名",
+    "save": "保存",
+    "cancel": "取消",
+    "toggle": "启用或停用",
+    "mapping": "解析映射",
+    "mappingNone": "无（原文透传）"
+  },
+  "Mappings": {
+    "title": "解析映射",
+    "create": "新建",
+    "save": "保存",
+    "cancel": "取消",
+    "edit": "编辑",
+    "delete": "删除",
+    "name": "名称",
+    "version": "版本",
+    "definition": "规则内容",
+    "namePlaceholder": "例如：cisco-asa",
+    "invalidJSON": "规则内容不是合法 JSON。",
+    "loadFailed": "无法加载解析映射",
+    "loadFailedDescription": "请稍后重试或检查 ingest 服务。",
+    "mappings": "解析映射",
+    "samples": "样本报文",
+    "samplesPlaceholder": "每行一条原始报文，与设备实际发送的一致",
+    "verify": "验证样本",
+    "samplesRequired": "至少添加一条样本报文。",
+    "matchedOf": "{total} 条样本中 {matched} 条解析成功"
   }
 }

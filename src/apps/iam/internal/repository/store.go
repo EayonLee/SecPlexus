@@ -207,8 +207,46 @@ func syncBuiltinRole(ctx context.Context, tx *sql.Tx) (uuid.UUID, error) {
 		`INSERT INTO iam.role_permissions(role_id,permission_key) SELECT $1,permission_key FROM iam.permissions WHERE status='active' ON CONFLICT DO NOTHING`,
 		id,
 	)
+	if err != nil {
+		return uuid.Nil, err
+	}
 
-	return id, err
+	return id, EnsureBaselineRole(ctx, tx)
+}
+
+// EnsureBaselineRole 幂等补齐基线角色及其读取权限。
+//
+// 放在 Seed 而不是迁移里：权限目录每次启动都会同步，新动作只有同步之后才存在，
+// 在迁移阶段按 join 授权会漏掉尚未入库的动作。
+// 基线角色不是 builtin——roles_single_builtin 唯一索引只允许一个内置角色。
+func EnsureBaselineRole(ctx context.Context, tx DB) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO iam.roles(id,name,description) VALUES(gen_random_uuid(),$1,$2) ON CONFLICT(name_normalized) DO NOTHING`,
+		AuthorizationBaselineRoleName, "每个已登录用户自动拥有；由授权流程隐式并入",
+	); err != nil {
+		return err
+	}
+
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO iam.role_permissions(role_id,permission_key)
+		SELECT r.id, p.permission_key
+		  FROM iam.roles r
+		  JOIN iam.permissions p ON p.permission_key = ANY($2) AND p.status='active'
+		 WHERE r.name_normalized = $1
+		ON CONFLICT DO NOTHING`, AuthorizationBaselineRoleName, BaselinePermissionKeys)
+
+	return err
+}
+
+// AuthorizationBaselineRoleName 是所有已登录用户共享的基线角色名。
+const AuthorizationBaselineRoleName = "authenticated"
+
+// BaselinePermissionKeys 是基线角色授予的权限：只允许读取，写操作必须显式授权。
+var BaselinePermissionKeys = []string{
+	"console.events.read",
+	"ingest.input.read",
+	"ingest.mapping.read",
+	"iam.users.read",
 }
 
 // VerifySchema 校验迁移版本兼容，不在服务启动时自动改表。
@@ -220,4 +258,33 @@ func (s *Store) VerifySchema(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// BaselinePermissions 读取基线角色（authenticated）授予的权限键。
+//
+// 基线角色不放进 builtin：roles_single_builtin 唯一索引只允许一个内置角色。
+// 授权流程把这里的权限与用户自身角色权限取并集，"登录即可"因而是数据而非代码分支。
+func BaselinePermissions(ctx context.Context, db DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT rp.permission_key
+		  FROM iam.role_permissions rp
+		  JOIN iam.roles r ON r.id = rp.role_id
+		 WHERE r.name_normalized = 'authenticated' AND rp.permission_key IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	items := make([]string, 0, 8)
+	for rows.Next() {
+		var key string
+		if err = rows.Scan(&key); err != nil {
+			return nil, err
+		}
+
+		items = append(items, key)
+	}
+
+	return items, rows.Err()
 }

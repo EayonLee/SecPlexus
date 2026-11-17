@@ -64,7 +64,7 @@ SPX_WEB_ORIGIN=
 
 - `HOST` 是调用方连接的 IP/域名；部署在其他机器时修改相应 HOST/PORT，所有调用方共同生效
 - `BIND_HOST` 是当前进程监听的本机地址，默认 `0.0.0.0`；不是调用目标，也不代替认证/防火墙。Go 默认只定义在所属 YAML；Web 默认由本模块加载器拥有
-- 端口通常共用 `SPX_IAM_PORT` / `SPX_CONSOLE_PORT`；确实需要本机监听不同端口时，用模块 `BIND_PORT` 显式覆盖，不改变调用方目标
+- 端口用 `SPX_<APP>_PORT`；服务只监听这一个端口，不再提供 `BIND_PORT` 二级覆盖
 - Web 监听端口只由 `SPX_WEB_PORT` 决定。`SPX_WEB_ORIGIN` 只供 IAM 的可信来源及 Cookie/CSRF 使用；Web 元信息不需要绝对地址，已移除相应依赖，不能决定本地监听端口；本机默认由 Web 端口生成 localhost origin
 - 应用服务全部 HTTP，HTTPS 和证书由 Nginx 等反向代理处理。模块没有 scheme、证书或 CA 文件配置；外部入口可以 HTTP 或 HTTPS
 
@@ -145,7 +145,6 @@ Web独立运行使用Next.js原生.env.example→.env.local；NEXT_PUBLIC_*不�
 | `SPX_IAM_HOST/PORT`、`SPX_CONSOLE_HOST/PORT` | 模板使用回环地址及 `8081` / `8080` | 服务位于其他机器时修改；不是防火墙规则 |
 | `SPX_WEB_ORIGIN` | 可空，本机推导 `http://localhost:<Web端口>` | 用服务器 IP、域名或 Nginx HTTPS 访问时配置真实入口，供 IAM 校验来源及设置 Cookie |
 | `SPX_POSTGRES_*`、`SPX_REDIS_*` | 见根模板；对应实例、库及账号必须已存在 | 使用已有远程基础设施时统一修改；不自动创建外部账号 |
-| 模块 `BIND_HOST/BIND_PORT` | YAML 默认监听 `0.0.0.0`，端口沿用公共服务端口；Web 可选 `SPX_WEB_BIND_HOST` | 只绑定某张网卡、回环地址或本机监听端口不同于连接端口时 |
 | 完整 DSN、日志及认证策略 | 字段旁 YAML 声明；高级项无需复制到根模板 | 需要驱动额外参数或调整运行策略时 |
 
 修改 `.env`、进程变量或 YAML 后重启受影响服务；Next 运行时配置也需重启。修改 IAM 可信来源需重启 IAM；修改服务连接位置需重启对应服务及其调用方。配置管理员身份/密码变更需同步重启全部 IAM 副本。Go 开发热更新只监听代码与 SQL，不把 YAML 变更当作已自动生效。
@@ -251,3 +250,53 @@ db:
 Web 保留模板的 `next/font/google` 字体注册方式，首次构建需要访问 `fonts.googleapis.com` 和 `fonts.gstatic.com`。出现 `Error while requesting resource`，并伴随字体内部模块解析失败时，先检查构建机器到字体服务的 DNS、代理与网络连通性；这不代表 IAM/Console 的地址或应用证书配置错误。依赖安装成功不等于字体下载成功，后续命中缓存的构建也不等于首次构建验收通过。服务运行仍使用 HTTP，不能通过给 IAM 增加证书或关闭 TLS 校验来处理构建时的外部网络问题。
 
 需要完全离线或受限网络构建时，必须另行确定字体资源随项目交付的方式及许可证，保持现有字体、字重与主题基准；本次没有替换字体或新增下载代理配置。
+
+## 配置命名规则（强制）
+
+键名必须回答两个问题：**这是谁的配置**、**它决定什么行为**。只写能力名（`topic`）或只写修饰词（`bind`）都不合格。
+
+### 三层归属
+
+| 层 | 位置 | 例 |
+|---|---|---|
+| 模块级 | 顶层 `app` / `db` / `cache` / `iam` / `logging` | `app.host` |
+| 能力级 | 顶层下按能力分段：`input` / `output` / `pipeline` / `pull` | `output.kafka.event_topic` |
+| 设备/业务级 | 段内按业务对象命名 | `input.http.max_body_bytes` |
+
+### 数据流向必须体现在键名里
+
+`input` 是数据进来的通道，`output` 是数据出去的目标。**不允许**把两者都塞进同一个 `kafka:` 段：
+Kafka 既可能是入站通道（消费客户总线）又可能是出站目标（发布 OCSF 事件），同名会让运维无法判断改的是哪一侧。
+
+### 主题/索引的命名
+
+格式 `<模块>.<业务>.<数据类别>`，且**按数据类别分开**，不共用 topic：
+
+- `spx.ingest.events` —— 归一化成功的 OCSF 事件；
+- `spx.ingest.parse-failures` —— 解析失败的数据。
+
+依据：Splunk 的 `outputs.conf` 按「目标组 + 业务索引」组织，解析错误写 `_internal` 而不是业务索引；
+Elastic Beats 用 `output.elasticsearch.index` 表达每类事件的去处。混发会让坏数据占掉正常事件的保留期。
+
+### 环境变量
+
+- 服务自有配置一律 `SPX_<APP>_<SEGMENT>_<KEY>`，不要出现没有模块前缀的 `SPX_KAFKA_*`；
+- 依赖地址（PostgreSQL/Redis/IAM）用共享名 `SPX_POSTGRES_*` / `SPX_REDIS_*` / `SPX_IAM_HOST`；
+- 每个服务只有一个地址：`SPX_<APP>_HOST` + `SPX_<APP>_PORT`，既用于绑定也用于调用方连接；
+  需要广泛监听时把 HOST 设为 `0.0.0.0`，但调用方配置必须用可连接地址；
+- `SPX_IAM_HOST` 是**调用方视角的目标地址**，不参与本进程绑定；
+- **部署必改项**（broker、topic、口令来源、证书路径）必须同时出现在 `.env.example`。
+
+### 共享库不绑定 Web 框架
+
+`iamclient` 只包含协议客户端（`Authorize`、`RecordAudit`、类型与常量），
+不 import 任何 Web 框架。gin 适配与审计编排在 `httpx/middleware`（`Guard`、`Session`）。
+
+依据：`golang.org/x/oauth2` 的 `Transport` 实现 `http.RoundTripper`、Kubernetes client-go
+只提供 net/http 客户端，框架适配都在使用方。这样 `iamclient` 可被 CLI、任务、其他框架复用。
+
+### 长连接重鉴权
+
+Console 的 SSE 流定期重新鉴权，间隔由 `stream.reauth_interval`（默认 30s）控制。
+依据：kube-apiserver 的 `--authorization-webhook-cache-unauthorized-ttl` 默认 30s——
+拒绝一侧要快（撤权生效时间），允许一侧可以更慢，因此取更严格的值。

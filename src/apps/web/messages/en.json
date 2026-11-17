@@ -57,7 +57,9 @@
     "settingsHome": "Profile",
     "settingsNavigation": "Settings navigation",
     "audit": "Audit log",
-    "users": "Users"
+    "users": "Users",
+    "ingest": "Data inputs",
+    "mappings": "Parse mappings"
   },
   "Appearance": {
     "title": "Appearance",
@@ -304,5 +306,50 @@
     "description": "One AI Security Platform: Protect, Operate, Respond.",
     "loginTitle": "Sign in · SecPlexus",
     "dashboardTitle": "Dashboard · SecPlexus"
+  },
+  "Ingest": {
+    "title": "Data inputs",
+    "create": "Create",
+    "name": "Name",
+    "namePlaceholder": "e.g. edge-firewall",
+    "protocol": "Protocol",
+    "port": "Port",
+    "endpoint": "Endpoint",
+    "status": "Status",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "delete": "Delete",
+    "none": "not configured",
+    "tokenOnce": "Copy this token now. It is shown once and cannot be retrieved later.",
+    "loadFailed": "Could not load data inputs",
+    "loadFailedDescription": "Retry later or check the ingest service.",
+    "ingest": "Data inputs",
+    "rename": "Rename",
+    "save": "Save",
+    "cancel": "Cancel",
+    "toggle": "Enable or disable",
+    "mapping": "Parse mapping",
+    "mappingNone": "none (passthrough)"
+  },
+  "Mappings": {
+    "title": "Parse mappings",
+    "create": "Create",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "delete": "Delete",
+    "name": "Name",
+    "version": "Version",
+    "definition": "Rule definition",
+    "namePlaceholder": "e.g. cisco-asa",
+    "invalidJSON": "Rule definition is not valid JSON.",
+    "loadFailed": "Could not load parse mappings",
+    "loadFailedDescription": "Retry later or check the ingest service.",
+    "mappings": "Parse mappings",
+    "samples": "Sample messages",
+    "samplesPlaceholder": "One raw message per line, exactly as the device sends it",
+    "verify": "Verify samples",
+    "samplesRequired": "Add at least one sample message.",
+    "matchedOf": "{matched} of {total} samples parsed"
   }
 }

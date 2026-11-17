@@ -1,17 +1,20 @@
 # Console 模块配置。
 #
 # 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
-# 每项写作 ${环境变量名-默认值}：环境变量未设置时用默认值。
+# 每项写作 ${环境变量名-默认值}：变量未设置时取默认值；
+# 写 ${变量名:-默认值} 表示空值也算未设置。
 # 本模块没有数据库和 Redis 配置——当前它只做"向 IAM 换授权结论"，还没有自有持久化业务，
 # 所以不建空库占位。实现案件等业务时再按模块自己的表增加。
 
-# ---- HTTP 监听 ----
-# HTTPS 由反向代理终止，本服务只监听明文 HTTP。
+# ---- 进程监听 -
+# 对外 HTTPS 由反向代理终止，本进程只监听明文 HTTP。
 app:
-  # 监听地址。0.0.0.0 = 所有网卡；127.0.0.1 = 只允许本机（前面有反向代理时用这个）。
-  host: "${SPX_CONSOLE_BIND_HOST-0.0.0.0}"
-  # 监听端口。BIND_PORT 是本进程实际绑定的端口；未设置时回退到 SPX_CONSOLE_PORT（调用方连接的目标端口）。
-  port: "${SPX_CONSOLE_BIND_PORT-${SPX_CONSOLE_PORT-8080}}"
+  # 本服务地址：既是本进程绑定的地址，也是调用方连接它的地址。
+  #   127.0.0.1 默认值，本机部署或前面有反向代理时使用。
+  #   0.0.0.0   容器内需要接受其他容器的连接时使用（由编排层限制暴露面）。
+  host: "${SPX_CONSOLE_HOST-127.0.0.1}"
+  # 监听端口：本进程实际监听的端口。调用方连接的也是这个端口，因此只在这里定义一次。
+  port: "${SPX_CONSOLE_PORT-8080}"
 
 # ---- 上游 IAM ----
 # Console 不读 IAM 的表、不导入 IAM 的内部包，全部通过 HTTP 契约访问。
@@ -26,21 +29,28 @@ iam:
   # 必须与 IAM config.yaml 里 service_clients.console.token 完全相同，否则所有请求会被 IAM 以 401 拒绝。
   token: "${SPX_CONSOLE_IAM_TOKEN-}"
 
-# ---- 日志 ----
-# 结构化 JSON 日志。容器部署建议 file 留空、只走 stdout，由容器运行时做轮转。
+# ---- 日志 -
+# 结构化 JSON 输出；审计事实不在这里，走 iam.audit_events。
 logging:
-  # 日志级别：debug / info / warn / error。生产用 info，排查问题临时改 debug。
+  # 最低级别：debug / info / warn / error。生产用 info；排查时临时调 debug，记得改回。
   level: "${SPX_CONSOLE_LOG_LEVEL-info}"
-  # 是否同时输出到 stdout。容器部署必须 true（否则日志丢失）。
+  # 是否输出到标准输出。容器部署保持 true，由运行时收集。
   stdout: "${SPX_CONSOLE_LOG_STDOUT-true}"
-  # 日志文件路径。容器里设为空字符串，只保留 stdout。
-  # 多个副本不能写同一个文件——会互相覆盖，每个副本要给不同路径或不写文件。
+  # 日志文件路径。留空 = 不写文件（容器里通常这样，只走 stdout）。
   file: "${SPX_CONSOLE_LOG_FILE-logs/console.log}"
-  # 单个日志文件最大体积（MB），超过就切分。仅在写文件时生效。
+  # 单个日志文件的最大体积（MB）。写满后按 max_backups 轮转。
   max_size_mb: "${SPX_CONSOLE_LOG_MAX_SIZE_MB-50}"
-  # 保留多少个历史日志文件。仅在写文件时生效。
+  # 保留的历史文件个数。磁盘紧张时先调小这里。
   max_backups: "${SPX_CONSOLE_LOG_MAX_BACKUPS-5}"
-  # 历史日志最长保留天数，超过就删除。仅在写文件时生效。
+  # 历史文件最长保留天数，超过即删除。
   max_age_days: "${SPX_CONSOLE_LOG_MAX_AGE_DAYS-14}"
-  # 是否压缩历史日志。仅在写文件时生效。
+  # 轮转后的历史文件是否压缩；压缩省磁盘、查询时需先解压。
   compress: "${SPX_CONSOLE_LOG_COMPRESS-true}"
+
+# ---- 事件流 ----
+# 长连接（SSE）建立后定期重新鉴权：撤权必须在可预期的时间内生效。
+stream:
+  # 重鉴权间隔。默认 30 秒，与 kube-apiserver 的
+  # authorization-webhook-cache-unauthorized-ttl(30s) 同一量级：
+  # 拒绝一侧要快，允许一侧可以更慢，因此取更严格的那个值。
+  reauth_interval: "${SPX_CONSOLE_STREAM_REAUTH_INTERVAL-30s}"

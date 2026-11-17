@@ -2,11 +2,17 @@
 package iamclient
 
 const (
-	PermissionIAMUsersRead   = "iam.users.read"
-	PermissionIAMUsersManage = "iam.users.manage"
-	PermissionIAMUsersReset  = "iam.users.reset"
-	PermissionIAMUsersRoles  = "iam.users.roles"
-	PermissionIAMRolesRead   = "iam.roles.read"
-	PermissionIAMRolesManage = "iam.roles.manage"
-	PermissionIAMAuditRead   = "iam.audit.read"
+	PermissionConsoleEventsRead  = "console.events.read"
+	PermissionIAMAuditRead       = "iam.audit.read"
+	PermissionIAMAuditWrite      = "iam.audit.write"
+	PermissionIAMRolesManage     = "iam.roles.manage"
+	PermissionIAMRolesRead       = "iam.roles.read"
+	PermissionIAMUsersManage     = "iam.users.manage"
+	PermissionIAMUsersRead       = "iam.users.read"
+	PermissionIAMUsersReset      = "iam.users.reset"
+	PermissionIAMUsersRoles      = "iam.users.roles"
+	PermissionIngestInputRead    = "ingest.input.read"
+	PermissionIngestInputWrite   = "ingest.input.write"
+	PermissionIngestMappingRead  = "ingest.mapping.read"
+	PermissionIngestMappingWrite = "ingest.mapping.write"
 )

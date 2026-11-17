@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -24,6 +25,11 @@ func Serve(ctx context.Context, servers ...*http.Server) error {
 		listener, err := listenConfig.Listen(ctx, "tcp", server.Addr)
 		if err != nil {
 			return err
+		}
+		// TLS 只是监听器的一层装饰：证书放在 server.TLSConfig 里，
+		// 监听、优雅停机、错误处理与明文完全共用同一条路径。
+		if server.TLSConfig != nil && len(server.TLSConfig.Certificates) > 0 {
+			listener = tls.NewListener(listener, server.TLSConfig)
 		}
 		listeners = append(listeners, listener)
 	}

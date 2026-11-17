@@ -11,7 +11,7 @@ import (
 // 回归：规则自己用掉的级别与时间字段不该出现在 unmapped 里。
 // unmapped 的用途是"规则漏映射了什么"，已消费字段混进去会淹没真正的问题。
 func TestUnmappedExcludesConsumedFields(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "consumed",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -44,7 +44,7 @@ func TestUnmappedExcludesConsumedFields(t *testing.T) {
 func TestCompileRejectsMalformedPaths(t *testing.T) {
 	for _, target := range []string{"x..y", ".x", "x.", "", " x", "x "} {
 		t.Run(target, func(t *testing.T) {
-			rule := normalizer.Rule{
+			rule := normalizer.Mapping{
 				ID:       "bad-path",
 				Parse:    parser.Spec{Mode: parser.ModeJSON},
 				FieldMap: map[string]string{"a": target},
@@ -59,7 +59,7 @@ func TestCompileRejectsMalformedPaths(t *testing.T) {
 
 // 回归：两个源字段写同一个目标时，map 遍历顺序会让结果不确定，必须拒绝。
 func TestCompileRejectsDuplicateTargets(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:    "dup-target",
 		Parse: parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{
@@ -75,7 +75,7 @@ func TestCompileRejectsDuplicateTargets(t *testing.T) {
 
 // 回归：目标路径互为前缀会让同一棵树被两种类型写入，必须拒绝。
 func TestCompileRejectsPrefixConflicts(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:    "prefix",
 		Parse: parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{
@@ -91,7 +91,7 @@ func TestCompileRejectsPrefixConflicts(t *testing.T) {
 
 // 常量路径同样要校验，否则错误只在生产事件里出现。
 func TestCompileRejectsMalformedConstantPath(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "bad-constant",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		Constants: map[string]any{"class_uid": 2004, "a..b": 1},
@@ -104,7 +104,7 @@ func TestCompileRejectsMalformedConstantPath(t *testing.T) {
 
 // 时间格式按声明顺序回退：第一个不匹配时用后面的。
 func TestTimeFormatsFallBackInOrder(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:       "time-fallback",
 		Parse:    parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{"ts": "metadata.event_ts"},
@@ -134,7 +134,7 @@ func TestTimeFormatsFallBackInOrder(t *testing.T) {
 
 // 级别字段缺失时记 warning 并落到 Unknown：OCSF 事件不允许缺级别。
 func TestMissingSeverityFieldWarnsAndDefaultsToUnknown(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "missing-severity",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		Severity:  normalizer.SeveritySpec{Field: "level", Values: map[string]int{"high": normalizer.SeverityHigh}},
@@ -161,7 +161,7 @@ func TestMissingSeverityFieldWarnsAndDefaultsToUnknown(t *testing.T) {
 
 // 没有未映射字段时不分配 unmapped（每事件省一次分配）。
 func TestUnmappedStaysNilWhenEverythingIsMapped(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "all-mapped",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -185,7 +185,7 @@ func TestUnmappedStaysNilWhenEverythingIsMapped(t *testing.T) {
 
 // 全链路：一次 NDJSON 报文经拆分、逐条解析与映射，产出三条带确定性 ID 的事件。
 func TestPipelineSplitParseApply(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:       "pipeline",
 		Parse:    parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{"src": "src_endpoint.ip", "level": "severity_raw"},

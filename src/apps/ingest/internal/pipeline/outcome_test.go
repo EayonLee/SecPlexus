@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // metadataOf 取出事件体里的 metadata。
@@ -33,7 +33,7 @@ func metadataOf(t *testing.T, body []byte) map[string]any {
 // 只给一个字符串时，聚合告警与人工排查只能二选一。
 func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
+	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`not json`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 		t.Fatal("metadata.spx 缺失")
 	}
 
-	parseError, ok := bookkeeping["parse_error"].(map[string]any)
+	parseError, ok := bookkeeping["parse.error"].(map[string]any)
 	if !ok {
 		t.Fatalf("缺少 parse_error: %#v", bookkeeping)
 	}
@@ -71,7 +71,7 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 // 未挂规则与格式不符是两件事：前者要补规则，后者要查报文。
 func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-generic", Transport: source.TransportHTTP}
+	entry := input.Entry{ID: "conn-generic", Protocol: input.ProtocolHTTP}
 
 	if err := line.Submit(context.Background(), entry, []byte("raw line"), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 // 回归：截断不能覆盖规则产出的 class_uid 与 severity_id。
 // 头部完整的 CEF 仍属于 2004，覆盖成通用类会让它落进错误分类。
 func TestTruncationKeepsRuleClassUID(t *testing.T) {
-	engine, err := normalizer.Compile(normalizer.Rule{
+	engine, err := normalizer.Compile(normalizer.Mapping{
 		ID:        "cef-rule",
 		Parse:     parser.Spec{Mode: parser.ModeCEF},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -103,7 +103,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	}
 
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-cef", Transport: source.TransportSyslog, Rule: engine}
+	entry := input.Entry{ID: "conn-cef", Protocol: input.ProtocolSyslog, Mapping: engine}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 90000, DroppedBytes: 20000}
 	if err = line.Submit(context.Background(), entry,
@@ -153,7 +153,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 // 截断说明要能说清"保留多少、原始多少"，否则运维无法判断丢了多少。
 func TestTruncationDetailReportsBytes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
+	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
 	meta := pipeline.Meta{Truncated: true, OriginalBytes: 100000, DroppedBytes: 34464}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), meta); err != nil {
@@ -174,7 +174,7 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 // activity_id、metadata 均为 required；objects/metadata.json 又要求 version 与 product。
 func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
+	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"10.0.0.7"}`), time.Now(), pipeline.Meta{}); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 	if !ok {
 		t.Fatalf("私有簿记未放进 metadata.spx: %#v", metadata)
 	}
-	if bookkeeping["source_id"] != "conn-1" || bookkeeping["parse_status"] != "ok" {
+	if bookkeeping["input_id"] != "conn-1" || bookkeeping["parse.outcome"] != "ok" {
 		t.Fatalf("metadata.spx = %#v", bookkeeping)
 	}
 }
@@ -230,7 +230,7 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 // 它们现在进 OCSF 的 unmapped 属性，且敏感键已脱敏。
 func TestUnmappedFieldsReachTheEvent(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
-	entry := source.Entry{ID: "conn-1", Transport: source.TransportHTTP, Rule: jsonRule(t)}
+	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
 	payload := `{"src":"10.0.0.7","password":"hunter2","vendor_note":"keep me"}`
 	if err := line.Submit(context.Background(), entry, []byte(payload), time.Now(), pipeline.Meta{}); err != nil {

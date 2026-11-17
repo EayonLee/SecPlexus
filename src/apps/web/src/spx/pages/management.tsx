@@ -11,6 +11,8 @@ import { RequireAccess } from "../components/access";
 import { ErrorState } from "../components/error-state";
 import { settingsPageFor } from "../iam/navigation";
 import { AuditPage } from "./audit";
+import { IngestPage } from "./ingest";
+import { MappingsPage } from "./mappings";
 import { RolesPage } from "./roles";
 import { UsersPage } from "./users";
 
@@ -26,6 +28,8 @@ export function ManagementPage({ pathname }: { pathname: string }) {
       <div className="@container/main flex flex-col gap-4 md:gap-6">
         {page.id === "roles" && <RolesPage />}
         {page.id === "users" && <UsersPage />}
+        {page.id === "ingest" && <IngestPage />}
+        {page.id === "mappings" && <MappingsPage />}
         {page.id === "audit" && <AuditPage />}
       </div>
     </RequireAccess>

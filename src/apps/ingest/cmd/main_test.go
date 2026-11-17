@@ -9,7 +9,7 @@ import (
 )
 
 func TestCheckConfigDoesNotConnectOrOpenLog(t *testing.T) {
-	t.Setenv("SPX_KAFKA_BROKERS", "127.0.0.1:9092")
+	t.Setenv("SPX_INGEST_KAFKA_BROKERS", "127.0.0.1:9092")
 	t.Setenv("SPX_INGEST_IAM_TOKEN", strings.Repeat("t", 32))
 	logfile := filepath.Join(t.TempDir(), "must-not-exist.log")
 	t.Setenv("SPX_INGEST_LOG_FILE", logfile)

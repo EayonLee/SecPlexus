@@ -42,6 +42,7 @@ func TestServeRejectsMissingSecurityBeforeOpeningLog(t *testing.T) {
 func TestCheckConfigHasNoRuntimeSideEffects(t *testing.T) {
 	t.Setenv("SPX_IAM_CSRF_KEY", strings.Repeat("c", 32))
 	t.Setenv("SPX_CONSOLE_IAM_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("SPX_INGEST_IAM_TOKEN", strings.Repeat("i", 32))
 	t.Setenv("SPX_POSTGRES_HOST", "127.0.0.1")
 	t.Setenv("SPX_POSTGRES_PORT", "1")
 	t.Setenv("SPX_REDIS_HOST", "127.0.0.1")

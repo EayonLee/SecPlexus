@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // Problem 描述某条接入点为何没能加载。
@@ -24,17 +25,16 @@ type Problem struct {
 	Reason   string // 人类可读原因，写进日志与 readiness 说明。
 }
 
-// LoadSources 从数据库编译出运行期的接入点集合。
+// LoadInputs 从数据库编译出运行期的接入点集合。
 //
 // 只取 enabled 的行：停用的接入点不该占用端口或消费组。
 // 任何一条规则编译失败都会让整次加载失败（Problems 非空即视为失败），
 // 调用方据此保留上一份成功配置。
-func LoadSources(ctx context.Context, pool *pgxpool.Pool) ([]source.Entry, []Problem, error) {
+func LoadInputs(ctx context.Context, pool *pgxpool.Pool) ([]input.Entry, []Problem, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT s.id, s.name, s.transport, s.token_digest, s.syslog_port,
-		       s.kafka_brokers, s.kafka_topic, r.spec
-		  FROM ingest.sources s
-		  LEFT JOIN ingest.parse_rules r ON r.id = s.parse_rule_id
+		SELECT s.id, s.name, s.protocol, s.configuration, r.definition
+		  FROM ingest.inputs s
+		  LEFT JOIN ingest.mappings r ON r.id = s.mapping_id
 		 WHERE s.enabled
 		 ORDER BY s.name`)
 	if err != nil {
@@ -44,31 +44,49 @@ func LoadSources(ctx context.Context, pool *pgxpool.Pool) ([]source.Entry, []Pro
 	defer rows.Close()
 
 	var (
-		entries  []source.Entry
+		entries  []input.Entry
 		problems []Problem
 	)
 
 	for rows.Next() {
 		var (
-			sourceID  string
-			name      string
-			transport string
-			token     []byte
-			port      *int32
-			brokers   []string
-			topic     *string
-			ruleRaw   []byte
+			sourceID      string
+			name          string
+			protocol      string
+			configuration []byte
+			ruleRaw       []byte
 		)
 
-		if err = rows.Scan(&sourceID, &name, &transport, &token, &port, &brokers, &topic, &ruleRaw); err != nil {
-			return nil, nil, fmt.Errorf("could not read source row: %w", err)
+		if err = rows.Scan(&sourceID, &name, &protocol, &configuration, &ruleRaw); err != nil {
+			return nil, nil, fmt.Errorf("could not read input row: %w", err)
 		}
 
-		entry := source.Entry{
-			ID:        sourceID,
-			Name:      name,
-			Transport: source.Transport(transport),
-			Kafka:     source.KafkaBinding{Brokers: brokers},
+		// configuration 里是协议专属设置；解码失败视为数据损坏而整次加载失败。
+		var decoded protocolConfiguration
+		if err = json.Unmarshal(configuration, &decoded); err != nil {
+			return nil, nil, fmt.Errorf("could not decode input configuration: %w", err)
+		}
+
+		var token []byte
+		if decoded.TokenSHA256 != "" {
+			if token, err = hex.DecodeString(decoded.TokenSHA256); err != nil {
+				return nil, nil, fmt.Errorf("could not decode input token digest: %w", err)
+			}
+		}
+
+		port := decoded.Port
+		brokers := decoded.Brokers
+		var topic *string
+		if decoded.Topic != "" {
+			value := decoded.Topic
+			topic = &value
+		}
+
+		entry := input.Entry{
+			ID:       sourceID,
+			Name:     name,
+			Protocol: input.Protocol(protocol),
+			Kafka:    input.KafkaBinding{Brokers: brokers},
 		}
 
 		if topic != nil {
@@ -84,7 +102,7 @@ func LoadSources(ctx context.Context, pool *pgxpool.Pool) ([]source.Entry, []Pro
 		}
 
 		if ruleRaw != nil {
-			engine, compileErr := compileRule(ruleRaw)
+			engine, compileErr := compileMapping(ruleRaw)
 			if compileErr != nil {
 				// 不中断遍历：把所有问题一次报全，运维一轮就能修完。
 				problems = append(problems, Problem{SourceID: sourceID, Reason: compileErr.Error()})
@@ -92,7 +110,7 @@ func LoadSources(ctx context.Context, pool *pgxpool.Pool) ([]source.Entry, []Pro
 				continue
 			}
 
-			entry.Rule = engine
+			entry.Mapping = engine
 		}
 
 		entries = append(entries, entry)
@@ -105,9 +123,9 @@ func LoadSources(ctx context.Context, pool *pgxpool.Pool) ([]source.Entry, []Pro
 	return entries, problems, nil
 }
 
-// compileRule 解析规则 JSON 并编译；失败时返回可读原因。
-func compileRule(raw []byte) (*normalizer.Engine, error) {
-	var spec ruleSpec
+// compileMapping 解析规则 JSON 并编译；失败时返回可读原因。
+func compileMapping(raw []byte) (*normalizer.Compiled, error) {
+	var spec mappingSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return nil, errors.New("rule spec is not valid JSON")
 	}

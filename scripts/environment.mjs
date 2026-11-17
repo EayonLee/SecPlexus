@@ -18,7 +18,17 @@ export function loadEnvironment(root, environment = process.env) {
     }
     throw new Error('Created .env from .env.example. Review the settings, then run the startup command again.');
   }
-  const values = { ...parseEnv(content), ...environment };
+  // 空值视为"未设置"：根 .env 是模板，未填写的密钥留空；
+  // 若让空串覆盖显式传入的进程环境，YAML 的 ${VAR-} 不会再用默认值兜底，
+  // 表现为"明明传了 token 却说缺失"。安全语义不变：缺失仍然拒绝启动。
+  // 只对密钥类丢弃空值：模板里留空的 token/key 不应覆盖显式传入的值。
+  // 其他键保留空值语义——例如把 *_LOG_FILE 设为空表示"不写文件"。
+  const secretSuffixes = ['_TOKEN', '_KEY', '_PASSWORD', '_SECRET'];
+  const values = {};
+  for (const [key, value] of Object.entries({ ...parseEnv(content), ...environment })) {
+    if (value === '' && key.startsWith('SPX_') && secretSuffixes.some((suffix) => key.endsWith(suffix))) continue;
+    values[key] = value;
+  }
   // Root .env paths are relative to the checkout; modules receive absolute paths.
   for (const [key, value] of Object.entries(values)) {
     if (key.startsWith('SPX_') && key.endsWith('_FILE') && value) values[key] = path.resolve(root, value);
@@ -38,6 +48,8 @@ export function moduleEnvironment(environment, module) {
     if (!key.startsWith('SPX_')) return !key.startsWith('NEXT_PUBLIC_');
     if (allowed.has(key)) return true;
     if (module === 'iam' && (key.startsWith('SPX_POSTGRES_') || key.startsWith('SPX_REDIS_'))) return true;
+    // IAM 需要校验每个 service client 的凭证：凡 <APP>_IAM_TOKEN 都属于它自己的配置。
+    if (module === 'iam' && key.endsWith('_IAM_TOKEN')) return true;
     if (module === 'ingest' && (key.startsWith('SPX_REDIS_') || key.startsWith('SPX_KAFKA_'))) return true;
     if (!key.startsWith(`SPX_${module.toUpperCase()}_`)) return false;
     return true;

@@ -3,7 +3,9 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -15,13 +17,15 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/publish"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -44,8 +48,16 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	// 先建发布器：它连通性失败必须在启动期暴露，好过第一条事件才发现丢数据。
 	producer, err := publish.NewKafka(startup, publish.Options{
-		Brokers: cfg.Kafka.Brokers,
-		Topic:   cfg.Kafka.Topic,
+		Brokers:           cfg.Output.Kafka.Brokers,
+		EventTopic:        cfg.Output.Kafka.EventTopic,
+		ParseFailureTopic: cfg.Output.Kafka.ParseFailureTopic,
+		Security: kafka.Security{
+			Protocol:    cfg.Output.Kafka.SecurityProtocol,
+			Mechanism:   cfg.Output.Kafka.SASLMechanism,
+			Username:    cfg.Output.Kafka.SASLUsername,
+			PasswordEnv: cfg.Output.Kafka.SASLPasswordEnv,
+			CAFile:      cfg.Output.Kafka.TLSCAFile,
+		},
 	})
 	if err != nil {
 		return err
@@ -69,7 +81,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	defer func() { outcome = errors.Join(outcome, client.Close()) }()
 
-	limiter, err := httpchannel.NewRedisLimiter(client, rateBurst(cfg.HTTP.RateBurst), ratePerSecond(cfg.HTTP.RatePerSec))
+	limiter, err := httpchannel.NewRedisLimiter(client, rateBurst(cfg.Input.HTTP.RateBurst), ratePerSecond(cfg.Input.HTTP.RatePerSec))
 	if err != nil {
 		return err
 	}
@@ -82,7 +94,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}, producer)
 
 	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
-	// 取消是幂等的：正常路径在停机阶段显式调用，这里兜住提前返回的情况。
+
 	defer stopPipeline()
 
 	// 通道单独一份取消信号：停机时要先停接收方，再排空流水线。
@@ -95,9 +107,9 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	// 接入点注册表：内容来自数据库，未注册令牌一律 401——
 	// 这比接受未知设备的推送安全。
-	registry := source.NewMemory()
+	registry := input.NewMemory()
 
-	refresher := newSourceRefresher(pool, registry, cfg.Pipeline.ReloadInterval)
+	refresher := newSourceRefresher(pool, registry, cfg.Input.Kafka.ReloadInterval)
 	if err = refresher.Load(startup); err != nil {
 		return err
 	}
@@ -108,6 +120,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	go refresher.Watch(watchCtx)
 
 	server := &handler.Server{
+		Stats: line.Stats,
 		Ready: func(ctx context.Context) error {
 			if err := client.Ping(ctx).Err(); err != nil {
 				return errors.New("cache is not ready")
@@ -122,27 +135,38 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 			// 曾经加载成功、之后刷新失败时旧配置仍在服务：
 			// 这种情况靠日志暴露，不再把实例摘掉，否则会中断正常工作的接入点。
 			if degraded := refresher.Degraded(); degraded != "" {
-				logging.From(ctx).Warn("Source refresh degraded", "event", "source.degraded", "reason", degraded)
+				logging.From(ctx).Warn("Source refresh degraded", "event", "input.degraded", "reason", degraded)
 			}
 
 			return nil
 		},
 	}
 
+	// 管理面的鉴权与审计都由 iamclient 完成，业务代码不含权限判断。
+	iam, err := iamclient.New(cfg.IAM.BaseURL, cfg.IAM.Token)
+	if err != nil {
+		return err
+	}
+
+	defer iam.Close()
+
 	channels := router.Deps{
 		Registry: registry,
 		Limiter:  limiter,
 		Pipeline: line,
-		MaxBody:  maxBodyBytes(cfg.HTTP.MaxBodyBytes),
+		MaxBody:  maxBodyBytes(cfg.Input.HTTP.MaxBodyBytes),
+		Admin:    repository.NewAdminStore(pool),
+		IAM:      iam,
 	}
 
 	// syslog 与 Kafka 消费是后台通道：它们不挂在 HTTP 路由上，各自有监听/轮询循环。
-	syslogChannel := syslogchannel.New(registry, line, cfg.Syslog.ReloadInterval, cfg.Syslog.BindHost)
+	syslogChannel := syslogchannel.New(registry, line, cfg.Input.Syslog.ReloadInterval, cfg.Input.Syslog.Host)
 	syslogDone := make(chan struct{})
 	go func() { defer close(syslogDone); _ = syslogChannel.Start(channelCtx) }()
 
 	kafkaConsumer := kafkachannel.New(registry, line, producer, kafkachannel.Options{
-		ReloadInterval: cfg.Pipeline.ReloadInterval,
+		ReloadInterval: cfg.Input.Kafka.ReloadInterval,
+		Security:       producerSecurity(cfg.Output.Kafka),
 	})
 	kafkaDone := make(chan struct{})
 	go func() { defer close(kafkaDone); _ = kafkaConsumer.Start(channelCtx) }()
@@ -157,7 +181,18 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	}
 
 	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr(),
-		"workers", cfg.Pipeline.Workers, "topic", cfg.Kafka.Topic)
+		"workers", cfg.Pipeline.Workers, "event_topic", cfg.Output.Kafka.EventTopic)
+
+	// 配置了证书就启用 TLS；监听与停机路径与明文一致。
+	if cfg.Input.HTTP.TLSCertFile != "" {
+		certificate, err := tls.LoadX509KeyPair(cfg.Input.HTTP.TLSCertFile, cfg.Input.HTTP.TLSKeyFile)
+		if err != nil {
+			return fmt.Errorf("could not load TLS certificate: %w", err)
+		}
+
+		httpServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
+		slog.Info("Starting HTTPS listener", "event", "service.starting_tls", "addr", cfg.App.Addr())
+	}
 
 	serveErr := httpx.Serve(ctx, httpServer)
 
@@ -223,4 +258,16 @@ func maxBodyBytes(value int64) int64 {
 	}
 
 	return value
+}
+
+// producerSecurity 把 Kafka 安全配置从配置结构转成客户端输入。
+// 生产与消费共用一份：同一集群不应有两套凭据来源。
+func producerSecurity(kafkaConfig config.Kafka) kafka.Security {
+	return kafka.Security{
+		Protocol:    kafkaConfig.SecurityProtocol,
+		Mechanism:   kafkaConfig.SASLMechanism,
+		Username:    kafkaConfig.SASLUsername,
+		PasswordEnv: kafkaConfig.SASLPasswordEnv,
+		CAFile:      kafkaConfig.TLSCAFile,
+	}
 }

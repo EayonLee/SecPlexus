@@ -54,6 +54,7 @@ describe("platform localization", () => {
           translate("value", {
             count: 2,
             total: 2,
+            matched: 1,
             selected: 1,
             page: 1,
             added: "read",

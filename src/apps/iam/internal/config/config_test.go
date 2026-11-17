@@ -211,6 +211,7 @@ func TestServiceClientActionsMustExistInTheContract(t *testing.T) {
 func TestDefaultHTTPNeedsNoCertificates(t *testing.T) {
 	t.Setenv("SPX_IAM_CSRF_KEY", strings.Repeat("k", 32))
 	t.Setenv("SPX_CONSOLE_IAM_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("SPX_INGEST_IAM_TOKEN", strings.Repeat("i", 32))
 	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
@@ -220,31 +221,26 @@ func TestDefaultHTTPNeedsNoCertificates(t *testing.T) {
 	}
 }
 
-// TestConnectionHostDoesNotBindListener 连接目标不能改变本地监听；后备值只来自 YAML。
-func TestConnectionHostDoesNotBindListener(t *testing.T) {
-	t.Setenv("SPX_IAM_HOST", "iam.corp")
+// TestConnectionHostDoesNotBindListener 连接目标不能改变本地监听；监听地址只来自 BIND_HOST。
+//
+// 环境变量统一后：监听用 SPX_IAM_BIND_HOST + SPX_IAM_PORT；
+// SPX_IAM_HOST 只是别的服务连接 IAM 时用的目标地址，不参与绑定。
+func TestListenHostComesFromSingleAddress(t *testing.T) {
+	t.Setenv("SPX_IAM_HOST", "10.1.2.3")
+	t.Setenv("SPX_IAM_PORT", "18081")
+
 	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.App.Host != "0.0.0.0" {
-		t.Fatal("connection address changed listener")
+
+	if cfg.App.Host != "10.1.2.3" {
+		t.Fatalf("监听地址 = %q，期望来自 SPX_IAM_HOST", cfg.App.Host)
 	}
-	t.Setenv("SPX_IAM_BIND_HOST", "127.0.0.1")
-	t.Setenv("SPX_IAM_BIND_PORT", "18081")
-	t.Setenv("SPX_IAM_PORT", "9443")
-	cfg, err = Load(configFile(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.App.Host != "127.0.0.1" || cfg.App.Port != 18081 {
-		t.Fatal("explicit listener override not respected")
+	if cfg.App.Port != 18081 {
+		t.Fatalf("监听端口 = %d，期望来自 SPX_IAM_PORT", cfg.App.Port)
 	}
 }
-
-// TestValidateAdministratorReportsPasswordLength 确保密码不合法时错误信息
-// 报出实际接收到的字符数。截断值（例如 .env 里未加引号的 '#' 之后被当作
-// 注释丢弃）会因此立刻自解释，而无需泄露密码本身。
 func TestValidateAdministratorReportsPasswordLength(t *testing.T) {
 	t.Parallel()
 
@@ -288,5 +284,21 @@ func TestConfigurationRejectsTrustAllProxies(t *testing.T) {
 
 	if _, err := Load(file); err == nil {
 		t.Fatal("loading a configuration that trusts every proxy must fail")
+	}
+}
+
+// 两个服务共用同一凭证会让授权身份取决于遍历顺序，必须启动即拒绝。
+func TestSecurityRejectsSharedServiceToken(t *testing.T) {
+	shared := strings.Repeat("x", 32)
+	cfg := Config{
+		Auth: Auth{CSRFKey: strings.Repeat("k", 32)},
+		ServiceClients: map[string]ServiceClient{
+			"console": {Token: shared, Actions: []string{"iam.users.read"}},
+			"ingest":  {Token: shared, Actions: []string{"ingest.input.read"}},
+		},
+	}
+
+	if err := cfg.ValidateSecurity(true); err == nil {
+		t.Fatal("shared service token accepted")
 	}
 }

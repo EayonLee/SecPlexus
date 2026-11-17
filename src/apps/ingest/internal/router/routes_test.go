@@ -13,9 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // 只有已声明的路由应存在；未知路径必须是 404 而不是被中间件吞成其它状态。
@@ -104,7 +104,7 @@ func TestReadyWithoutCheckIsOK(t *testing.T) {
 // 回归（P0）：注册表加载完成（哪怕没有接入点）后就绪必须为真。
 // 之前从未调用 Replace，Loaded() 恒为假，进程永远 503。
 func TestReadyAfterRegistryLoaded(t *testing.T) {
-	registry := source.NewMemory()
+	registry := input.NewMemory()
 
 	handlerInstance := &handler.Server{Ready: func(context.Context) error {
 		if !registry.Loaded() {
@@ -137,11 +137,11 @@ func TestReadyAfterRegistryLoaded(t *testing.T) {
 // 这条测试刻意走完整的 router.Handler（含中间件），
 // 因为之前所有推送用例都直接调通道的 Handle，绕过了中间件，缺陷因此没被发现。
 func TestDevicePushBypassesAdminInputBoundary(t *testing.T) {
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID:        "conn-1",
-		Transport: source.TransportHTTP,
-		Token:     source.DigestToken(testToken),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID:       "conn-1",
+		Protocol: input.ProtocolHTTP,
+		Token:    input.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}

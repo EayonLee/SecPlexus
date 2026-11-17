@@ -8,57 +8,73 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
 // Deps 是通道处理器的依赖集合。
 // 单独建模而不是塞进 Server：设备侧路由与管理侧路由的依赖不同，
 // 混在一起会让管理侧也被迫持有通道实现。
 type Deps struct {
-	Registry source.Lookup       // 接入点与令牌查询。
+	Registry input.Lookup        // 接入点与令牌查询。
 	Limiter  httpchannel.Limiter // 每接入点频率限制。
 	Pipeline *pipeline.Pipeline  // 受理后的解析与发布。
 	MaxBody  int64               // 请求体上限，由配置注入通道。
-	Admin    handler.SourceStore // 接入点与规则存取；nil 表示管理面未启用。
-	Guard    gin.HandlerFunc     // 管理面会话守卫；nil 表示不注册管理路由。
+	Admin    handler.InputStore  // 接入点与映射存取；nil 表示管理面未启用。
+	IAM      *iamclient.Client   // 鉴权与审计；nil 表示不注册管理路由。
 }
 
 // devicePrefix 是设备接入路径前缀。
 // 单独列出来是因为它必须与管理面共享同一个监听端口、但用不同的输入边界。
 const devicePrefix = "/api/v1/ingest/events/"
 
-// AdminGuard 校验发起管理请求的用户会话。
-//
-// 本项目不新增权限点（全员可见决策）：守卫只需要确认"是一个有效会话"，
-// 不做细粒度授权。为 nil 时管理路由不注册——绝不暴露无鉴权的写接口。
-type AdminGuard gin.HandlerFunc
-
 // registerAdmin 注册接入点与解析规则的管理路由。
 func registerAdmin(engine gin.IRouter, deps Deps) {
-	if deps.Admin == nil || deps.Guard == nil {
+	if deps.Admin == nil || deps.IAM == nil {
 		return
 	}
 
 	admin := &handler.Admin{Store: deps.Admin}
-	group := engine.Group("/api/v1/ingest", deps.Guard)
 
-	group.GET("/sources", admin.ListSources)
-	group.POST("/sources", admin.CreateSource)
-	group.PATCH("/sources/:id", admin.UpdateSource)
-	group.DELETE("/sources/:id", admin.DeleteSource)
+	engine.GET("/api/v1/ingest/inputs",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestInputRead, "input"),
+		admin.ListInputs)
+	engine.POST("/api/v1/ingest/inputs",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestInputWrite, "input"),
+		admin.CreateInput)
+	engine.PATCH("/api/v1/ingest/inputs/:id",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestInputWrite, "input"),
+		admin.UpdateInput)
+	engine.DELETE("/api/v1/ingest/inputs/:id",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestInputWrite, "input"),
+		admin.DeleteInput)
 
-	group.GET("/parse-rules", admin.ListRules)
-	group.POST("/parse-rules", admin.CreateRule)
-	group.PATCH("/parse-rules/:id", admin.UpdateRule)
-	group.DELETE("/parse-rules/:id", admin.DeleteRule)
+	engine.POST("/api/v1/ingest/mappings/validate",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestMappingWrite, "mapping"),
+		admin.ValidateMapping)
+	engine.GET("/api/v1/ingest/mappings",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestMappingRead, "mapping"),
+		admin.ListMappings)
+	engine.POST("/api/v1/ingest/mappings",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestMappingWrite, "mapping"),
+		admin.CreateMapping)
+	engine.PATCH("/api/v1/ingest/mappings/:id",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestMappingWrite, "mapping"),
+		admin.UpdateMapping)
+	engine.DELETE("/api/v1/ingest/mappings/:id",
+		middleware.Guard(deps.IAM, iamclient.PermissionIngestMappingWrite, "mapping"),
+		admin.DeleteMapping)
 }
 
 // Register 注册管理面路由。
 // 设备推送不在这里：它有自己的体积与媒体类型规则，不能继承管理面的边界。
 func Register(engine gin.IRouter, server *handler.Server, deps Deps) {
 	engine.GET("/health/ready", server.ReadyHandler)
+
+	// 指标端点按内网抓取设计：不加会话，由反向代理限制来源。
+	engine.GET("/metrics", server.Metrics)
 }
 
 // registerPush 注册设备推送路由。
@@ -70,8 +86,8 @@ func registerPush(engine gin.IRouter, deps Deps) {
 	push := httpchannel.New(deps.Registry, deps.Limiter, deps.Pipeline)
 	push.MaxBodyBytes = deps.MaxBody
 
-	engine.POST(devicePrefix+":source_id", func(c *gin.Context) {
-		push.Handle(c.Writer, c.Request, c.Param("source_id"))
+	engine.POST(devicePrefix+":input_id", func(c *gin.Context) {
+		push.Handle(c.Writer, c.Request, c.Param("input_id"))
 	})
 }
 

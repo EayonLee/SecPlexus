@@ -13,7 +13,7 @@
 
 ```
 骨架/配置/IAM ──┬── HTTP 通道 ──┐
-               ├── Kafka 通道 ──┼── 发布(parse_status 语义) ── 集成验收
+               ├── Kafka 通道 ──┼── 发布(parse.outcome 语义) ── 集成验收
                └── 注册表 ── syslog 通道
 解析层(探测+解析规则) ────────────────┘
 ```
@@ -47,7 +47,7 @@
   - 延后：`extends` 继承与逐键覆盖（只有内置规则用得上，等 18 条规则一起做）；`type: int` 转换（真实样本里暂未出现需要强转的字段，等规则回归时按需加）；数组下标 `x[0]`（无规则需要逐元素映射，整值写入已足够）。
 - [x] 失败测试先行：severity 归一——大小写/空白归一、未映射 → 0 + warning。值表由规则声明，中文档位在具体规则里配置。
 - [x] 失败测试先行：`event_id` UUIDv5 确定性（同输入同输出、connector 维度隔离）。用原始字节而非归一化结构做指纹：少一次序列化，字节相同就是同一条事件。
-- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。**阻塞：等用户提供真实设备日志样本**——没有样本的规则按样本驱动校验必然失败，写出来的是假的。规则加载路径依赖第五组的 `parse_rules.spec`，放在第五组之后做。
+- [ ] 内置解析规则 `internal/normalizer/rules/*.yaml` + `go:embed`；解析规则 schema 校验函数。**阻塞：等用户提供真实设备日志样本**——没有样本的规则按样本驱动校验必然失败，写出来的是假的。规则加载路径依赖第五组的 `mappings.spec`，放在第五组之后做。
 
 ### 第三组：通道
 
@@ -61,9 +61,9 @@
 
 ### 第四组：发布与解析状态
 
-- [ ] 失败测试先行（集成）：分区键按实体标识保序（同实体同分区）、无实体回退 event_id、不回退固定常量；解析失败事件同样保序发布且携带 parse_status。
+- [ ] 失败测试先行（集成）：分区键按实体标识保序（同实体同分区）、无实体回退 event_id、不回退固定常量；解析失败事件同样保序发布且携带 parse.outcome。
 - [x] 发布器实现（集成测试见下方未完成项）：channel 背压、批量 500 条/2s、确定性 event_id。
-- [x] 解析状态：失败事件照常发布到 `spx.ingest.event`，带 `metadata.parse_status=error` 与原因码数组；解析失败率指标（无独立隔离区 topic）。
+- [x] 解析状态：失败事件照常发布到 `spx.ingest.event`，带 `metadata.parse.outcome=error` 与原因码数组；解析失败率指标（无独立隔离区 topic）。
 
 ### 第五组：sources 接入点注册表与管理 API
 
@@ -71,19 +71,19 @@
 
 #### 5.1 迁移与注册表加载
 
-- [ ] 失败测试先行（集成）：迁移建表后，`sources` 的 `CHECK` 约束拒绝非法组合——`http` 缺 `token_digest`、`syslog` 缺 `syslog_port`、`kafka` 缺 brokers/topic 三类都必须被数据库拒绝，而不是靠应用层判断。
+- [ ] 失败测试先行（集成）：迁移建表后，`inputs` 的 `CHECK` 约束拒绝非法组合——`http` 缺 `token_digest`、`syslog` 缺 `syslog_port`、`kafka` 缺 brokers/topic 三类都必须被数据库拒绝，而不是靠应用层判断。
 - [ ] 失败测试先行（集成）：`syslog_port` 部分唯一索引——两条 `syslog` 接入点抢同一端口时第二条插入失败。
-- [ ] 失败测试先行（集成）：加载器把 `sources` 与 `parse_rules` 编译进注册表；`parse_rule_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
-- [ ] 迁移 `ingest.sources` 与 `ingest.parse_rules` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
-- [ ] `internal/source` 包替换现有 `internal/source`：`Entry`（原 `Entry`）、`Transport`（原 `Channel`）、`Lookup`（原 `Lookup`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`connector_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
+- [ ] 失败测试先行（集成）：加载器把 `inputs` 与 `mappings` 编译进注册表；`mapping_id` 为空时该接入点为通用接入（`class_uid=6003`，原文透传）；解析规则编译失败时该接入点加载失败并记录原因，不影响其他接入点。
+- [ ] 迁移 `ingest.inputs` 与 `ingest.mappings` 两张表（goose，对齐 iam 的 repository.Migrate 模式），每张表与每个业务列都写 `COMMENT ON`；落地 `cmd migrate` 命令。
+- [ ] `internal/source` 包替换现有 `internal/source`：`Entry`（原 `Entry`）、`Transport`（原 `Channel`）、`Lookup`（原 `Lookup`）、`Entry.Rule`（原 `Entry.Engine`）；`router.Channels` 改名 `router.Deps`；`input_id` 全面改为 `source_id`（事件 `metadata.spx`、消费组名、HTTP 路径参数）。
 - [ ] 启动时从数据库加载 + 周期刷新（默认 10s）+ `SIGHUP` 立即重载；数据库不可用时保持上次成功加载的结果并在 readiness 上报降级，不退回空表。
 
 #### 5.2 管理 API
 
 - [x] 失败测试先行（集成）：创建 `http` 接入点返回一次性明文 token，响应后再查列表不得再出现明文；创建 `syslog` 接入点返回端口；创建 `kafka` 接入点返回绑定。
-- [ ] 失败测试先行（集成）：`transport` 创建后不可修改（PATCH 带 `transport` 返回 400）；换 token 后旧 token 立即失效；换 `parse_rule_id` 后从下一条消息起生效。
+- [ ] 失败测试先行（集成）：`protocol` 创建后不可修改（PATCH 带 `protocol` 返回 400）；换 token 后旧 token 立即失效；换 `mapping_id` 后从下一条消息起生效。
 - [x] 失败测试先行（集成）：删除仍被接入点引用的解析规则返回 409（仓储层已用 `ON DELETE RESTRICT` 证明）；删除接入点执行物理删除，其监听端口随热重载释放。
-- [x] 管理路由 `/api/v1/ingest/sources` 与 `/api/v1/ingest/parse-rules`（GET/POST/PATCH/DELETE）；路由注册在 `internal/router`，DTO 归 `internal/model`。**不新增权限点**（与第一组的全员可见决策一致）：只要求有效用户会话，不做细粒度授权；未配置会话守卫时不注册管理路由，避免暴露无鉴权写接口。
+- [x] 管理路由 `/api/v1/ingest/inputs` 与 `/api/v1/ingest/mappings`（GET/POST/PATCH/DELETE）；路由注册在 `internal/router`，DTO 归 `internal/model`。**不新增权限点**（与第一组的全员可见决策一致）：只要求有效用户会话，不做细粒度授权；未配置会话守卫时不注册管理路由，避免暴露无鉴权写接口。
 - [ ] 向导样本验证：给定 5–10 条样本与候选规则，逐条跑解析并回报命中率与关键字段填充率；失败时提供两条出路——换解析规则，或创建通用接入（`class_uid=6003`）。通用接入后续可换成正式解析规则。
 - [ ] 解析规则校验复用 `normalizer.Compile` 的三层校验（结构/路径/class_uid/样本试跑）；校验失败返回字段级错误，不落库。
 
@@ -114,7 +114,7 @@
 - [x] 语料库 `internal/parser/testdata/corpus/`：六种变体（json/cef/kv/kv-colon/regex/delimiter-comma）+ syslog 三份（rfc5424/rfc3164/cef-over-syslog），走真实 `Split → Parse` 流程。
 - [x] 语料测试 `TestCorpusParsesEverySample`（按变体表驱动）与 `TestCorpusArraySplitsPerElement`。
 - [x] 原生模糊测试：`FuzzParseEveryMode`、`FuzzSplitNeverPanics`、`FuzzSplitFrames`、`FuzzFlattenNeverPanics`，语料即种子；公共性质为不 panic、零字段不成功、分帧有界。
-- [x] 截断语义：`metadata.truncated` + `original_bytes`，且 `parse_status` 强制 error（原因码 `truncated`）——模糊与语料之外的第三条护栏。
+- [x] 截断语义：`metadata.truncated` + `original_bytes`，且 `parse.outcome` 强制 error（原因码 `truncated`）——模糊与语料之外的第三条护栏。
 - [ ] 从 Loghub / Azure Sentinel Sample Data 导入真实样本子集（需先确认各自许可并在文件头注明来源）。
 - [ ] 在 CI 增加定时模糊测试任务（夜间跑 5 分钟，发现新语料即提 issue）。
 
@@ -148,3 +148,18 @@ go vet ./src/...
 - 18 家内置解析规则中 10 家国产厂商格式无公开规范，样本依赖真实设备日志；首版允许部分解析规则标记 `experimental`，解析失败率暴露映射质量。
 - 客户现场已有的 syslog 转发链路（rsyslog 中继）会把来源 IP 变成中继 IP——端口绑定不受影响，但文档必须写明不要依赖源 IP 做归属。
 - 本计划不引入 ClickHouse 依赖；correlator 计划评审时再定存储写入细节，避免两个计划互相阻塞。
+
+## 性能证据（本机实测，AMD Ryzen 22 逻辑核，benchtime 3s）
+
+| 基准 | ns/op | 折算吞吐（单核） | 分配 |
+|---|---|---|---|
+| `BenchmarkIngestHTTP`（单条事件，HTTP→鉴权→解析→入队） | 7,498 | **约 133,000 事件/秒** | 13.2 kB / 112 次 |
+| `BenchmarkIngestHTTPBatch100`（单请求 100 条） | 495,549 | 约 202,000 事件/秒（4,955 ns/条） | 529 kB / 7,500 次 |
+| `BenchmarkApplyCEF`（解析+归一化） | 3,538 | 约 283,000 事件/秒 | 4.1 kB / 52 次 |
+| `BenchmarkApplyJSON`（解析+归一化） | 2,944 | 约 340,000 事件/秒 | 2.9 kB / 33 次 |
+
+说明：
+
+- 受理链路是**异步**的：上表测的是"请求被受理并进入流水线"的延迟，发布吞吐由 Kafka 侧与 `spx_ingest_published_total` 回答。
+- 5 万 EPS 的容量核算：单核 133,000 EPS → **约 0.38 核**（含 HTTP 开销），解析层本身约 0.18–0.27 核。
+- 批量推送显著降低每事件成本（7,498 → 4,955 ns，约 -34%）：HTTP 与鉴权是固定开销，设备端应尽量批量发送。

@@ -56,7 +56,7 @@ func get(t *testing.T, server *handler.Server, path string) *httptest.ResponseRe
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	router.Handler(server).ServeHTTP(recorder, request)
+	router.Handler(server, server.IAM).ServeHTTP(recorder, request)
 	return recorder
 }
 
