@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 const testToken = "ing_test_token_0123456789abcdef"
@@ -57,10 +57,10 @@ func (f *fakePublisher) entry() []pipeline.Event {
 }
 
 // newRule 编译一条最小 JSON 规则。
-func newRule(t *testing.T) *normalizer.Engine {
+func newRule(t *testing.T) *normalizer.Compiled {
 	t.Helper()
 
-	engine, err := normalizer.Compile(normalizer.Rule{
+	engine, err := normalizer.Compile(normalizer.Mapping{
 		ID:        "http-test",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -77,12 +77,12 @@ func newRule(t *testing.T) *normalizer.Engine {
 func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipeline.Pipeline, *fakePublisher, *fakeLimiter) {
 	t.Helper()
 
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID:        "conn-1",
-		Transport: source.TransportHTTP,
-		Rule:      newRule(t),
-		Token:     source.DigestToken(testToken),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID:       "conn-1",
+		Protocol: input.ProtocolHTTP,
+		Mapping:  newRule(t),
+		Token:    input.DigestToken(testToken),
 	}})
 
 	if limiter == nil {
@@ -99,7 +99,7 @@ func harness(t *testing.T, limiter httpchannel.Limiter) (*httptest.Server, *pipe
 	channel := httpchannel.New(registry, limiter, line)
 
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{input_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -292,7 +292,7 @@ func TestLimiterFailureReturns503(t *testing.T) {
 	}
 }
 
-// 畸形报文不返回错误给设备：受理后解析失败的事件照常发布并带 parse_status。
+// 畸形报文不返回错误给设备：受理后解析失败的事件照常发布并带 parse.outcome。
 func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 	server, line, publisher, _ := harness(t, nil)
 
@@ -312,12 +312,12 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 
 // 未挂规则的接入点：受理成功，事件以 error 状态透传原文。
 func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID:        "conn-generic",
-		Transport: source.TransportHTTP,
-		Rule:      nil,
-		Token:     source.DigestToken(testToken),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID:       "conn-generic",
+		Protocol: input.ProtocolHTTP,
+		Mapping:  nil,
+		Token:    input.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}
@@ -329,7 +329,7 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 
 	channel := httpchannel.New(registry, &fakeLimiter{}, line)
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{input_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -348,10 +348,10 @@ func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
 // 回归（P1-2）：管道关停/队列满导致一条都没受理时必须返回 503，
 // 而不是用 202 假装成功——设备看到 202 就不会重推，数据真丢。
 func TestNoAcceptedReturns503(t *testing.T) {
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID: "conn-1", Transport: source.TransportHTTP, Rule: newRule(t),
-		Token: source.DigestToken(testToken),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: newRule(t),
+		Token: input.DigestToken(testToken),
 	}})
 
 	publisher := &fakePublisher{}
@@ -362,7 +362,7 @@ func TestNoAcceptedReturns503(t *testing.T) {
 
 	channel := httpchannel.New(registry, &fakeLimiter{}, line)
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/ingest/events/{source_id}", channel)
+	mux.Handle("POST /api/v1/ingest/events/{input_id}", channel)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 

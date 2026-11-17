@@ -38,7 +38,7 @@ func BenchmarkApplyCEF(b *testing.B) {
 
 // BenchmarkApplyJSON 度量结构化 JSON 的同一路径成本。
 func BenchmarkApplyJSON(b *testing.B) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:    "json-bench",
 		Parse: parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{

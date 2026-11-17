@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -23,7 +23,7 @@ import (
 // 绝不出现"一部分生效、一部分静默消失"的中间状态。
 type sourceRefresher struct {
 	pool     *pgxpool.Pool
-	registry *source.Memory
+	registry *input.Memory
 	interval time.Duration
 
 	mu       sync.RWMutex
@@ -31,7 +31,7 @@ type sourceRefresher struct {
 }
 
 // newSourceRefresher 创建刷新器。
-func newSourceRefresher(pool *pgxpool.Pool, registry *source.Memory, interval time.Duration) *sourceRefresher {
+func newSourceRefresher(pool *pgxpool.Pool, registry *input.Memory, interval time.Duration) *sourceRefresher {
 	if interval <= 0 {
 		interval = repository.ReloadInterval
 	}
@@ -41,11 +41,11 @@ func newSourceRefresher(pool *pgxpool.Pool, registry *source.Memory, interval ti
 
 // Load 加载一次；失败时保留旧集合并记下降级原因。
 func (r *sourceRefresher) Load(ctx context.Context) error {
-	entries, problems, err := repository.LoadSources(ctx, r.pool)
+	entries, problems, err := repository.LoadInputs(ctx, r.pool)
 	if err == nil && len(problems) > 0 {
 		for _, problem := range problems {
-			logging.From(ctx).Error("Source did not compile", "event", "source.compile_failed",
-				"source_id", problem.SourceID, "reason", problem.Reason)
+			logging.From(ctx).Error("Source did not compile", "event", "input.compile_failed",
+				"input_id", problem.SourceID, "reason", problem.Reason)
 		}
 
 		err = errors.New("some sources did not compile")
@@ -57,7 +57,7 @@ func (r *sourceRefresher) Load(ctx context.Context) error {
 		r.mu.Unlock()
 
 		// 上一份配置继续服务：数据库抖动不该让接入点集体消失。
-		logging.From(ctx).Error("Keeping previous sources", "event", "source.reload_kept_previous",
+		logging.From(ctx).Error("Keeping previous sources", "event", "input.reload_kept_previous",
 			"error", logging.Error(err))
 
 		return err
@@ -69,7 +69,7 @@ func (r *sourceRefresher) Load(ctx context.Context) error {
 	r.degraded = ""
 	r.mu.Unlock()
 
-	logging.From(ctx).Info("Sources loaded", "event", "source.loaded", "count", len(entries))
+	logging.From(ctx).Info("Sources loaded", "event", "input.loaded", "count", len(entries))
 
 	return nil
 }
@@ -102,7 +102,7 @@ func (r *sourceRefresher) Watch(ctx context.Context) {
 		case <-ticker.C:
 			_ = r.Load(ctx)
 		case <-hangup:
-			logging.From(ctx).Info("SIGHUP requested source reload", "event", "source.reload_requested")
+			logging.From(ctx).Info("SIGHUP requested source reload", "event", "input.reload_requested")
 			_ = r.Load(ctx)
 		}
 	}

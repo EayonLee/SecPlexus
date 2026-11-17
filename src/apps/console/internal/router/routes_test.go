@@ -21,7 +21,9 @@ func testHandler(t *testing.T) http.Handler {
 	}
 
 	t.Cleanup(client.Close)
-	return router.Handler(&handler.Server{IAM: client})
+	server := &handler.Server{IAM: client}
+
+	return router.Handler(server, client)
 }
 
 // 只有已声明的路由应存在；未知路径必须是 404 而不是被中间件吞成其它状态。
@@ -47,7 +49,7 @@ func TestEventsRouteIsRegistered(t *testing.T) {
 	}
 
 	t.Cleanup(client.Close)
-	router.Register(engine, &handler.Server{IAM: client})
+	router.Register(engine, &handler.Server{IAM: client}, client)
 
 	var found bool
 	for _, route := range engine.Routes() {
@@ -71,7 +73,7 @@ func TestOrganizationRoutesAreGone(t *testing.T) {
 	}
 
 	t.Cleanup(client.Close)
-	router.Register(engine, &handler.Server{IAM: client})
+	router.Register(engine, &handler.Server{IAM: client}, nil)
 
 	for _, route := range engine.Routes() {
 		if strings.Contains(route.Path, "orgs") || strings.Contains(route.Path, ":org_id") {
@@ -90,7 +92,7 @@ func TestReadyRouteRegistered(t *testing.T) {
 	}
 
 	t.Cleanup(client.Close)
-	router.Register(engine, &handler.Server{IAM: client})
+	router.Register(engine, &handler.Server{IAM: client}, nil)
 
 	for _, route := range engine.Routes() {
 		if route.Path == "/health/ready" {

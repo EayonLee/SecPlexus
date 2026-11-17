@@ -209,6 +209,9 @@ func (c Config) ValidateSecurity(required bool) error {
 		return errors.New("service_clients must contain at least one client")
 	}
 	catalog := authorization.Catalog()
+	// 两个服务共用同一凭证时，授权结论取决于遍历顺序，身份不确定。
+	// 这是配置错误，必须启动即拒绝，而不是让同一个 Token 随机以某个服务身份出现。
+	owners := make(map[string]string, len(c.ServiceClients))
 	for id, client := range c.ServiceClients {
 		if id == "" || len(client.Actions) == 0 || ((required || client.Token != "") && (len(client.Token) < 32 || len(client.Token) > 512)) {
 			return errors.New("service_clients requires a nonempty ID, a 32–512 byte token (SPX_CONSOLE_IAM_TOKEN for Console) and allowed actions")
@@ -218,6 +221,13 @@ func (c Config) ValidateSecurity(required bool) error {
 				return errors.New("service_clients.actions must use registered IAM permission keys")
 			}
 		}
+		if client.Token == "" {
+			continue
+		}
+		if other, exists := owners[client.Token]; exists {
+			return fmt.Errorf("service_clients.%s and service_clients.%s share the same token; each service needs its own credential", other, id)
+		}
+		owners[client.Token] = id
 	}
 	return nil
 }

@@ -15,8 +15,8 @@ import (
 var receivedAt = time.Unix(1762986541, 0).UTC()
 
 // cefRule 是供应商规则的典型形态：CEF 解析 + 字段映射 + 级别值表 + 常量 + 样本。
-func cefRule() normalizer.Rule {
-	return normalizer.Rule{
+func cefRule() normalizer.Mapping {
+	return normalizer.Mapping{
 		ID:      "fortinet-fortigate",
 		Name:    "FortiGate 攻击日志",
 		Vendor:  "Fortinet",
@@ -140,7 +140,7 @@ func TestUnmappedSeverityWarnsAndFallsBack(t *testing.T) {
 
 // 时间字段按声明格式解析成 epoch 毫秒。
 func TestTimeStampsEpochMillis(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "json-time",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"ts": "metadata.event_ts"},
@@ -167,7 +167,7 @@ func TestTimeStampsEpochMillis(t *testing.T) {
 // 时间解析失败记 warning 并回退到接收时间：事件必须带时间，
 // 否则保留期与窗口聚合对它失效。
 func TestUnparsableTimeWarnsAndFallsBackToReceivedAt(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "json-time",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"ts": "metadata.event_ts"},
@@ -195,7 +195,7 @@ func TestUnparsableTimeWarnsAndFallsBackToReceivedAt(t *testing.T) {
 
 // 常量最后写入，不能被设备字段覆盖。
 func TestConstantsOverrideMappedFields(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "const-override",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"kind": "kind"},
@@ -228,7 +228,7 @@ func TestCompileRejectsRuleWhoseSampleFails(t *testing.T) {
 }
 
 func TestCompileRejectsInvalidRules(t *testing.T) {
-	tests := map[string]normalizer.Rule{
+	tests := map[string]normalizer.Mapping{
 		"missing id": {Parse: parser.Spec{Mode: parser.ModeJSON}},
 		"unknown mode": {
 			ID:    "x",
@@ -265,7 +265,7 @@ func TestCompileRejectsInvalidRules(t *testing.T) {
 	}
 }
 
-// 解析失败必须冒泡为错误，交给调用方记 parse_status=error。
+// 解析失败必须冒泡为错误，交给调用方记 parse.outcome=error。
 func TestApplyReportsParseFailure(t *testing.T) {
 	engine, err := normalizer.Compile(cefRule())
 	if err != nil {
@@ -303,7 +303,7 @@ func TestEventIDIsDeterministicPerConnector(t *testing.T) {
 // 回归：unmapped 里的凭证字段必须替换为 [REDACTED]，
 // 否则设备日志里的口令与 API Key 会进入事件存储与查询界面。
 func TestUnmappedRedactsSensitiveFields(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "redact",
 		Parse:     parser.Spec{Mode: parser.ModeKV},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -333,7 +333,7 @@ func TestUnmappedRedactsSensitiveFields(t *testing.T) {
 
 // 回归：每条事件必须带 severity_id 与 time（OCSF 最小字段）。
 func TestEventsAlwaysCarrySeverityAndTime(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "minimal",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"a": "activity_name"},
@@ -360,7 +360,7 @@ func TestEventsAlwaysCarrySeverityAndTime(t *testing.T) {
 
 // 回归：规则必须声明 class_uid——下游按它路由，缺失即伪 OCSF。
 func TestCompileRejectsRuleWithoutClassUID(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:       "no-class",
 		Parse:    parser.Spec{Mode: parser.ModeJSON},
 		FieldMap: map[string]string{"a": "activity_name"},
@@ -373,7 +373,7 @@ func TestCompileRejectsRuleWithoutClassUID(t *testing.T) {
 
 // 回归：常量目标与映射目标互为前缀会让树形写入覆盖标量，加载即拒绝。
 func TestCompileRejectsConstantPrefixConflict(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "const-prefix",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"a": "x"},
@@ -387,7 +387,7 @@ func TestCompileRejectsConstantPrefixConflict(t *testing.T) {
 
 // 回归：设备时区用于解析无时区的时间串——北京 10:00 不能被当成 UTC 10:00。
 func TestTimeHonorsDeviceTimezone(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "tz",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"ts": "raw_ts"},
@@ -413,7 +413,7 @@ func TestTimeHonorsDeviceTimezone(t *testing.T) {
 
 // 时区名非法时加载即拒绝。
 func TestCompileRejectsInvalidTimezone(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "bad-tz",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		Time:      normalizer.TimeSpec{Field: "ts", Formats: []string{"2006"}, Location: "Mars/Olympus"},
@@ -430,7 +430,7 @@ func TestCompileRejectsInvalidTimezone(t *testing.T) {
 func TestCompileRejectsFieldMapWritingEngineOwnedKeys(t *testing.T) {
 	for _, target := range []string{"severity_id", "time"} {
 		t.Run(target, func(t *testing.T) {
-			rule := normalizer.Rule{
+			rule := normalizer.Mapping{
 				ID:        "engine-owned",
 				Parse:     parser.Spec{Mode: parser.ModeJSON},
 				FieldMap:  map[string]string{"src": target},
@@ -446,7 +446,7 @@ func TestCompileRejectsFieldMapWritingEngineOwnedKeys(t *testing.T) {
 
 // 常量是"最后盖章"机制：severity_id 常量覆盖引擎默认——固定级别源的唯一写法，必须保留。
 func TestConstantSeverityOverridesEngineDefault(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "const-severity",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -470,7 +470,7 @@ func TestConstantSeverityOverridesEngineDefault(t *testing.T) {
 
 // 回归（二轮审查）：值表键与事件值同样归一化——表键 "HIGH" 要能匹配事件值 "high"。
 func TestSeverityTableKeysAreCaseInsensitive(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "table-case",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		Severity:  normalizer.SeveritySpec{Field: "level", Values: map[string]int{"HIGH": normalizer.SeverityHigh}},
@@ -494,7 +494,7 @@ func TestSeverityTableKeysAreCaseInsensitive(t *testing.T) {
 
 // 回归（二轮审查）：归一化后冲突的值表键必须拒绝——否则 map 迭代顺序决定谁赢。
 func TestCompileRejectsCollidingSeverityKeys(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:    "collide",
 		Parse: parser.Spec{Mode: parser.ModeJSON},
 		Severity: normalizer.SeveritySpec{Field: "level", Values: map[string]int{
@@ -511,7 +511,7 @@ func TestCompileRejectsCollidingSeverityKeys(t *testing.T) {
 
 // 回归（二轮审查）：class_uid 显式为 nil 是伪 OCSF，必须拒绝。
 func TestCompileRejectsNilClassUID(t *testing.T) {
-	rule := normalizer.Rule{
+	rule := normalizer.Mapping{
 		ID:        "nil-class",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		Constants: map[string]any{"class_uid": nil},

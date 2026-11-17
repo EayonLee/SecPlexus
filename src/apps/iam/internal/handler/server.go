@@ -16,8 +16,11 @@ import (
 	"github.com/gorilla/csrf"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
+	"github.com/google/uuid"
+
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
@@ -213,6 +216,15 @@ func (s *Server) AuthorizeRequest(c *gin.Context) {
 	original.Header.Set("Cookie", input.Cookie)
 	original.Header.Set("Origin", input.Origin)
 	original.Header.Set("X-CSRF-Token", input.CSRFToken)
+
+	// 状态变更必须带有效的 CSRF 令牌：服务凭证证明"哪个服务在问"，
+	// 但真正被借用的是浏览器会话，跨站请求必须在这里被挡住。
+	if !s.Security.VerifyCSRF(original) {
+		logging.From(r.Context()).Warn("CSRF check rejected authorization", "event", "security.csrf_rejected", "action", input.Action)
+		result.Fail(c.Writer, result.CodeCSRFInvalid)
+
+		return
+	}
 	var decision iamclient.CapabilityDecision
 	var failure error
 	buffer := iammiddleware.NewBuffer()
@@ -243,4 +255,65 @@ func (s *Server) AuthorizeRequest(c *gin.Context) {
 		return
 	}
 	result.Success(c.Writer, decision)
+}
+
+// PostAuditEvent 接收平台内服务提交的审计事实。
+//
+// 鉴权用服务凭证而不是用户会话：调用方是受信服务，写的是它刚完成的操作。
+// 操作者身份由服务在 metadata 中注明；IAM 不据请求体推断 actor_type，
+// 因此这类记录一律记为 system，避免伪造用户身份。
+func (s *Server) PostAuditEvent(c *gin.Context) {
+	r := c.Request
+
+	if !s.Security.ServiceClient(r, iamclient.PermissionIAMAuditWrite) {
+		httpx.Reject(c, authorization.ErrDenied)
+
+		return
+	}
+
+	var event iamclient.AuditEvent
+	if err := httpx.Bind(c, &event); err != nil {
+		httpx.Reject(c, repository.ErrInvalid)
+
+		return
+	}
+
+	if event.Action == "" || event.TargetType == "" || event.RequestID == "" ||
+		(event.Outcome != string(enum.AuditOutcomeSuccess) &&
+			event.Outcome != string(enum.AuditOutcomeDenied) &&
+			event.Outcome != string(enum.AuditOutcomeFailure)) {
+		httpx.Reject(c, repository.ErrInvalid)
+
+		return
+	}
+
+	audit := repository.Audit{
+		ActorType:  enum.ActorTypeSystem,
+		Action:     event.Action,
+		TargetType: event.TargetType,
+		Outcome:    enum.AuditOutcome(event.Outcome),
+		Reason:     event.Reason,
+		RequestID:  event.RequestID,
+		Metadata:   event.Metadata,
+	}
+
+	if event.TargetID != "" {
+		if parsed, err := uuid.Parse(event.TargetID); err == nil {
+			audit.TargetID = &parsed
+		}
+	}
+
+	if event.DecisionID != "" {
+		if parsed, err := uuid.Parse(event.DecisionID); err == nil {
+			audit.DecisionID = &parsed
+		}
+	}
+
+	if err := repository.AppendAudit(r.Context(), s.Service.Store.DB, audit); err != nil {
+		httpx.Reject(c, err)
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }

@@ -1,7 +1,39 @@
 [
   {
-    "key": "iam.users.read",
-    "description": "查看用户与角色归属",
+    "key": "console.events.read",
+    "description": "订阅运维事件流（SSE）",
+    "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
+    "key": "iam.audit.read",
+    "description": "查看审计事件",
+    "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
+    "key": "iam.audit.write",
+    "description": "由平台内服务写入审计事实",
+    "risk_level": "sensitive",
+    "delegable": false,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
+    "key": "iam.roles.manage",
+    "description": "创建、修改、删除角色与角色权限",
+    "risk_level": "high",
+    "delegable": true,
+    "requires_recent_auth": true,
+    "status": "active"
+  },
+  {
+    "key": "iam.roles.read",
+    "description": "查看角色与权限目录",
     "risk_level": "normal",
     "delegable": true,
     "requires_recent_auth": false,
@@ -13,6 +45,14 @@
     "risk_level": "high",
     "delegable": true,
     "requires_recent_auth": true,
+    "status": "active"
+  },
+  {
+    "key": "iam.users.read",
+    "description": "查看用户与角色归属",
+    "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
     "status": "active"
   },
   {
@@ -32,25 +72,33 @@
     "status": "active"
   },
   {
-    "key": "iam.roles.read",
-    "description": "查看角色与权限目录",
+    "key": "ingest.input.read",
+    "description": "查看数据接入点与解析映射",
     "risk_level": "normal",
     "delegable": true,
     "requires_recent_auth": false,
     "status": "active"
   },
   {
-    "key": "iam.roles.manage",
-    "description": "创建、修改、删除角色与角色权限",
+    "key": "ingest.input.write",
+    "description": "创建、修改、删除数据接入点与轮换令牌",
     "risk_level": "high",
     "delegable": true,
     "requires_recent_auth": true,
     "status": "active"
   },
   {
-    "key": "iam.audit.read",
-    "description": "查看审计事件",
+    "key": "ingest.mapping.read",
+    "description": "查看解析映射",
     "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
+    "key": "ingest.mapping.write",
+    "description": "创建、修改、删除解析映射",
+    "risk_level": "sensitive",
     "delegable": true,
     "requires_recent_auth": false,
     "status": "active"

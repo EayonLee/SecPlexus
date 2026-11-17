@@ -39,6 +39,7 @@ func (e *Error) Unwrap() error { return e.Cause }
 type Client struct {
 	origin     string
 	credential string
+	webOrigin  string // 浏览器同源地址，用于状态变更请求的 CSRF 防护。
 	http       *http.Client
 }
 
@@ -168,4 +169,16 @@ func ValidateConfig(baseURL, credential string, required bool) error {
 	}
 
 	return nil
+}
+
+// WebOrigin 返回配置的浏览器同源地址；空表示不校验来源。
+func (c *Client) WebOrigin() string { return c.webOrigin }
+
+// WithWebOrigin 设置浏览器同源地址，用于状态变更请求的 CSRF 防护。
+// 返回新副本而不是就地修改，避免共享实例被并发改写。
+func (c *Client) WithWebOrigin(origin string) *Client {
+	clone := *c
+	clone.webOrigin = origin
+
+	return &clone
 }

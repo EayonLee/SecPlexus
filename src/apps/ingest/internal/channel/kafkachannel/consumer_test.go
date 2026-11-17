@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/kafkachannel"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // countingPublisher 记录发布次数。
@@ -29,15 +29,15 @@ func (c *countingPublisher) Publish(context.Context, []pipeline.Event) error {
 
 // 只绑定完整的 Kafka 接入点才会被消费；不完整的被跳过。
 func TestKafkaSourcesOnlyReturnsUsableBindings(t *testing.T) {
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{
-		{ID: "complete", Transport: source.TransportKafka, Kafka: source.KafkaBinding{
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{
+		{ID: "complete", Protocol: input.ProtocolKafka, Kafka: input.KafkaBinding{
 			Brokers: []string{"127.0.0.1:9092"}, Topic: "external-events",
 		}},
-		{ID: "no-topic", Transport: source.TransportKafka, Kafka: source.KafkaBinding{
+		{ID: "no-topic", Protocol: input.ProtocolKafka, Kafka: input.KafkaBinding{
 			Brokers: []string{"127.0.0.1:9092"},
 		}},
-		{ID: "http", Transport: source.TransportHTTP, Token: source.DigestToken("t")},
+		{ID: "http", Protocol: input.ProtocolHTTP, Token: input.DigestToken("t")},
 	})
 
 	sources := registry.KafkaSources()
@@ -48,7 +48,7 @@ func TestKafkaSourcesOnlyReturnsUsableBindings(t *testing.T) {
 
 // 不可达的 broker 不会让 Start 卡死：消费循环启动失败只记日志。
 func TestStartToleratesUnreachableBroker(t *testing.T) {
-	engine, err := normalizer.Compile(normalizer.Rule{
+	engine, err := normalizer.Compile(normalizer.Mapping{
 		ID:        "kafka-test",
 		Parse:     parser.Spec{Mode: parser.ModeJSON},
 		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
@@ -58,10 +58,10 @@ func TestStartToleratesUnreachableBroker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID: "conn-1", Transport: source.TransportKafka, Rule: engine,
-		Kafka: source.KafkaBinding{Brokers: []string{"127.0.0.1:1"}, Topic: "t"},
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "conn-1", Protocol: input.ProtocolKafka, Mapping: engine,
+		Kafka: input.KafkaBinding{Brokers: []string{"127.0.0.1:1"}, Topic: "t"},
 	}})
 
 	publisher := &countingPublisher{}

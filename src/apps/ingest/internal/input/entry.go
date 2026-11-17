@@ -2,7 +2,7 @@
 //
 // 通道不认识数据库：它只拿到一份不可变的 Entry（接入点 + 已编译的解析规则），
 // 因此通道实现可以完全用内存注册表测试，注册表从数据库加载是第五组的事。
-package source
+package input
 
 import (
 	"crypto/sha256"
@@ -11,25 +11,28 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 )
 
-// Transport 是接入方式。取值与 connectors 表的 channel 字段一致。
-type Transport string
+// Protocol 是接入方式。取值与 inputs 表的 protocol 字段一致。
+type Protocol string
 
 const (
-	TransportHTTP   Transport = "http"   // 设备主动推送。
-	TransportSyslog Transport = "syslog" // UDP/TCP syslog 监听。
-	TransportKafka  Transport = "kafka"  // 消费客户已有总线。
+	ProtocolHTTP Protocol = "http" // 设备主动推送。
+	// ProtocolPull 是拉模式连接器：字节由我们主动取回，而不是设备送来。
+	// 它不出现在 ingest.inputs 的协议闭集里——拉取任务有自己的表。
+	ProtocolPull   Protocol = "pull"
+	ProtocolSyslog Protocol = "syslog" // UDP/TCP syslog 监听。
+	ProtocolKafka  Protocol = "kafka"  // 消费客户已有总线。
 )
 
 // Entry 是通道运行期需要知道的全部接入点信息。
 // 通道不改它，也不持有数据库连接。
 type Entry struct {
-	ID        string             // 接入点标识，事件里回填。
-	Name      string             // 展示名称，仅用于日志与诊断。
-	Transport Transport          // 接入方式。
-	Rule      *normalizer.Engine // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
-	Token     [sha256.Size]byte  // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
-	Port      int                // syslog 通道的监听端口；0 表示未绑定。
-	Kafka     KafkaBinding       // Kafka 消费绑定；仅 TransportKafka 使用。
+	ID       string               // 接入点标识，事件里回填。
+	Name     string               // 展示名称，仅用于日志与诊断。
+	Protocol Protocol             // 接入方式。
+	Mapping  *normalizer.Compiled // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
+	Token    [sha256.Size]byte    // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
+	Port     int                  // syslog 通道的监听端口；0 表示未绑定。
+	Kafka    KafkaBinding         // Kafka 消费绑定；仅 ProtocolKafka 使用。
 }
 
 // KafkaBinding 描述要消费的外部总线。
@@ -144,7 +147,7 @@ func (m *Memory) SyslogBindings() []Entry {
 
 	bindings := make([]Entry, 0, len(m.byID))
 	for _, entry := range m.byID {
-		if entry.Transport == TransportSyslog && entry.Port > 0 {
+		if entry.Protocol == ProtocolSyslog && entry.Port > 0 {
 			bindings = append(bindings, entry)
 		}
 	}
@@ -159,7 +162,7 @@ func (m *Memory) KafkaSources() []Entry {
 
 	sources := make([]Entry, 0, len(m.byID))
 	for _, entry := range m.byID {
-		if entry.Transport == TransportKafka && entry.Kafka.Usable() {
+		if entry.Protocol == ProtocolKafka && entry.Kafka.Usable() {
 			sources = append(sources, entry)
 		}
 	}

@@ -16,12 +16,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
-// Status 是事件的解析状态，随事件发布到 metadata.parse_status。
+// Status 是事件的解析状态，随事件发布到 metadata.spx.parse.outcome。
 type Status string
 
 const (
@@ -84,6 +84,9 @@ const ClassUIDGeneric = 6003
 // 调用方应把报文退回上游（HTTP 返回 503 让设备重推），而不是当作已受理。
 var ErrClosed = errors.New("pipeline is closed")
 
+// ErrBusy 表示队列在宽限期内仍无法接纳：调用方应回 503 + Retry-After 让上游重试。
+var ErrBusy = errors.New("pipeline queue is full")
+
 // Event 是一条待发布的事件。
 type Event struct {
 	SourceID     string  // 来源接入点。
@@ -92,6 +95,8 @@ type Event struct {
 	Body         []byte  // OCSF 事件 JSON。
 	Outcome      Outcome // 解析结果：状态、阶段、原因码与细节。
 
+	// DeadLetter 表示该事件应发到死信 topic（仅当配置了死信 topic 时置位）。
+	DeadLetter bool
 	// Truncated 与 OriginalBytes 是数据完整性事实，与"解析是否成功"分开：
 	// 一条被截断的报文可能仍然解析成功（字段都在头部），
 	// 下游需要能分别对"不完整"和"解析失败"告警。
@@ -115,7 +120,7 @@ type Meta struct {
 
 // Job 是一条待解析的报文。
 type Job struct {
-	Source   source.Entry
+	Source   input.Entry
 	Raw      []byte
 	Received time.Time
 	// Fields 非空表示第 1 层已由通道完成（如 syslog 剥信封），
@@ -132,8 +137,14 @@ type Stats struct {
 	Published    uint64 // 已发布的事件数。
 	PublishRetry uint64 // 发布重试次数。
 	Dropped      uint64 // 排空超时被丢弃的事件数；正常应恒为 0。
-	Panics       uint64 // 被 recover 兜住的引擎 panic 次数。
-	QueueDepth   int    // 当前待解析队列长度。
+	// ByProtocol 是按接入协议分维度的计数，键是 http / syslog / kafka。
+	// 看板需要"哪个通道出了问题"，全局计数回答不了。
+	ByProtocol map[string]ProtocolStats
+	// ByInput 是按接入点分维度的计数，键是接入点标识。
+	// 基数受 maxInputSeries 限制：标签值来自用户创建的资源，必须设上限。
+	ByInput    map[string]ProtocolStats
+	Panics     uint64 // 被 recover 兜住的引擎 panic 次数。
+	QueueDepth int    // 当前待解析队列长度。
 }
 
 // Options 是管道容量参数。
@@ -142,8 +153,14 @@ type Options struct {
 	QueueDepth    int           // 待解析队列长度；默认 10000（约 0.2 秒的 5w EPS）。
 	BatchSize     int           // 每批事件数；默认 500。
 	FlushInterval time.Duration // 批量最长等待；默认 2 秒。
+	// ParseFailureTopic 是解析失败事件的独立 topic（必填，配置层已校验）。
+	// 与正常事件共用 topic 会让坏数据占掉保留期与带宽，也让下游过滤成为常态开销。
+	ParseFailureTopic string
+	// OverflowGrace 是队列满时允许等待的上限；默认 250 毫秒。
+	// 与其让设备等到 TCP 超时，不如尽快回 503 + Retry-After，让重试有明确节奏。
+	OverflowGrace time.Duration
 	// DrainTimeout 是关停时排空与最后一批发布的预算；默认 15 秒。
-	// 有界是刻意的：无界排空会让进程永远退不出（Fluent Bit 的 Flush 丢数据事故正是反面教材），
+	// 有界是刻意的：无界排空会让进程永远退不出，强制杀掉又会丢数据。
 	// 超时后丢弃并记 Error，让运维看得见，而不是静默卡住。
 	DrainTimeout time.Duration
 }
@@ -161,6 +178,9 @@ func (o Options) defaults() Options {
 	}
 	if o.FlushInterval <= 0 {
 		o.FlushInterval = 2 * time.Second
+	}
+	if o.OverflowGrace <= 0 {
+		o.OverflowGrace = 250 * time.Millisecond
 	}
 	if o.DrainTimeout <= 0 {
 		o.DrainTimeout = 15 * time.Second
@@ -201,6 +221,18 @@ type Pipeline struct {
 	publishRetry atomic.Uint64
 	panics       atomic.Uint64
 	dropped      atomic.Uint64
+	// 分协议计数：固定三组原子量，避免热路径上出现 map 锁。
+	httpAccepted   atomic.Uint64
+	httpParsed     atomic.Uint64
+	syslogAccepted atomic.Uint64
+	syslogParsed   atomic.Uint64
+	pullAccepted   atomic.Uint64
+	// byInput 按接入点计数；sync.Map 让热路径无锁，容量由 maxInputSeries 兜底。
+	byInput       sync.Map
+	inputSeries   atomic.Int64
+	pullParsed    atomic.Uint64
+	kafkaAccepted atomic.Uint64
+	kafkaParsed   atomic.Uint64
 }
 
 // New 创建管道；Start 才会启动 worker。
@@ -227,7 +259,7 @@ func New(options Options, publisher Publisher) *Pipeline {
 
 // SubmitFields 受理一条已由通道完成线格式解析的报文。
 // syslog 通道用 go-syslog 剥完信封后走这里：字段已就绪，只差规则映射。
-func (p *Pipeline) SubmitFields(ctx context.Context, entry source.Entry, fields map[string]any, received time.Time, meta Meta) error {
+func (p *Pipeline) SubmitFields(ctx context.Context, entry input.Entry, fields map[string]any, received time.Time, meta Meta) error {
 	job := Job{Source: entry, Fields: fields, Received: received, Meta: meta}
 
 	p.inflight.Add(1)
@@ -242,25 +274,20 @@ func (p *Pipeline) SubmitFields(ctx context.Context, entry source.Entry, fields 
 	default:
 	}
 
-	select {
-	case p.jobs <- job:
-		p.accepted.Add(1)
-		return nil
-	case <-p.done:
+	if err := p.enqueue(ctx, job); err != nil {
 		p.inflight.Done()
 
-		return ErrClosed
-	case <-ctx.Done():
-		p.inflight.Done()
-
-		return ctx.Err()
+		return err
 	}
+
+	p.accepted.Add(1)
+
+	return nil
 }
 
-// Submit 受理一条报文。
-// 队列满时阻塞而不是丢弃：背压必须传到通道层，由它阻塞发送方——
-// 丢数据比让设备重发更难补救。
-func (p *Pipeline) Submit(ctx context.Context, entry source.Entry, raw []byte, received time.Time, meta Meta) error {
+// Submit 受理一条报文：先快速尝试入队，队列满时最多等 OverflowGrace。
+// 超出宽限即返回 ErrBusy，由通道层回 503 + Retry-After，让设备按明确节奏重试。
+func (p *Pipeline) Submit(ctx context.Context, entry input.Entry, raw []byte, received time.Time, meta Meta) error {
 	job := Job{Source: entry, Raw: raw, Received: received, Meta: meta}
 
 	// 先登记再入队：Flush 看到计数为零才是真的全空。
@@ -276,15 +303,15 @@ func (p *Pipeline) Submit(ctx context.Context, entry source.Entry, raw []byte, r
 	default:
 	}
 
-	select {
-	case p.jobs <- job:
-		p.accepted.Add(1)
-		return nil
-	case <-ctx.Done():
+	if err := p.enqueue(ctx, job); err != nil {
 		p.inflight.Done()
 
-		return ctx.Err()
+		return err
 	}
+
+	p.accepted.Add(1)
+
+	return nil
 }
 
 // Start 启动解析 worker 与批处理器，阻塞到 ctx 取消或 Close 被调用，然后按顺序关停：
@@ -381,6 +408,8 @@ func (p *Pipeline) Stats() Stats {
 		PublishRetry: p.publishRetry.Load(),
 		Panics:       p.panics.Load(),
 		Dropped:      p.dropped.Load(),
+		ByProtocol:   p.protocolSnapshot(),
+		ByInput:      p.inputSnapshot(),
 		QueueDepth:   len(p.jobs),
 	}
 }
@@ -416,7 +445,7 @@ func (p *Pipeline) handle(job Job) {
 
 // Parse 只做解析与信封构造，不发布。
 // Kafka 消费需要"确认发布成功后再提交位移"，因此由它自己掌控发布与提交的顺序。
-func (p *Pipeline) Parse(entry source.Entry, raw []byte, received time.Time) Event {
+func (p *Pipeline) Parse(entry input.Entry, raw []byte, received time.Time) Event {
 	return p.parse(Job{Source: entry, Raw: raw, Received: received})
 }
 
@@ -449,7 +478,16 @@ func (p *Pipeline) parse(job Job) Event {
 		}
 	}
 
+	parsed := outcome.OK()
+	p.countProtocol(job.Source.Protocol, parsed)
+	p.countInput(job.Source.ID, parsed)
+
 	event.Outcome = outcome
+
+	// 分流策略：配置了死信 topic 才把失败事件单独送走；
+	// 没配就保持"同一 topic + parse.outcome"的旧语义，避免部署差异带来行为差异。
+	event.DeadLetter = !outcome.OK() && p.options.ParseFailureTopic != ""
+
 	if outcome.OK() {
 		p.parsed.Add(1)
 	} else {
@@ -478,7 +516,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 		if recovered := recover(); recovered != nil {
 			p.panics.Add(1)
 			logging.From(context.Background()).Error("Parse engine panicked",
-				"event", "parse.panic", "source_id", job.Source.ID,
+				"event", "parse.panic", "input_id", job.Source.ID,
 				"panic_kind", fmt.Sprintf("%T", recovered), "stack", logging.Stack())
 
 			fields = nil
@@ -494,7 +532,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
 	// 原因码单独区分，运维才能看出该去补规则还是查报文。
-	if job.Source.Rule == nil {
+	if job.Source.Mapping == nil {
 		return nil, nil, Outcome{
 			Status: StatusError,
 			Stage:  StageMap,
@@ -505,12 +543,12 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	// 通道已完成第 1 层：字段直接进第 2 层映射。
 	if job.Fields != nil {
-		mapped := job.Source.Rule.ApplyFields(job.Fields, job.Received)
+		mapped := job.Source.Mapping.ApplyFields(job.Fields, job.Received)
 
 		return mapped.Fields, mapped.Unmapped, Outcome{Status: StatusOK}
 	}
 
-	parsed, err := job.Source.Rule.Apply(job.Raw, job.Received)
+	parsed, err := job.Source.Mapping.Apply(job.Raw, job.Received)
 	if err != nil {
 		return nil, nil, Outcome{
 			Status: StatusError,
@@ -522,7 +560,7 @@ func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outc
 
 	for _, warning := range parsed.Warnings {
 		logging.From(context.Background()).Debug("Rule warning", "event", "parse.warning",
-			"source_id", job.Source.ID, "warning", warning)
+			"input_id", job.Source.ID, "warning", warning)
 	}
 
 	return parsed.Fields, parsed.Unmapped, Outcome{Status: StatusOK}
@@ -610,14 +648,14 @@ func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
 	}
 
 	// 我方簿记放进 metadata.spx：metadata 是 OCSF 预留对象，
-	// 直接塞 source_id/parse_status 会占用标准语义并挡掉必填的 version/product。
+	// 直接塞 input_id/parse.outcome 会占用标准语义并挡掉必填的 version/product。
 	bookkeeping := map[string]any{
-		"source_id":    job.Source.ID,
-		"parse_status": string(event.Outcome.Status),
+		"input_id":      job.Source.ID,
+		"parse.outcome": string(event.Outcome.Status),
 	}
 
 	if !event.Outcome.OK() {
-		bookkeeping["parse_error"] = map[string]any{
+		bookkeeping["parse.error"] = map[string]any{
 			"stage":   string(event.Outcome.Stage),
 			"reason":  string(event.Outcome.Reason),
 			"message": event.Outcome.Detail,
@@ -699,10 +737,10 @@ func fallbackBody(job Job, event Event) []byte {
 		"time":        job.Received.UTC().UnixMilli(),
 		"message":     string(job.Raw),
 		"metadata": map[string]any{
-			"source_id":    job.Source.ID,
-			"event_id":     event.EventID,
-			"parse_status": string(StatusError),
-			"parse_error": map[string]any{
+			"input_id":      job.Source.ID,
+			"event_id":      event.EventID,
+			"parse.outcome": string(StatusError),
+			"parse.error": map[string]any{
 				"stage":   string(StageMap),
 				"reason":  string(ReasonFormatMismatch),
 				"message": "event fields are not serializable",
@@ -784,7 +822,7 @@ func drain(events <-chan Event, batch []Event) []Event {
 //
 // 稳态下无限重试：发布失败意味着下游缺数据，背压继续往上游传。
 // 关停时改为有界——从进入关停起 DrainTimeout 内还发不出去就丢弃并记 Error，
-// 因为无界等待会让进程永远退不出（Kubernetes 会 SIGKILL，反而更糟）。
+// 因为无界等待会让进程永远退不出，而编排层强杀只会丢数据。
 func (p *Pipeline) publish(batch []Event) {
 	if len(batch) == 0 {
 		return
@@ -835,5 +873,136 @@ func (p *Pipeline) publish(batch []Event) {
 		if backoff < 5*time.Second {
 			backoff *= 2
 		}
+	}
+}
+
+// ProtocolStats 是单个协议的计数。
+type ProtocolStats struct {
+	Accepted uint64
+	Parsed   uint64
+}
+
+// countProtocol 累加分协议计数；解析成功与否分别记账。
+func (p *Pipeline) countProtocol(protocol input.Protocol, parsed bool) {
+	switch protocol {
+	case input.ProtocolHTTP:
+		p.httpAccepted.Add(1)
+		if parsed {
+			p.httpParsed.Add(1)
+		}
+	case input.ProtocolSyslog:
+		p.syslogAccepted.Add(1)
+		if parsed {
+			p.syslogParsed.Add(1)
+		}
+	case input.ProtocolPull:
+		p.pullAccepted.Add(1)
+		if parsed {
+			p.pullParsed.Add(1)
+		}
+	case input.ProtocolKafka:
+		p.kafkaAccepted.Add(1)
+		if parsed {
+			p.kafkaParsed.Add(1)
+		}
+	}
+}
+
+// protocolSnapshot 读取分协议计数。
+func (p *Pipeline) protocolSnapshot() map[string]ProtocolStats {
+	return map[string]ProtocolStats{
+		string(input.ProtocolHTTP):   {Accepted: p.httpAccepted.Load(), Parsed: p.httpParsed.Load()},
+		string(input.ProtocolSyslog): {Accepted: p.syslogAccepted.Load(), Parsed: p.syslogParsed.Load()},
+		string(input.ProtocolKafka):  {Accepted: p.kafkaAccepted.Load(), Parsed: p.kafkaParsed.Load()},
+		string(input.ProtocolPull):   {Accepted: p.pullAccepted.Load(), Parsed: p.pullParsed.Load()},
+	}
+}
+
+// maxInputSeries 限制按接入点的序列数。
+//
+// 指标标签的高基数是采集侧的真实风险；接入点是用户创建的资源，
+// 必须设上限，否则一次误操作（批量建接入点）就能拖垮抓取端。
+const maxInputSeries = 512
+
+// inputCounters 是单个接入点的计数。
+type inputCounters struct {
+	accepted atomic.Uint64
+	parsed   atomic.Uint64
+}
+
+// countInput 累加按接入点的计数。
+//
+// 超过上限后不再新增序列：宁可在指标里"看不到那个接入点"，
+// 也不能让内存与抓取端基数无限增长。
+func (p *Pipeline) countInput(inputID string, parsed bool) {
+	if inputID == "" {
+		return
+	}
+
+	value, ok := p.byInput.Load(inputID)
+	if !ok {
+		if p.inputSeries.Load() >= maxInputSeries {
+			return
+		}
+
+		counters := &inputCounters{}
+		actual, loaded := p.byInput.LoadOrStore(inputID, counters)
+		if !loaded {
+			p.inputSeries.Add(1)
+		}
+
+		value = actual
+	}
+
+	counters, ok := value.(*inputCounters)
+	if !ok {
+		return
+	}
+
+	counters.accepted.Add(1)
+	if parsed {
+		counters.parsed.Add(1)
+	}
+}
+
+// inputSnapshot 读取按接入点的计数。
+func (p *Pipeline) inputSnapshot() map[string]ProtocolStats {
+	snapshot := make(map[string]ProtocolStats, 8)
+	p.byInput.Range(func(key, value any) bool {
+		inputID, keyOK := key.(string)
+		counters, valueOK := value.(*inputCounters)
+		if keyOK && valueOK {
+			snapshot[inputID] = ProtocolStats{Accepted: counters.accepted.Load(), Parsed: counters.parsed.Load()}
+		}
+
+		return true
+	})
+
+	return snapshot
+}
+
+// enqueue 先快速尝试入队，队列满时最多等待 OverflowGrace。
+//
+// 有界等待是刻意的：设备端的重试节奏应来自我们的 503 + Retry-After，
+// 而不是让它一直挂到 TCP 超时才发现没人收。
+func (p *Pipeline) enqueue(ctx context.Context, job Job) error {
+	select {
+	case p.jobs <- job:
+		return nil
+	default:
+	}
+
+	timer := time.NewTimer(p.options.OverflowGrace)
+	defer timer.Stop()
+
+	select {
+	case p.jobs <- job:
+		return nil
+	case <-p.done:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ErrBusy
 	}
 }

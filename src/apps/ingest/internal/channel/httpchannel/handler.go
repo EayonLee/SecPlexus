@@ -1,6 +1,6 @@
 // Package httpchannel 实现设备主动推送通道。
 //
-// 契约（spec）：POST /api/v1/ingest/events/{source_id}，Bearer 令牌按接入点校验，
+// 契约（spec）：POST /api/v1/ingest/events/{input_id}，Bearer 令牌按接入点校验，
 // 请求体 10 MiB、数组 1000 条上限，成功 202 返回受理计数；
 // 解析与发布在响应之后异步完成，失败不回传设备。
 package httpchannel
@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -36,7 +36,7 @@ var acceptedContentTypes = map[string]struct{}{
 
 // Channel 是 HTTP 通道。
 type Channel struct {
-	registry source.Lookup      // 接入点与令牌查询。
+	registry input.Lookup       // 接入点与令牌查询。
 	limiter  Limiter            // 每接入点频率限制。
 	pipeline *pipeline.Pipeline // 受理后的解析与发布。
 
@@ -46,14 +46,14 @@ type Channel struct {
 }
 
 // New 创建 HTTP 通道。
-func New(registry source.Lookup, limiter Limiter, line *pipeline.Pipeline) *Channel {
+func New(registry input.Lookup, limiter Limiter, line *pipeline.Pipeline) *Channel {
 	return &Channel{registry: registry, limiter: limiter, pipeline: line}
 }
 
 // ServeHTTP 让通道能独立挂到标准 mux（测试、直连反向代理）。',
 // 路由层自己解析路径参数时请直接调用 Handle。',
 func (c *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	c.Handle(w, r, r.PathValue("source_id"))
+	c.Handle(w, r, r.PathValue("input_id"))
 }
 
 // Handle 处理一次设备推送。sourceID 由路由层解析后传入——
@@ -94,9 +94,9 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 		return
 	}
 
-	// 拆分模式取自解析规则，而不是通道类型：
-	// 通道说"怎么进来"，模式说"字节长什么样"，两者不同。
-	messages, err := parser.Split(splitMode(entry, r.Header.Get("Content-Type")), body)
+	// 拆分顺序：映射声明了多行合并就先用它把连续行合成逻辑消息，
+	// 否则按线格式拆分。多行合并必须在解析之前，否则堆栈会被切成独立事件。
+	messages, err := splitBody(entry, r.Header.Get("Content-Type"), body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "malformed payload")
 		return
@@ -113,7 +113,7 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 		// 队列满时此处阻塞，背压直接传到设备：不丢数据。
 		if err = c.pipeline.Submit(r.Context(), entry, message, received, pipeline.Meta{}); err != nil {
 			logging.From(r.Context()).Warn("Submit aborted", "event", "ingest.submit_aborted",
-				"source_id", entry.ID, "accepted", accepted, "rejected", len(messages)-accepted,
+				"input_id", entry.ID, "accepted", accepted, "rejected", len(messages)-accepted,
 				"error", logging.Error(err))
 
 			break
@@ -139,12 +139,23 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 	writeAccepted(w, accepted, len(messages)-accepted)
 }
 
+// splitBody 按映射与请求体类型把报文切成消息。
+func splitBody(entry input.Entry, contentType string, body []byte) ([][]byte, error) {
+	if entry.Mapping != nil {
+		if merge := entry.Mapping.Multiline(); merge != nil {
+			return merge(body)
+		}
+	}
+
+	return parser.Split(splitMode(entry, contentType), body)
+}
+
 // splitMode 决定用什么线格式拆分请求体。
 // 挂了规则就用规则声明的模式；未挂规则时按请求体类型推断：
 // text/plain 一行一条，其余按 JSON（数组与 NDJSON 都能拆）。
-func splitMode(entry source.Entry, contentType string) string {
-	if entry.Rule != nil {
-		return entry.Rule.Rule().Parse.Mode
+func splitMode(entry input.Entry, contentType string) string {
+	if entry.Mapping != nil {
+		return entry.Mapping.Mapping().Parse.Mode
 	}
 
 	mediaType, _, err := mime.ParseMediaType(contentType)
@@ -158,17 +169,17 @@ func splitMode(entry source.Entry, contentType string) string {
 
 // authorize 校验 Bearer 令牌与路径上的接入点是否配对。
 // 令牌属于 A 而路径写 B 必须拒绝：否则一个令牌能往任意接入点写事件。
-func (c *Channel) authorize(w http.ResponseWriter, r *http.Request, sourceID string) (source.Entry, bool) {
+func (c *Channel) authorize(w http.ResponseWriter, r *http.Request, sourceID string) (input.Entry, bool) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		writeError(w, http.StatusUnauthorized, "missing token")
-		return source.Entry{}, false
+		return input.Entry{}, false
 	}
 
-	entry, ok := c.registry.ByTokenDigest(source.DigestToken(token))
+	entry, ok := c.registry.ByTokenDigest(input.DigestToken(token))
 	if !ok || !sameID(entry.ID, sourceID) {
 		writeError(w, http.StatusUnauthorized, "invalid token")
-		return source.Entry{}, false
+		return input.Entry{}, false
 	}
 
 	return entry, true

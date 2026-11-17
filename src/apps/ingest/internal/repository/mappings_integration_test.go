@@ -13,11 +13,11 @@ import (
 const validRule = `{"id":"r","name":"r","parse":{"mode":"json"},"field_map":{"src":"src_endpoint.ip"},"constants":{"class_uid":2004}}`
 
 // 回归：编译不过的规则不进表——避免运行期才发现。
-func TestCreateRuleRejectsUncompilableSpec(t *testing.T) {
+func TestCreateMappingRejectsUncompilableSpec(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
 
-	if _, err := repository.CreateRule(ctx, pool, repository.CreateRuleInput{
+	if _, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{
 		Name: uniqueName(t, "badrule"),
 		Spec: []byte(`{"id":"b","name":"b","parse":{"mode":"protobuf"},"field_map":{},"constants":{"class_uid":2004}}`),
 	}); err == nil {
@@ -26,14 +26,14 @@ func TestCreateRuleRejectsUncompilableSpec(t *testing.T) {
 }
 
 // 回归：换规则内容会让版本自增，事件才能按版本归因。
-func TestUpdateRuleBumpsVersion(t *testing.T) {
+func TestUpdateMappingBumpsVersion(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
 
 	name := uniqueName(t, "rule")
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM ingest.parse_rules WHERE name = $1`, name) })
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM ingest.mappings WHERE name = $1`, name) })
 
-	created, err := repository.CreateRule(ctx, pool, repository.CreateRuleInput{Name: name, Spec: []byte(validRule)})
+	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: name, Spec: []byte(validRule)})
 	if err != nil {
 		t.Fatalf("创建失败: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestUpdateRuleBumpsVersion(t *testing.T) {
 		t.Fatalf("初始版本 = %d，期望 1", created.Version)
 	}
 
-	updated, err := repository.UpdateRule(ctx, pool, created.ID, repository.CreateRuleInput{
+	updated, err := repository.UpdateMapping(ctx, pool, created.ID, repository.CreateMappingParams{
 		Name: name,
 		Spec: []byte(`{"id":"r","name":"r","parse":{"mode":"kv"},"field_map":{"a":"actor.user.name"},"constants":{"class_uid":2004}}`),
 	})
@@ -53,31 +53,31 @@ func TestUpdateRuleBumpsVersion(t *testing.T) {
 	}
 }
 
-// 回归：删除仍被接入点引用的规则必须返回 ErrRuleReferenced（接口转 409）。
-func TestDeleteRuleInUseIsRejected(t *testing.T) {
+// 回归：删除仍被接入点引用的规则必须返回 ErrMappingReferenced（接口转 409）。
+func TestDeleteMappingInUseIsRejected(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
 
 	ruleName := uniqueName(t, "usedrule")
 	sourceName := uniqueName(t, "usedsrc")
 
-	created, err := repository.CreateRule(ctx, pool, repository.CreateRuleInput{Name: ruleName, Spec: []byte(validRule)})
+	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: ruleName, Spec: []byte(validRule)})
 	if err != nil {
 		t.Fatalf("创建规则失败: %v", err)
 	}
 
-	if _, _, err = repository.CreateSource(ctx, pool, repository.CreateSourceInput{
-		Name: sourceName, Transport: "http", ParseRuleID: &created.ID,
+	if _, _, err = repository.CreateInput(ctx, pool, repository.CreateInputParams{
+		Name: sourceName, Protocol: "http", MappingID: &created.ID,
 	}); err != nil {
 		t.Fatalf("创建接入点失败: %v", err)
 	}
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM ingest.sources WHERE name = $1`, sourceName)
-		_, _ = pool.Exec(ctx, `DELETE FROM ingest.parse_rules WHERE name = $1`, ruleName)
+		_, _ = pool.Exec(ctx, `DELETE FROM ingest.inputs WHERE name = $1`, sourceName)
+		_, _ = pool.Exec(ctx, `DELETE FROM ingest.mappings WHERE name = $1`, ruleName)
 	})
 
-	if err = repository.DeleteRule(ctx, pool, created.ID); !errors.Is(err, repository.ErrRuleReferenced) {
-		t.Fatalf("错误 = %v，期望 ErrRuleReferenced", err)
+	if err = repository.DeleteMapping(ctx, pool, created.ID); !errors.Is(err, repository.ErrMappingReferenced) {
+		t.Fatalf("错误 = %v，期望 ErrMappingReferenced", err)
 	}
 }

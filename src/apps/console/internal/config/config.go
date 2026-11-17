@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
@@ -22,9 +23,16 @@ type App struct {
 func (a App) Addr() string { return net.JoinHostPort(a.Host, strconv.Itoa(a.Port)) }
 
 // Config 包含 Console 启动和运行所需的配置。
+// Stream 描述事件流的运行参数。
+type Stream struct {
+	// ReauthInterval 是长连接重新鉴权的间隔；0 表示 30 秒。
+	ReauthInterval time.Duration `yaml:"reauth_interval"`
+}
+
 type Config struct {
-	App App `yaml:"app"` // 服务监听配置。
-	IAM struct {
+	App    App    `yaml:"app"`    // 服务监听配置。
+	Stream Stream `yaml:"stream"` // 事件流参数。
+	IAM    struct {
 		Host    string `yaml:"host" validate:"required,hostname|ip"` // IAM 连接目标，IP 或域名。
 		Port    int    `yaml:"port" validate:"gte=1,lte=65535"`      // IAM 连接端口。
 		BaseURL string `yaml:"-"`                                    // 由结构化连接字段派生，不接受另一份 URL 配置。

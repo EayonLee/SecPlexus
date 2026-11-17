@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/encoding"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 )
@@ -62,10 +63,15 @@ type Event struct {
 	Warnings []string       // 非致命问题：级别或时间无法折算等。
 }
 
-// Engine 把一条规则与它的解析器、投影计划绑定在一起。
+// Compiled 把一条规则与它的解析器、投影计划绑定在一起。
 // 构造后不再修改内部状态，可被多个 worker 并发调用。
-type Engine struct {
-	rule           Rule
+type Compiled struct {
+	// encoding 是来源字符集解码器；nil 表示报文已是 UTF-8。
+	encoding encoding.Encoding
+	// multiline 是多行合并器；nil 表示该映射不做行合并。
+	multiline func([]byte) ([][]byte, error)
+
+	mapping        Mapping
 	parser         parser.Parser
 	projections    []projection
 	constants      []constant
@@ -75,18 +81,33 @@ type Engine struct {
 }
 
 // Rule 返回绑定到引擎的规则，供指标与诊断使用。
-func (e *Engine) Rule() Rule { return e.rule }
+func (e *Compiled) Mapping() Mapping { return e.mapping }
+
+// Decode 把报文转成 UTF-8；未配置字符集时原样返回。
+//
+// 通道必须在任何解析器之前调用它：syslog 由 go-syslog 先剥信封，
+// 若等到字段解析之后再解码，信封里的主机名与消息已经是乱码。
+func (e *Compiled) Decode(raw []byte) ([]byte, error) { return decode(e.encoding, raw) }
+
+// Multiline 返回多行合并器；nil 表示该映射不做行合并。
+func (e *Compiled) Multiline() func([]byte) ([][]byte, error) { return e.multiline }
 
 // Apply 解析一条消息并投影成 OCSF 事件。
 //
 // receivedAt 是通道收到这条消息的时刻，事件时间解析失败时作为回退，
 // 因此每条事件都有时间——OCSF 事件缺时间会让保留期与窗口聚合全部失效。
 //
-// 解析失败返回错误，调用方记为 parse_status=error；
+// 解析失败返回错误，调用方记为 parse.outcome=error；
 // 级别或时间折算不了只记 warning，事件照常产出——
 // 不因一个字段不可信就丢掉整条日志。
-func (e *Engine) Apply(raw []byte, receivedAt time.Time) (Event, error) {
-	fields, err := e.parser.Parse(raw)
+func (e *Compiled) Apply(raw []byte, receivedAt time.Time) (Event, error) {
+	// 先在报文层转成 UTF-8：按错误字符集解析出来的字段是乱码，后续映射救不回来。
+	decoded, err := decode(e.encoding, raw)
+	if err != nil {
+		return Event{}, err
+	}
+
+	fields, err := e.parser.Parse(decoded)
 	if err != nil {
 		return Event{}, err
 	}
@@ -97,7 +118,7 @@ func (e *Engine) Apply(raw []byte, receivedAt time.Time) (Event, error) {
 // ApplyFields 只做第 2 层：把已解析的扁平字段投影成 OCSF 事件。
 // 第 1 层由通道自己做时用它——syslog 通道先用 go-syslog 剥信封，
 // 再把字段交给规则映射，两层职责仍然不混。
-func (e *Engine) ApplyFields(fields map[string]any, receivedAt time.Time) Event {
+func (e *Compiled) ApplyFields(fields map[string]any, receivedAt time.Time) Event {
 	event := Event{Fields: make(map[string]any, len(e.projections)+len(e.constants)+4)}
 
 	for index := range e.projections {
@@ -126,7 +147,7 @@ func (e *Engine) ApplyFields(fields map[string]any, receivedAt time.Time) Event 
 // collectUnmapped 记录规则没有用到的源字段；一个都没有时不分配 map。
 // 命中敏感名单的字段保留键名、替换值：
 // 规则作者仍能看到"这里有个字段值得映射"，凭证却不进入事件存储。
-func (e *Engine) collectUnmapped(event *Event, fields map[string]any) {
+func (e *Compiled) collectUnmapped(event *Event, fields map[string]any) {
 	for source, value := range fields {
 		if _, ok := e.consumed[source]; ok {
 			continue
@@ -148,15 +169,15 @@ func (e *Engine) collectUnmapped(event *Event, fields map[string]any) {
 // stampSeverity 把级别折算成 severity_id。
 // OCSF 事件必须带级别：规则没声明、字段缺失或值表未命中都落到 Unknown（0）并记 warning，
 // 绝不产出缺级别的伪 OCSF 事件。
-func (e *Engine) stampSeverity(event *Event, fields map[string]any) {
-	if e.rule.Severity.Field == "" {
+func (e *Compiled) stampSeverity(event *Event, fields map[string]any) {
+	if e.mapping.Severity.Field == "" {
 		event.Fields["severity_id"] = SeverityUnknown
 		return
 	}
 
-	raw, ok := fields[e.rule.Severity.Field]
+	raw, ok := fields[e.mapping.Severity.Field]
 	if !ok {
-		event.Warnings = append(event.Warnings, "severity field missing: "+e.rule.Severity.Field)
+		event.Warnings = append(event.Warnings, "severity field missing: "+e.mapping.Severity.Field)
 		event.Fields["severity_id"] = SeverityUnknown
 		return
 	}
@@ -173,12 +194,12 @@ func (e *Engine) stampSeverity(event *Event, fields map[string]any) {
 
 // stampTime 写事件时间：规则声明的时间字段优先，解析失败或未声明时回退接收时间。
 // 两种来源都写成 OCSF 的 time（epoch 毫秒），事件永远带时间。
-func (e *Engine) stampTime(event *Event, fields map[string]any, receivedAt time.Time) {
-	if e.rule.Time.Field != "" {
-		raw, ok := fields[e.rule.Time.Field]
+func (e *Compiled) stampTime(event *Event, fields map[string]any, receivedAt time.Time) {
+	if e.mapping.Time.Field != "" {
+		raw, ok := fields[e.mapping.Time.Field]
 		if !ok {
-			event.Warnings = append(event.Warnings, "time field missing: "+e.rule.Time.Field)
-		} else if millis, err := parseTime(textValue(raw), e.rule.Time.Formats, e.location); err == nil {
+			event.Warnings = append(event.Warnings, "time field missing: "+e.mapping.Time.Field)
+		} else if millis, err := parseTime(textValue(raw), e.mapping.Time.Formats, e.location); err == nil {
 			event.Fields["time"] = millis
 
 			return

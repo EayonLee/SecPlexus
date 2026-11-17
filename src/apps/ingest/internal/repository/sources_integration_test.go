@@ -4,6 +4,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -72,57 +74,62 @@ func uniqueName(t *testing.T, suffix string) string {
 }
 
 // 回归：每种传输方式缺字段都必须被数据库拒绝，而不是靠应用层判断。
-func TestSourceTransportFieldsAreEnforcedByDatabase(t *testing.T) {
+// 协议必填字段由用例层校验：configuration 是 JSON，数据库无法表达「每种协议必填什么」。
+// 依据：Graylog 也是按输入类型校验 configuration，而不是给每种类型加固定列。
+func TestInputConfigurationIsValidatedPerProtocol(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
 
-	tests := map[string]struct {
-		transport string
-		token     []byte
-		port      *int
-		topic     *string
-		brokers   []string
-	}{
-		"http without token":    {transport: "http"},
-		"syslog without port":   {transport: "syslog"},
-		"kafka without topic":   {transport: "kafka", brokers: []string{"127.0.0.1:9092"}},
-		"http with syslog port": {transport: "http", token: make([]byte, 32), port: intPtr(5514)},
-		"unknown transport":     {transport: "smtp", token: make([]byte, 32)},
+	// 端口必须唯一：用当前纳秒推导一个测试专用值，避免与历史行冲突。
+	port := int32(15000 + time.Now().UnixNano()%40000)
+	topic := "logs"
+
+	invalid := map[string]repository.CreateInputParams{
+		"syslog without port":   {Name: "v-syslog", Protocol: "syslog"},
+		"kafka without brokers": {Name: "v-kafka1", Protocol: "kafka", KafkaTopic: &topic},
+		"kafka without topic":   {Name: "v-kafka2", Protocol: "kafka", KafkaBrokers: []string{"127.0.0.1:9092"}},
+		"unknown protocol":      {Name: "v-unknown", Protocol: "smtp"},
 	}
 
-	for name, test := range tests {
+	for name, params := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := pool.Exec(ctx,
-				`INSERT INTO ingest.sources (id, name, transport, token_digest, syslog_port, kafka_topic, kafka_brokers)
-				 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)`,
-				uniqueName(t, "bad"), test.transport, test.token, test.port, test.topic, test.brokers)
-			if err == nil {
-				t.Fatal("数据库接受了非法组合")
+			params.Name = uniqueName(t, params.Name)
+
+			if _, _, err := repository.CreateInput(ctx, pool, params); !errors.Is(err, repository.ErrInvalidCombination) {
+				t.Fatalf("错误 = %v，期望 ErrInvalidCombination", err)
 			}
 		})
 	}
-}
 
-// 回归：两个 syslog 接入点不能抢同一个端口。
+	// 合法组合不能被误拒。
+	if _, _, err := repository.CreateInput(ctx, pool, repository.CreateInputParams{
+		Name: uniqueName(t, "v-valid"), Protocol: "syslog", SyslogPort: &port,
+	}); err != nil {
+		t.Fatalf("合法 syslog 配置被拒绝: %v", err)
+	}
+}
 func TestSyslogPortIsUnique(t *testing.T) {
 	pool := openPool(t)
 	ctx := context.Background()
 
-	port := 5900 + int(time.Now().UnixNano()%300)
+	// 端口取自时间戳，先按端口清理残留行：抛随机数撞库不是可靠做法。
+	port := 15000 + int(time.Now().UnixNano()%40000)
 
 	cleanup := func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM ingest.sources WHERE syslog_port = $1`, port)
+		_, _ = pool.Exec(ctx, `DELETE FROM ingest.inputs WHERE configuration->>'port' = $1`, strconv.Itoa(port))
 	}
+
+	cleanup()
 	t.Cleanup(cleanup)
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO ingest.sources (id, name, transport, syslog_port) VALUES (gen_random_uuid(), $1, 'syslog', $2)`,
+		`INSERT INTO ingest.inputs (id, name, protocol, configuration) VALUES (gen_random_uuid(), $1, 'syslog', jsonb_build_object('port', $2::int))`,
 		uniqueName(t, "p1"), port); err != nil {
 		t.Fatalf("第一条插入失败: %v", err)
 	}
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO ingest.sources (id, name, transport, syslog_port) VALUES (gen_random_uuid(), $1, 'syslog', $2)`,
+		`INSERT INTO ingest.inputs (id, name, protocol, configuration) VALUES (gen_random_uuid(), $1, 'syslog', jsonb_build_object('port', $2::int))`,
 		uniqueName(t, "p2"), port); err == nil {
 		t.Fatal("同一端口被两个接入点占用")
 	}
@@ -138,24 +145,23 @@ func TestDeleteReferencedRuleIsRejected(t *testing.T) {
 
 	var ruleID string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO ingest.parse_rules (id, name, spec) VALUES (gen_random_uuid(), $1, '{}'::jsonb) RETURNING id`,
+		`INSERT INTO ingest.mappings (id, name, definition) VALUES (gen_random_uuid(), $1, '{}'::jsonb) RETURNING id`,
 		ruleName).Scan(&ruleID); err != nil {
 		t.Fatalf("创建规则失败: %v", err)
 	}
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO ingest.sources (id, name, transport, token_digest, parse_rule_id)
-		 VALUES (gen_random_uuid(), $1, 'http', $2, $3)`,
-		sourceName, make([]byte, 32), ruleID); err != nil {
+		`INSERT INTO ingest.inputs (id, name, protocol, mapping_id) VALUES (gen_random_uuid(), $1, 'http', $2)`,
+		sourceName, ruleID); err != nil {
 		t.Fatalf("创建接入点失败: %v", err)
 	}
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM ingest.sources WHERE name = $1`, sourceName)
-		_, _ = pool.Exec(ctx, `DELETE FROM ingest.parse_rules WHERE name = $1`, ruleName)
+		_, _ = pool.Exec(ctx, `DELETE FROM ingest.inputs WHERE name = $1`, sourceName)
+		_, _ = pool.Exec(ctx, `DELETE FROM ingest.mappings WHERE name = $1`, ruleName)
 	})
 
-	if _, err := pool.Exec(ctx, `DELETE FROM ingest.parse_rules WHERE id = $1`, ruleID); err == nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM ingest.mappings WHERE id = $1`, ruleID); err == nil {
 		t.Fatal("删除仍被引用的规则没有被拒绝")
 	}
 }

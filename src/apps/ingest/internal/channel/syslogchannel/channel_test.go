@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/source"
 )
 
 // collector 记录已发布事件。
@@ -46,10 +46,10 @@ func (c *collector) count() int {
 }
 
 // syslogRule 映射 syslog 信封里的主机与消息。
-func syslogRule(t *testing.T) *normalizer.Engine {
+func syslogRule(t *testing.T) *normalizer.Compiled {
 	t.Helper()
 
-	engine, err := normalizer.Compile(normalizer.Rule{
+	engine, err := normalizer.Compile(normalizer.Mapping{
 		ID:    "syslog-test",
 		Parse: parser.Spec{Mode: parser.ModeKV},
 		FieldMap: map[string]string{
@@ -109,12 +109,12 @@ func freePort(t *testing.T) int {
 func harness(t *testing.T, port int) (*collector, *pipeline.Pipeline, func()) {
 	t.Helper()
 
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID:        "syslog-1",
-		Transport: source.TransportSyslog,
-		Port:      port,
-		Rule:      syslogRule(t),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID:       "syslog-1",
+		Protocol: input.ProtocolSyslog,
+		Port:     port,
+		Mapping:  syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -214,9 +214,9 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	firstPort := freePort(t)
 	secondPort := freePort(t)
 
-	registry := source.NewMemory()
-	registry.Replace([]source.Entry{{
-		ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Rule: syslogRule(t),
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "syslog-1", Protocol: input.ProtocolSyslog, Port: firstPort, Mapping: syslogRule(t),
 	}})
 
 	publisher := &collector{}
@@ -240,9 +240,9 @@ func TestReloadBindsNewConnector(t *testing.T) {
 	}()
 
 	// 追加一个接入点，周期刷新应当把它绑定。
-	registry.Replace([]source.Entry{
-		{ID: "syslog-1", Transport: source.TransportSyslog, Port: firstPort, Rule: syslogRule(t)},
-		{ID: "syslog-2", Transport: source.TransportSyslog, Port: secondPort, Rule: syslogRule(t)},
+	registry.Replace([]input.Entry{
+		{ID: "syslog-1", Protocol: input.ProtocolSyslog, Port: firstPort, Mapping: syslogRule(t)},
+		{ID: "syslog-2", Protocol: input.ProtocolSyslog, Port: secondPort, Mapping: syslogRule(t)},
 	})
 
 	var bound bool

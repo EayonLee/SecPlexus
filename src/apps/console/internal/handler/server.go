@@ -2,8 +2,6 @@
 package handler
 
 import (
-	"errors"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,35 +13,18 @@ import (
 
 // Server 使用 IAM 的授权结果处理 Console 请求。
 type Server struct {
-	IAM *iamclient.Client // 用于验证会话与扁平授权的 IAM 客户端。
-}
-
-// authorize 验证原始会话与 iam.users.read 权限，拒绝不可信的浏览器身份声明。
-// 授权只有「用户 → 角色 → 权限」，没有范围参数。
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (iamclient.CapabilityDecision, bool) {
-	decision, err := s.IAM.Authorize(r.Context(), r, iamclient.PermissionIAMUsersRead)
-	if err != nil {
-		var failure *iamclient.Error
-		if errors.As(err, &failure) {
-			if failure.Code == result.CodeRateLimited {
-				w.Header().Set("Retry-After", "60")
-			}
-			result.Fail(w, failure.Code)
-		} else {
-			result.Fail(w, result.CodeServiceUnavailable)
-		}
-
-		return iamclient.CapabilityDecision{}, false
-	}
-
-	return decision, true
+	// ReauthInterval 是事件流重新鉴权的间隔；0 表示 30 秒。
+	ReauthInterval time.Duration
+	IAM            *iamclient.Client // 用于验证会话与扁平授权的 IAM 客户端。
 }
 
 // Context 返回已经 IAM 验证的当前身份上下文。
 func (s *Server) Context(c *gin.Context) {
-	w, r := c.Writer, c.Request
-	decision, ok := s.authorize(w, r)
+	w := c.Writer
+	decision, ok := principal(c)
 	if !ok {
+		result.Fail(w, result.CodeUnauthenticated)
+
 		return
 	}
 
@@ -55,13 +36,15 @@ func (s *Server) Context(c *gin.Context) {
 
 // Events 订阅事件并定期重新鉴权，权限撤销后结束流。
 func (s *Server) Events(c *gin.Context) {
-	w, r := c.Writer, c.Request
-	decision, ok := s.authorize(w, r)
+	w := c.Writer
+	decision, ok := principal(c)
 	if !ok {
+		result.Fail(w, result.CodeUnauthenticated)
+
 		return
 	}
 
-	logger := logging.From(r.Context()).With("user_id", decision.Principal.UserID, "decision_id", decision.DecisionID)
+	logger := logging.From(c.Request.Context()).With("user_id", decision.Principal.UserID, "decision_id", decision.DecisionID)
 	started := time.Now()
 	reason := "client_disconnected"
 	defer func() {
@@ -79,15 +62,20 @@ func (s *Server) Events(c *gin.Context) {
 	c.Writer.Flush()
 	logger.Info("事件流已建立", "event", "sse.opened")
 	// 在三十秒撤权目标内，为有界 IAM 调用预留五秒。
-	ticker := time.NewTicker(25 * time.Second)
+	interval := s.ReauthInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-c.Request.Context().Done():
 			return
 		case <-ticker.C:
-			next, err := s.IAM.Authorize(r.Context(), r, iamclient.PermissionIAMUsersRead)
+			next, err := s.IAM.Authorize(c.Request.Context(), c.Request, iamclient.PermissionIAMUsersRead)
 			if err != nil || !next.Allowed {
 				reason = "access_revoked"
 				if err != nil {
@@ -106,4 +94,18 @@ func (s *Server) Events(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+}
+
+// principal 从 gin 上下文取出 Guard 写入的会话主体。
+//
+// 鉴权与审计已在中间件完成，handler 只读取所需信息。
+func principal(c *gin.Context) (iamclient.CapabilityDecision, bool) {
+	value, exists := c.Get(iamclient.PrincipalKey)
+	if !exists {
+		return iamclient.CapabilityDecision{}, false
+	}
+
+	decision, ok := value.(iamclient.CapabilityDecision)
+
+	return decision, ok
 }

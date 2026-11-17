@@ -175,3 +175,47 @@ func (s *Security) GinProtect() gin.HandlerFunc {
 		}
 	}
 }
+
+// discardWriter 丢弃校验器的响应体，只关心校验是否通过。
+type discardWriter struct{ header http.Header }
+
+func (d *discardWriter) Header() http.Header {
+	if d.header == nil {
+		d.header = make(http.Header)
+	}
+
+	return d.header
+}
+
+func (d *discardWriter) Write(data []byte) (int, error) { return len(data), nil }
+func (d *discardWriter) WriteHeader(int)                {}
+
+// VerifyCSRF 用与 Protect 完全相同的规则校验一次请求，不写响应。
+//
+// 服务间授权入口（/authorize）原本绕过了 CSRF 中间件：调用方是受信服务，
+// 但请求里携带的是**浏览器的用户会话**，因此状态变更必须同样校验来源与令牌。
+// 把校验放在这里而不是各业务服务，是为了让控制面只有一处实现。
+func (s *Security) VerifyCSRF(r *http.Request) bool {
+	if safeMethod(r.Method) {
+		return true
+	}
+
+	host, ok := s.origins[r.Header.Get("Origin")]
+	if !ok {
+		return false
+	}
+
+	request := r.Clone(r.Context())
+	request.Host = host
+	request.URL.Scheme = s.scheme
+	request.URL.Host = host
+	if !s.secure {
+		request = csrf.PlaintextHTTPRequest(request)
+	}
+
+	verified := false
+	s.protect(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { verified = true })).
+		ServeHTTP(&discardWriter{}, request)
+
+	return verified
+}

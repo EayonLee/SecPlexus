@@ -31,6 +31,9 @@ const (
 )
 
 var (
+	// ErrDecodeFailed 表示报文无法按配置的字符集解码；
+	// 它属于报文层问题，与"规则不合法"分开，方便按原因统计。
+	ErrDecodeFailed = errors.New("message cannot be decoded with the configured encoding")
 	// ErrInvalidRule 表示规则定义不完整或超出值域；加载即拒绝。
 	ErrInvalidRule = errors.New("invalid parse rule")
 	// ErrSampleFailed 表示规则自带的样本没能通过解析或映射。
@@ -55,7 +58,7 @@ type TimeSpec struct {
 }
 
 // Rule 是一条解析规则的完整定义。
-type Rule struct {
+type Mapping struct {
 	ID          string            // 规则标识，在同一模块内唯一。
 	Name        string            // 展示名称。
 	Vendor      string            // 厂商。
@@ -67,6 +70,12 @@ type Rule struct {
 	Time        TimeSpec          // 事件时间解析规则。
 	Constants   map[string]any    // 最后写入的固定值，覆盖映射结果。
 	Samples     []string          // 真实样本，编译时逐条校验。
+	// Multiline 声明如何在解析前把连续行合成一条消息。
+	// 放在映射而不是通道：换一条规则就应该换掉行合并策略。
+	Multiline parser.Multiline
+	// Encoding 声明报文的来源字符集（如 gbk、big5）；空或 utf-8 表示无需解码。
+	// 字符集属于解析配置：同一条链路换个来源设备，编码往往跟着变。
+	Encoding string
 }
 
 // maxSeverityID 是 OCSF severity_id 的上界。
@@ -75,7 +84,7 @@ const maxSeverityID = SeverityFatal
 // Compile 校验规则并绑定解析器与预编译的投影计划。
 // 返回的引擎不可变，可被多个 worker 并发调用。
 // 校验分三层：规则结构（含路径合法性）、解析器参数、样本实跑。
-func Compile(rule Rule) (*Engine, error) {
+func Compile(rule Mapping) (*Compiled, error) {
 	if err := rule.validate(); err != nil {
 		return nil, err
 	}
@@ -102,8 +111,25 @@ func Compile(rule Rule) (*Engine, error) {
 		severityValues[normalizeKey(value)] = id
 	}
 
-	engine := &Engine{
-		rule:           rule,
+	// 多行合并是构造期编译的：运行期每条报文都要用，不能现解析正则。
+	var merge func([]byte) ([][]byte, error)
+	if rule.Multiline.StartPattern != "" {
+		merge, err = parser.NewMultiline(rule.Multiline)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 字符集解码器同样在构造期解析：未知编码加载即拒绝。
+	sourceEncoding, err := resolveEncoding(rule.Encoding)
+	if err != nil {
+		return nil, err
+	}
+
+	engine := &Compiled{
+		mapping:        rule,
+		encoding:       sourceEncoding,
+		multiline:      merge,
 		parser:         instance,
 		projections:    compileFieldMap(rule.FieldMap),
 		constants:      compileConstants(rule.Constants),
@@ -145,7 +171,7 @@ func compileConstants(constants map[string]any) []constant {
 
 // consumedSources 汇总规则自身消费掉的源字段。
 // unmapped 的意义是"规则没有用到的字段"，级别与时间字段已经用过，不该再报。
-func consumedSources(rule Rule) map[string]struct{} {
+func consumedSources(rule Mapping) map[string]struct{} {
 	consumed := make(map[string]struct{}, len(rule.FieldMap)+2)
 	for source := range rule.FieldMap {
 		consumed[source] = struct{}{}
@@ -161,14 +187,14 @@ func consumedSources(rule Rule) map[string]struct{} {
 }
 
 // validate 检查规则结构的必填项与值域，错误定位到字段。
-func (r Rule) validate() error {
-	if strings.TrimSpace(r.ID) == "" {
+func (m Mapping) validate() error {
+	if strings.TrimSpace(m.ID) == "" {
 		return fmt.Errorf("%w: id is required", ErrInvalidRule)
 	}
 
-	targets := make(map[string]string, len(r.FieldMap))
-	fieldTargets := make(map[string]struct{}, len(r.FieldMap))
-	for source, target := range r.FieldMap {
+	targets := make(map[string]string, len(m.FieldMap))
+	fieldTargets := make(map[string]struct{}, len(m.FieldMap))
+	for source, target := range m.FieldMap {
 		if strings.TrimSpace(source) == "" {
 			return fmt.Errorf("%w: field_map has an empty source", ErrInvalidRule)
 		}
@@ -203,7 +229,7 @@ func (r Rule) validate() error {
 		}
 	}
 
-	for _, value := range r.Severity.Values {
+	for _, value := range m.Severity.Values {
 		if value < SeverityUnknown || value > maxSeverityID {
 			return fmt.Errorf("%w: severity maps to %d, outside 0-%d", ErrInvalidRule, value, maxSeverityID)
 		}
@@ -211,8 +237,8 @@ func (r Rule) validate() error {
 
 	// 值表键在匹配前会归一化（小写、去空白）；两个键归一后相同会让映射不确定，
 	// 加载期拒绝，而不是让 map 迭代顺序决定谁赢。
-	normalized := make(map[string]struct{}, len(r.Severity.Values))
-	for value := range r.Severity.Values {
+	normalized := make(map[string]struct{}, len(m.Severity.Values))
+	for value := range m.Severity.Values {
 		key := normalizeKey(value)
 		if _, exists := normalized[key]; exists {
 			return fmt.Errorf("%w: severity values collide on %q after normalization", ErrInvalidRule, key)
@@ -221,16 +247,16 @@ func (r Rule) validate() error {
 		normalized[key] = struct{}{}
 	}
 
-	if r.Severity.Field != "" && len(r.Severity.Values) == 0 {
+	if m.Severity.Field != "" && len(m.Severity.Values) == 0 {
 		return fmt.Errorf("%w: severity field needs a value table", ErrInvalidRule)
 	}
 
-	if r.Time.Field != "" && len(r.Time.Formats) == 0 {
+	if m.Time.Field != "" && len(m.Time.Formats) == 0 {
 		return fmt.Errorf("%w: time field needs at least one format", ErrInvalidRule)
 	}
 
-	constantTargets := make(map[string]struct{}, len(r.Constants))
-	for target := range r.Constants {
+	constantTargets := make(map[string]struct{}, len(m.Constants))
+	for target := range m.Constants {
 		segments, err := validatePath(target)
 		if err != nil {
 			return fmt.Errorf("%w: constant %q: %w", ErrInvalidRule, target, err)
@@ -241,7 +267,7 @@ func (r Rule) validate() error {
 
 	// class_uid 是下游按类路由的唯一依据，缺失或空值的事件是伪 OCSF，直接拒绝。
 	// 缺键与显式 nil 都取到零值 nil，一次判断覆盖两种情况。
-	if r.Constants["class_uid"] == nil {
+	if m.Constants["class_uid"] == nil {
 		return fmt.Errorf("%w: constants must declare a non-nil class_uid", ErrInvalidRule)
 	}
 

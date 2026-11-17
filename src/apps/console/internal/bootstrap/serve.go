@@ -38,7 +38,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	server := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           router.Handler(&handler.Server{IAM: client}),
+		Handler:           router.Handler(&handler.Server{IAM: client, ReauthInterval: cfg.Stream.ReauthInterval}, client),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
@@ -15,6 +16,8 @@ import (
 type Server struct {
 	// Ready 报告外部依赖是否可用；nil 表示当前没有需要检查的依赖。
 	Ready func(ctx context.Context) error
+	// Stats 返回流水线计数；nil 表示指标端点不启用。
+	Stats func() pipeline.Stats
 }
 
 // ReadyHandler 就绪检查：依赖不可用时返回 503，负载均衡据此摘除实例。

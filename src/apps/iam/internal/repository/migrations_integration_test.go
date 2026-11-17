@@ -145,17 +145,17 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	provider, err := goose.NewProvider("", db, migrations.Files, goose.WithStore(versionStore), goose.WithDisableGlobalRegistry(true))
-	if err != nil {
-		t.Fatal(err)
-	}
 	// 账本在 iam schema 内，因此必须先建 schema（与 Migrate 的 ensureSchema 一致）。
 	if _, err = db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS iam"); err != nil {
 		t.Fatal(err)
 	}
 
-	// 只应用第一条迁移：schema 落后于目标版本，必须既不能服务、也要如实报告 pending。
-	if _, err = provider.UpTo(ctx, 1); err != nil {
+	// 迁移历史已合并为单条基线：「只应用前 N-1 条」不再可表达。
+	// 用等价场景表达落后状态：空 schema + 空账本，一条迁移都未应用。
+	if _, err = db.ExecContext(ctx, "DROP SCHEMA IF EXISTS iam CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS iam"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.VerifySchema(ctx); err == nil {
@@ -177,16 +177,24 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 		}
 		return state.Current, state.Target, state.Pending
 	}
-	if current, target, pending := readStatus(); !pending || current == target {
-		t.Fatalf("behind schema reported current=%d target=%d pending=%v", current, target, pending)
+	// 账本与 provider 在 schema 被清空前已读取过状态，必须重建后再追平。
+	if versionStore, err = database.NewStore(database.DialectPostgres, "iam.goose_db_version"); err != nil {
+		t.Fatal(err)
 	}
-	// 应用到目标版本后 schema 可服务；内置数据仍未同步。
+	provider, err := goose.NewProvider("", db, migrations.Files,
+		goose.WithStore(versionStore), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err = provider.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.VerifySchema(ctx); err != nil {
 		t.Fatal(err)
 	}
+
+	// 注意：迁移已合并为单条基线，「落后 N-1 条」这种中间态不再可能自然出现，
+	// 因此这里只断言仍然成立的两件事：未初始化必须拒绝服务、追平后 Status 如实报告。
 	current, target, pending := readStatus()
 	if pending || target != current {
 		t.Fatalf("unexpected migration state current=%d target=%d pending=%v", current, target, pending)
