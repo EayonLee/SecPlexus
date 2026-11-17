@@ -159,32 +159,43 @@ func (c *Consumer) consume(ctx context.Context, entry input.Entry) error {
 		}
 
 		records := make([]*kgo.Record, 0, fetches.NumRecords())
-		events := make([]pipeline.Event, 0, fetches.NumRecords())
+		fetches.EachRecord(func(record *kgo.Record) { records = append(records, record) })
 
-		fetches.EachRecord(func(record *kgo.Record) {
-			records = append(records, record)
-			events = append(events, c.pipeline.Parse(entry, record.Value, record.Timestamp))
-		})
-
-		if len(events) == 0 {
-			continue
-		}
-
-		// 发布成功才提交；失败时重投同一批，最多退避到 5 秒。
-		if err := c.publish(ctx, events); err != nil {
-			logging.From(ctx).Warn("Publish failed; offsets not committed", "event", "kafka.publish_failed",
-				"input_id", entry.ID, "records", len(records), "error", logging.Error(err))
-
+		if len(records) == 0 {
 			continue
 		}
 
 		// 提交失败要重试而不是退出：一次瞬时抖动不该让接入点永久停摆，
 		// 而此时数据已发布，重投只会产生重复（由 event_id 去重），
 		// 比"停摆直到人工重启"代价小得多。
-		if err := c.commit(ctx, client, records); err != nil {
+		if err := c.processBatch(ctx, entry, records, func(commitCtx context.Context, batch []*kgo.Record) error {
+			return c.commit(commitCtx, client, batch)
+		}); err != nil {
 			return err
 		}
 	}
+}
+
+// processBatch 解析并发布一批记录，只有发布成功才调用 commit。
+//
+// 提交动作由调用方传入而不是直接持有客户端：这样"发布先于提交"这个
+// 不丢数据的核心顺序，可以脱离真实 broker 被验证。
+// publish 在 ctx 结束前不会返回错误（内部退避重试），因此这里返回的错误只来自 commit。
+func (c *Consumer) processBatch(ctx context.Context, entry input.Entry, records []*kgo.Record, commit func(context.Context, []*kgo.Record) error) error {
+	events := make([]pipeline.Event, 0, len(records))
+	for _, record := range records {
+		events = append(events, c.pipeline.Parse(entry, record.Value, record.Timestamp))
+	}
+
+	// 发布成功才提交；失败时调用方重投同一批，最多退避到 5 秒。
+	if err := c.publish(ctx, events); err != nil {
+		logging.From(ctx).Warn("Publish failed; offsets not committed", "event", "kafka.publish_failed",
+			"input_id", entry.ID, "records", len(records), "error", logging.Error(err))
+
+		return nil
+	}
+
+	return commit(ctx, records)
 }
 
 // publish 带退避重试，直到成功或进程退出。

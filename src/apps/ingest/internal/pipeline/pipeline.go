@@ -730,20 +730,32 @@ func numeric(value any) (int64, bool) {
 }
 
 // fallbackBody 在字段无法序列化时兜底：宁可丢掉字段，也不让事件消失。
+// 它必须与正常路径产出同一份契约（含 metadata.spx），否则排障时
+// 恰好是最需要线索的那批事件没有接入点与解析结论。
 func fallbackBody(job Job, event Event) []byte {
+	classUID := int64(ClassUIDGeneric)
+	activityID := int64(0)
+
 	body, _ := json.Marshal(map[string]any{
-		"class_uid":   ClassUIDGeneric,
-		"severity_id": normalizer.SeverityUnknown,
-		"time":        job.Received.UTC().UnixMilli(),
-		"message":     string(job.Raw),
+		"class_uid":    classUID,
+		"category_uid": classUID / 1000,
+		"type_uid":     classUID*100 + activityID,
+		"activity_id":  activityID,
+		"severity_id":  normalizer.SeverityUnknown,
+		"time":         job.Received.UTC().UnixMilli(),
+		"message":      string(job.Raw),
 		"metadata": map[string]any{
-			"input_id":      job.Source.ID,
-			"event_id":      event.EventID,
-			"parse.outcome": string(StatusError),
-			"parse.error": map[string]any{
-				"stage":   string(StageMap),
-				"reason":  string(ReasonFormatMismatch),
-				"message": "event fields are not serializable",
+			"version": OCSFVersion,
+			"product": Product,
+			"uid":     event.EventID,
+			"spx": map[string]any{
+				"input_id":      job.Source.ID,
+				"parse.outcome": string(StatusError),
+				"parse.error": map[string]any{
+					"stage":   string(StageMap),
+					"reason":  string(ReasonFormatMismatch),
+					"message": "event fields are not serializable",
+				},
 			},
 		},
 	})

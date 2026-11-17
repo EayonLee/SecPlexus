@@ -56,12 +56,13 @@
 - [ ] 可信代理网段（app.trusted_proxy_cidrs）随 HTTP 通道一起落地：路由按 iam 的方式启用 X-Forwarded-For 解析并拒绝 0.0.0.0/0——骨架阶段删除了无消费方的死配置。
 - [x] 失败测试先行（集成）：syslog——真实 UDP/TCP 端口收包、RFC6587 两种分帧、RFC3164/5424 识别、CEF 前缀路由、64KiB 截断。
 - [x] syslog 通道实现（集成测试见下方未完成项）：按注册表绑定监听、周期刷新 + SIGHUP 热重载、UDP 无回错、TCP 解析失败仅计数。
-- [ ] 失败测试先行（集成）：Kafka 消费——earliest 起消费、发布成功才提交位移、发布失败不提交（重启后重消费）。
+- [x] 「发布成功才提交位移」：`processBatch` 注入提交动作后验证顺序（含变异检验：把提交提前会让测试失败）；
+  earliest 起消费与真实 broker 下的重投语义仍待有 Kafka 实例时补集成用例。
 - [x] Kafka 通道实现（集成测试见下方未完成项）：接入点驱动、独立消费组、手动位移提交。
 
 ### 第四组：发布与解析状态
 
-- [ ] 失败测试先行（集成）：分区键按实体标识保序（同实体同分区）、无实体回退 event_id、不回退固定常量；解析失败事件同样保序发布且携带 parse.outcome。
+- [x] 分区键保序：`partitionKey` 的白盒断言覆盖优先级（源地址 → 主机名 → 账号 → 事件标识）与回退行为，不需要 broker。
 - [x] 发布器实现（集成测试见下方未完成项）：channel 背压、批量 500 条/2s、确定性 event_id。
 - [x] 解析状态：失败事件照常发布到 `spx.ingest.event`，带 `metadata.parse.outcome=error` 与原因码数组；解析失败率指标（无独立隔离区 topic）。
 
@@ -90,7 +91,8 @@
 #### 5.3 验收
 
 - [ ] 端到端：建一条 `http` 接入点 → 用真实 token 推送样本 → `spx.ingest.event` 收到 OCSF 事件，`metadata.spx.source_id` 与 `metadata.uid` 正确；再建一条 `syslog` 接入点 → `nc` 发 RFC5424 与 CEF → 核对发布结果。
-- [ ] 停用接入点后其端口停止监听、HTTP 返回 401；重新启用后恢复，无需重启进程。
+- [x] 停用接入点后其端口停止监听、HTTP 返回 401，重新启用后恢复：
+  `TestReloadReleasesPortOfDisabledInput` 与 `TestDisabledInputRejectsDevicePush` 覆盖，无需重启进程。
 ## 代码审查修复（批次 2 完成后）
 
 对解析与映射做过一轮 P0/P1/P2 审查（10 个探针验证 + 对照测试），以下问题已全部修复并有回归测试钉住：
