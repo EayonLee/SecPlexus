@@ -19,7 +19,7 @@
     "key": "iam.audit.write",
     "description": "由平台内服务写入审计事实",
     "risk_level": "sensitive",
-    "delegable": false,
+    "delegable": true,
     "requires_recent_auth": false,
     "status": "active"
   },
