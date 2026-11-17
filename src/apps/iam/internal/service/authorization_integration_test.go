@@ -238,8 +238,9 @@ func TestBuiltinRoleIsImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if permissions != 7 {
-		t.Fatalf("builtin role permissions = %d, want 7", permissions)
+	// 内置角色持有目录中的全部权限：与目录比对，新增权限点时自动跟随。
+	if want := len(authorization.Catalog()); permissions != want {
+		t.Fatalf("builtin role permissions = %d, want %d", permissions, want)
 	}
 }
 
@@ -358,11 +359,9 @@ func TestLastSuperAdminInvariant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 委派规则要求操作者持有被移除权限的全部键，因此这里授予完整目录。
-	operatorRole, err := s.CreateRole(admin, RoleCreate{Name: "用户与角色管理员", Permissions: []string{
-		"iam.users.read", "iam.users.manage", "iam.users.reset", "iam.users.roles",
-		"iam.roles.read", "iam.roles.manage", "iam.audit.read",
-	}}, uuid.NewString())
+	// 委派规则要求操作者持有被移除权限的全部键，因此这里授予完整目录——
+	// 用目录而不是写死列表：新增权限点时这个前置条件应自动跟随。
+	operatorRole, err := s.CreateRole(admin, RoleCreate{Name: "用户与角色管理员", Permissions: catalogKeys()}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,4 +482,15 @@ func TestDeleteUserKeepsHistoricalRoleBindings(t *testing.T) {
 	if remaining != 1 {
 		t.Fatalf("target roles after creator deletion = %d, want 1", remaining)
 	}
+}
+
+// catalogKeys 返回目录里的全部权限键。
+func catalogKeys() []string {
+	items := authorization.Catalog()
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
+	}
+
+	return keys
 }

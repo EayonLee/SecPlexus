@@ -200,10 +200,6 @@ try {
     SPX_CONSOLE_PORT: String(consolePort),
     SPX_WEB_HOST: "127.0.0.1",
     SPX_WEB_PORT: String(webPort),
-    SPX_IAM_PORT: String(iamPort),
-    SPX_CONSOLE_PORT: String(consolePort),
-    SPX_IAM_HOST: "127.0.0.1",
-    SPX_CONSOLE_HOST: "127.0.0.1",
   };
   // Root startup derives backend URLs from actual module ports. Use one DB
   // connection for initialization, HTTP replicas and maintenance.
@@ -229,7 +225,6 @@ try {
     ...iamEnv,
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
-    SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
   });
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
@@ -237,7 +232,6 @@ try {
     ...consoleEnv,
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort2),
-    SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),

@@ -19,9 +19,9 @@ test('all selected modules are checked before migration or runtime side effects'
     Object.assign(env, {
       SPX_WEB_PORT: '15173', SPX_IAM_CSRF_KEY: 'c'.repeat(32), SPX_CONSOLE_IAM_TOKEN: 't'.repeat(32),
       SPX_POSTGRES_HOST: '127.0.0.1', SPX_POSTGRES_PORT: '1',
-      SPX_REDIS_HOST: '127.0.0.1', SPX_REDIS_PORT: '1', SPX_IAM_PORT: '18081', SPX_CONSOLE_BIND_PORT: '0',
+      SPX_REDIS_HOST: '127.0.0.1', SPX_REDIS_PORT: '1', SPX_IAM_PORT: '18081', SPX_CONSOLE_PORT: '0',
       // IAM is valid; Console's listener is deliberately invalid.
-      SPX_IAM_BIND_PORT: '18081', SPX_IAM_BOOTSTRAP_PASSWORD: 'preflight-bootstrap-password',
+      SPX_INGEST_IAM_TOKEN: 'i'.repeat(32), SPX_IAM_BOOTSTRAP_PASSWORD: 'preflight-bootstrap-password',
     });
     const result = spawnSync(process.execPath, ['scripts/start.mjs', 'preview', 'iam', 'console'], {
       cwd: directory, env, encoding: 'utf8', timeout: 110000,
@@ -30,7 +30,7 @@ test('all selected modules are checked before migration or runtime side effects'
     assert.match(result.stdout + result.stderr, /app.port/);
     assert.doesNotMatch(result.stdout + result.stderr, /migrations and initialization completed|connection refused/);
     assert.equal(existsSync(path.join(directory, 'logs')), false);
-    env.SPX_CONSOLE_BIND_PORT = '18080';
+    env.SPX_CONSOLE_PORT = '18080';
     for (const modules of [['iam', 'console'], ['iam'], ['console']]) {
       const check = spawnSync(process.execPath, ['scripts/start.mjs', 'check-config', ...modules], {
         cwd: directory, env, encoding: 'utf8', timeout: 110000,
