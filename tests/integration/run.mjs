@@ -35,7 +35,7 @@ try {
   if (!env.SPX_TEST_POSTGRES_URL || !env.SPX_TEST_REDIS_URL) {
     throw new Error('Provide SPX_TEST_POSTGRES_URL and SPX_TEST_REDIS_URL, or explicitly pass --docker.');
   }
-  const child = spawn('go', ['test', ...(process.argv.includes('--race') ? ['-race'] : []), '-tags', 'integration', '-count=1', './src/apps/iam/...', './src/apps/console/...'], { env, stdio: 'inherit' });
+  const child = spawn('go', ['test', ...(process.argv.includes('--race') ? ['-race'] : []), '-tags', 'integration', '-count=1', './src/apps/iam/...', './src/apps/console/...', './src/apps/ingest/...'], { env, stdio: 'inherit' });
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => child.kill(signal));
   process.exitCode = await new Promise((resolve, reject) => {
     child.once('error', reject);

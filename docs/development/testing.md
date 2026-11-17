@@ -23,7 +23,8 @@
 - 禁止断言实现细节（内部调用次数、私有字段）代替断言可观察行为。
 - 断言机器可消费的值（解析后的字段、稳定令牌、边界错误码），不断言面向人阅读的散文。
 - 集成测试必须使用自有隔离资源并清理；不得连接或改写开发库。
-- 缺少 `SPX_TEST_POSTGRES_URL` 或 `SPX_TEST_REDIS_URL` 时，集成测试跳过而非失败；跳过不算覆盖。
+- 缺少 `SPX_TEST_POSTGRES_URL`、`SPX_TEST_REDIS_URL` 或 `SPX_TEST_KAFKA_BROKERS` 时，对应集成测试跳过而非失败；跳过不算覆盖。
+- 配置用例断言的是 YAML 默认值，`TestMain` 会清空 `SPX_*`：本地 source 过 `.env` 时不会再出现与环境相关的假失败。
 
 ## 原则
 
@@ -65,7 +66,7 @@ make test-e2e ARGS="--docker"
 
 以上入口在macOS、Linux、PowerShell与`cmd.exe`中统一通过GNU Make执行；Makefile配方不依赖POSIX shell，平台差异由Node脚本承担。`make test`先由[scripts/test-scripts.mjs](../../scripts/test-scripts.mjs)枚举脚本测试，再运行Go与Web单测，不依赖shell通配符展开。
 
-集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。CI 的 `Integration (ubuntu-latest)` job 用 `make integration ARGS="--docker"` 跑同一套用例：临时 `postgres:16-alpine` 与 `redis:7-alpine` 容器、随机端口与临时凭据，结束时按名称清理；宿主机另装 `postgresql-client-16`，让备份恢复用例的 `pg_dump` 与服务端同主版本。
+集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。CI 的 `Integration (ubuntu-latest)` job 用 `make integration ARGS="--docker"` 跑 iam、console、ingest 同一套用例：临时 `postgres:16-alpine` 与 `redis:7-alpine` 容器、随机端口与临时凭据，结束时按名称清理；宿主机另装 `postgresql-client-16`，让备份恢复用例的 `pg_dump` 与服务端同主版本。
 外部Redis优先专用测试库；当前用户明确允许远程 DB0，测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
 备份恢复用例使用与服务端兼容的 pg_dump/pg_restore；外部PG无需构建应用容器，测试仍创建独立随机数据库。
 
@@ -160,6 +161,7 @@ manual模式创建相同的独立双副本栈，在权限0600的临时文件中�
 ## 可信入口与生命周期回归
 
 全栈 E2E 直接启动 Next/IAM/Console。可以显式提供 `SPX_TEST_POSTGRES_URL`（允许创建临时库的管理连接）和 `SPX_TEST_REDIS_URL`，或显式 `--docker` 创建测试组件。远程 PG 只创建/删除本次随机临时库；Redis 只删除该库唯一账号/会话的精确键，不执行 FLUSH 或全平台前缀清理，也不删除共享来源桶。共用 DB 时来源桶仍共享计数并按原 TTL 到期，测试账号必须唯一。使用共享组件前需明确确认环境。备份恢复集成另需兼容版本的 pg_dump/pg_restore。
+Kafka 消费语义（最早位移、发布失败不提交、重启后重投）需要真实 broker：`SPX_TEST_KAFKA_BROKERS=host:9092 go test -tags=integration ./src/apps/ingest/internal/channel/kafkachannel/`。
 
 共享 HTTP 生命周期的真实监听测试覆盖后一个绑定失败释放前者、多个监听并行停止接收、默认及自定义 BaseContext 的活跃事件流观察退出取消，并保留自定义上下文值及无强杀退出；执行 `go test -race ./src/packages/go/httpx`。服务自身的资源仍由各 bootstrap 拥有，测试不停止已有进程。定向 Axios 边界测试使用真实本机 HTTP 响应覆盖迟到 401、错误密码及无效写入确认，不以手写 mock 实现代替网络/Axios 行为。
 

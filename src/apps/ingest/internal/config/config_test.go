@@ -124,3 +124,16 @@ func TestConfigurationRejectsWildcardIAMHost(t *testing.T) {
 		t.Fatalf("expected wildcard rejection, got %v", err)
 	}
 }
+
+// 这些用例断言 YAML 里的默认值，必须与调用者的 shell 环境隔离：
+// 本地 source 过 .env 时 SPX_* 会覆盖默认值，断言就变成与环境相关的假失败。
+func TestMain(m *testing.M) {
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "SPX_") {
+			_ = os.Unsetenv(key)
+		}
+	}
+
+	os.Exit(m.Run())
+}
