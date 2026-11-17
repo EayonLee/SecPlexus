@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"io"
 	"net"
 	"net/http"
@@ -314,16 +315,16 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 		t.Fatalf("configured administrator roles = %v", roles)
 	}
 
+	// 内置角色持有目录里的全部权限：与目录逐一对比，而不是记一个数字。
 	permissions := me["permissions"].([]any)
-	if len(permissions) != 7 {
-		t.Fatalf("configured administrator permissions = %v", permissions)
-	}
+	assertCatalogPermissions(t, permissions)
 
 	// 内置角色由启动同步写入：可查看、不可改、不可删。
 	builtin := admin.builtinRole()
-	if builtin["name"] != "超级管理员" || builtin["description"] != "" || len(builtin["permissions"].([]any)) != 7 || builtin["version"] != nil {
+	if builtin["name"] != "超级管理员" || builtin["description"] != "" || builtin["version"] != nil {
 		t.Fatalf("unexpected builtin role %v", builtin)
 	}
+	assertCatalogPermissions(t, builtin["permissions"].([]any))
 
 	builtinID := builtin["id"].(string)
 	admin.code("PATCH", "/api/v1/iam/roles/"+builtinID, map[string]any{"name": "改名"}, 409, "iam.builtin_role_immutable")
@@ -336,10 +337,11 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	admin.code("POST", "/api/v1/iam/users/"+userID+"/reset-password", map[string]any{"password": "another reset password"}, 409, "iam.configured_user_immutable")
 	admin.code("POST", "/api/v1/iam/me/password", map[string]any{"old_password": initial, "new_password": "another changed password"}, 409, "iam.configured_user_immutable")
 
-	// 权限目录来自数据库投影，超级管理员可委派全部 7 项。
+	// 权限目录来自数据库投影，超级管理员可委派目录里的全部权限。
+	// 与目录常量比对而不是记数字：新增权限点时这里应自动跟随。
 	catalog := admin.request("GET", "/api/v1/iam/permissions", nil, 200)["items"].([]any)
-	if len(catalog) != 7 {
-		t.Fatalf("permission catalog has %d items", len(catalog))
+	if len(catalog) != len(authorization.Catalog()) {
+		t.Fatalf("permission catalog has %d items, catalog defines %d", len(catalog), len(authorization.Catalog()))
 	}
 
 	for _, item := range catalog {
@@ -349,8 +351,11 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 			t.Fatal("permission catalog still exposes a scope field")
 		}
 
-		if entry["can_delegate"] != true {
-			t.Fatalf("configured administrator cannot delegate %v", permission["key"])
+		// 可委派性来自目录：不可委派的权限（例如只允许服务写入审计事实的动作）
+		// 内置角色本身持有，但不能转授给其他角色。
+		wantDelegable := catalogDelegable(permission["key"].(string))
+		if entry["can_delegate"] != wantDelegable {
+			t.Fatalf("can_delegate(%v) = %v, catalog says %v", permission["key"], entry["can_delegate"], wantDelegable)
 		}
 	}
 
@@ -698,4 +703,45 @@ func TestReauthenticateFailureDoesNotLockAccount(t *testing.T) {
 
 	// 正确密码仍可完成确认，说明账号没有被锁。
 	admin.request("POST", "/api/v1/iam/auth/reauthenticate", map[string]any{"password": f.password}, 200)
+}
+
+// assertCatalogPermissions 断言给定权限集合与权限目录完全一致。
+// 用目录而不是固定数字：新增权限点时，内置角色必须自动包含它。
+func assertCatalogPermissions(t *testing.T, actual []any) {
+	t.Helper()
+
+	catalog := authorization.Catalog()
+	expected := make(map[string]bool, len(catalog))
+	for _, permission := range catalog {
+		expected[permission.Key] = true
+	}
+
+	seen := make(map[string]bool, len(actual))
+	for _, item := range actual {
+		key, ok := item.(string)
+		if !ok {
+			t.Fatalf("permission entry is not a key: %v", item)
+		}
+		if !expected[key] {
+			t.Fatalf("permission %q is not in the catalog", key)
+		}
+		seen[key] = true
+	}
+
+	for key := range expected {
+		if !seen[key] {
+			t.Fatalf("catalog permission %q is missing from the builtin role: %v", key, actual)
+		}
+	}
+}
+
+// catalogDelegable 返回权限在目录里是否可委派。
+func catalogDelegable(key string) bool {
+	for _, permission := range authorization.Catalog() {
+		if permission.Key == key {
+			return permission.Delegable
+		}
+	}
+
+	return false
 }

@@ -243,10 +243,11 @@ const AuthorizationBaselineRoleName = "authenticated"
 
 // BaselinePermissionKeys 是基线角色授予的权限：只允许读取，写操作必须显式授权。
 var BaselinePermissionKeys = []string{
+	// 登录即可订阅自己的运维事件流。
 	"console.events.read",
+	// 阅读接入点与解析映射：足以排障，不构成管理能力。
 	"ingest.input.read",
 	"ingest.mapping.read",
-	"iam.users.read",
 }
 
 // VerifySchema 校验迁移版本兼容，不在服务启动时自动改表。

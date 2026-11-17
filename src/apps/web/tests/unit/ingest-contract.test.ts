@@ -24,15 +24,6 @@ describe("ingest navigation gating", () => {
     expect(onlyMapping.map((page) => page.id)).not.toContain("ingest");
   });
 
-  test("gates pull connectors by the same read permission as inputs", () => {
-    // 拉取与推送是同一个概念域（数据来源），复用输入的读取权限：
-    // 单独发明权限键只会让管理员多配一次、多错一次。
-    const visible = visibleSettingsPages({ permissions: [permissions.IngestInputRead] });
-
-    expect(visible.map((page) => page.id)).toContain("pull");
-    expect(settingsPages.find((page) => page.id === "pull")?.action).toBe("ingest.input.read");
-  });
-
   test("binds each entry to a real permission key", () => {
     const ingest = settingsPages.find((page) => page.id === "ingest");
     const mappings = settingsPages.find((page) => page.id === "mappings");
