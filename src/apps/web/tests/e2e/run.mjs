@@ -460,7 +460,15 @@ try {
     ingestClosed,
     new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 15000)),
   ]);
-  if (ingestExit.signal === "timeout") throw new Error("Ingest did not stop within the shutdown budget.");
+  if (ingestExit.signal === "timeout") {
+    // 卡住时要指出停在哪一步，否则只能靠猜。
+    const tail = tailOf(ingest);
+    let logTail = "";
+    try {
+      logTail = readFileSync(path.join(directory, "ingest.log"), "utf8").trim().split("\n").slice(-6).join("\n");
+    } catch {}
+    throw new Error(`Ingest did not stop within the shutdown budget.\nstdout/stderr tail:\n${tail}\nlog tail:\n${logTail}`);
+  }
   console.log(`Ingest stopped with its own shutdown path (code=${ingestExit.code}).`);
 } catch (error) {
   console.error(error.message);
