@@ -7,8 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 	"time"
+
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
 
