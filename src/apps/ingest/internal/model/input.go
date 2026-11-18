@@ -35,7 +35,7 @@ type CreateInputRequest struct {
 
 // CreateInputResponse 创建成功后返回一次明文令牌。
 type CreateInputResponse struct {
-	Input Input `json:"source"`
+	Input Input `json:"input"`
 	// Token 只在本次响应里出现；服务端只保存摘要。
 	Token string `json:"token,omitempty"`
 }
@@ -52,16 +52,16 @@ type UpdateInputRequest struct {
 
 // Mapping 是管理面返回的解析规则。
 type Mapping struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Spec      json.RawMessage `json:"spec"`
-	Version   int             `json:"version"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Definition json.RawMessage `json:"definition"`
+	Version    int             `json:"version"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // MappingRequest 是创建或修改规则的请求体。
 type MappingRequest struct {
-	Name string          `json:"name" binding:"required,min=1,max=100"`
-	Spec json.RawMessage `json:"spec" binding:"required"`
+	Name       string          `json:"name" binding:"required,min=1,max=100"`
+	Definition json.RawMessage `json:"definition" binding:"required"`
 }

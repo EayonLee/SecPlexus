@@ -44,3 +44,15 @@ Dependabot、Code scanning 与 Secret scanning 的告警原则上必须修复。
 - **补偿措施**：`osv-scanner.toml` 保留同名忽略条目（含到期日），CI 的 `security` job 仍会拦截新增漏洞。
 - **后续**：上游发布修复版本后删除忽略条目并升级。
 - **复审日期**：2027-03-31
+
+### GHSA-fc5q-39xc-vjpf · picomatch extglob ReDoS
+
+- **状态**：ignored（build-only，攻击前提不成立），登记在 `osv-scanner.toml`
+- **依赖**：`picomatch 2.3.2`（经 micromatch ← fast-glob）与 `picomatch 4.0.7`（经 fdir/tinyglobby），
+  上游最新且**无修复版本**（advisory：last_affected 4.0.7，2026-10-19 公布）
+- **不可达依据**：漏洞需要攻击者提供形如 `+(*)` 的 glob 并由 picomatch 编译。仓库内 picomatch 只出现在
+  构建与开发工具链（Tailwind/PostCSS/文件遍历），生产服务不接收用户提交的 glob；`grep` 全仓也没有把
+  请求参数传入 glob 的调用。
+- **补偿措施**：CI 的 `security` job 每次运行都重新扫描，上游发布修复版本后该条抑制到期，扫描会立即重新报出。
+- **后续**：picomatch 发布 >4.0.7 后升级并删除本条与 `osv-scanner.toml` 的抑制。
+- **复审日期**：2027-03-31

@@ -7,6 +7,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -70,7 +71,8 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 	}
 
 	if err = goose.UpContext(ctx, db, "."); err != nil {
-		return errors.New("could not apply migrations")
+		// 保留底层 SQL 原因：只说"无法应用迁移"会让排障从错误信息重新开始。
+		return fmt.Errorf("could not apply migrations: %w", err)
 	}
 
 	completed = true

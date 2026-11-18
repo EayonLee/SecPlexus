@@ -22,6 +22,8 @@ app:
 # ---- PostgreSQL ----
 # 接入点与解析映射存这里。接收路径不写库：事件一律走 Kafka。
 db:
+  # 完整连接地址；非空时忽略下面的分项。
+  url: "${SPX_POSTGRES_URL-}"
   # 以下分项与 url 二者择一：填了 url 就忽略分项。
   host: "${SPX_POSTGRES_HOST-127.0.0.1}"
   port: "${SPX_POSTGRES_PORT-5432}"

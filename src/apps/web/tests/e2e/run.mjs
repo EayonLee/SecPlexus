@@ -52,6 +52,7 @@ function launch(binary, args, env, options = {}) {
     stdio: ["ignore", "pipe", "pipe"],
     detached: options.detached ?? process.platform !== "win32",
   });
+  child.spxName = options.name ?? path.basename(binary);
   let output = "";
   const collect = (chunk) => {
     output += chunk.toString();
@@ -93,7 +94,7 @@ try {
     }
   }
   if (!process.argv.includes("--docker") && (!process.env.SPX_TEST_POSTGRES_URL || !process.env.SPX_TEST_REDIS_URL))
-    throw new Error("Provide SPX_TEST_POSTGRES_URL and SPX_TEST_REDIS_URL, or explicitly pass --docker.");
+    throw new Error("Provide SPX_TEST_POSTGRES_URL, SPX_TEST_REDIS_URL and SPX_TEST_KAFKA_BROKERS, or explicitly pass --docker.");
   const pgPassword = randomBytes(24).toString("hex");
   const password = randomBytes(24).toString("hex");
   const adminUsername = `e2e_${randomBytes(8).toString("hex")}`;
@@ -105,6 +106,9 @@ try {
   const redis = `${name}-redis`;
   let databaseURL;
   let redisURL;
+  let kafkaBrokers = process.env.SPX_TEST_KAFKA_BROKERS;
+  // Kafka 的 advertised listener 必须与映射端口一致，因此先定端口再起容器。
+  const kafkaPort = await port();
   if (process.argv.includes("--docker")) {
     const dockerDatabase = `spx_e2e_${randomBytes(16).toString("hex")}`;
     command(
@@ -133,6 +137,24 @@ try {
     containers.push(pg);
     command("docker", ["run", "-d", "--name", redis, "-p", "127.0.0.1::6379", "redis:7-alpine"]);
     containers.push(redis);
+    // ingest 必须连得上总线：单节点 KRaft 足够，避免依赖 ZooKeeper。
+    const kafka = `${name}-kafka`;
+    command("docker", [
+      "run", "-d", "--name", kafka,
+      "-e", "KAFKA_NODE_ID=1",
+      "-e", "KAFKA_PROCESS_ROLES=broker,controller",
+      "-e", "KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093",
+      "-e", `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:${kafkaPort}`,
+      "-e", "KAFKA_CONTROLLER_QUORUM_VOTERS=1@127.0.0.1:9093",
+      "-e", "KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",
+      "-e", "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
+      "-e", "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1",
+      "-e", "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1",
+      "-e", "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0",
+      "-p", `127.0.0.1:${kafkaPort}:9092`,
+      "apache/kafka:3.9.0",
+    ]);
+    containers.push(kafka);
     const deadline = Date.now() + 60000;
     while (command("docker", ["inspect", "--format", "{{.State.Health.Status}}", pg]) !== "healthy") {
       if (Date.now() > deadline) throw new Error("Test database readiness timeout");
@@ -142,6 +164,7 @@ try {
     const redisPort = command("docker", ["port", redis, "6379/tcp"]).split(":").at(-1);
     databaseURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${dockerDatabase}?sslmode=disable`;
     redisURL = `redis://127.0.0.1:${redisPort}/0`;
+    kafkaBrokers = `127.0.0.1:${kafkaPort}`;
   } else {
     postgresAdminURL = process.env.SPX_TEST_POSTGRES_URL;
     ownedDatabase = command("go", ["run", "./tests/integration/database", "create"], {
@@ -157,13 +180,16 @@ try {
   const consolePort = await port();
   const iamPort2 = await port();
   const consolePort2 = await port();
-  listenerPorts.push(webPort, iamPort, consolePort, iamPort2, consolePort2);
+  const ingestPort = await port();
+  listenerPorts.push(webPort, iamPort, consolePort, iamPort2, consolePort2, ingestPort);
   const publicURL = `http://127.0.0.1:${webPort}`;
   const csrf = randomBytes(16).toString("hex");
   const iamBinary = path.join(directory, `iam${executableSuffix}`);
   const consoleBinary = path.join(directory, `console${executableSuffix}`);
   command("go", ["build", "-o", iamBinary, "./src/apps/iam/cmd"]);
   command("go", ["build", "-o", consoleBinary, "./src/apps/console/cmd"]);
+  const ingestBinary = path.join(directory, `ingest${executableSuffix}`);
+  command("go", ["build", "-o", ingestBinary, "./src/apps/ingest/cmd"]);
   command(iamBinary, ["migrate", "--config", "src/apps/iam/config.yaml"], {
     env: {
       ...systemEnv,
@@ -172,6 +198,22 @@ try {
       SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
       SPX_IAM_LOG_FILE: "",
     },
+  });
+  const topicSuffix = randomBytes(6).toString("hex");
+  const ingestEnv = {
+    ...systemEnv,
+    SPX_POSTGRES_URL: databaseURL,
+    SPX_REDIS_URL: redisURL,
+    SPX_INGEST_IAM_TOKEN: ingestCredential,
+    SPX_INGEST_HOST: "127.0.0.1",
+    SPX_INGEST_PORT: String(ingestPort),
+    SPX_INGEST_KAFKA_BROKERS: kafkaBrokers,
+    SPX_INGEST_KAFKA_EVENT_TOPIC: `spx.e2e.${topicSuffix}.events`,
+    SPX_INGEST_KAFKA_PARSE_FAILURE_TOPIC: `spx.e2e.${topicSuffix}.failures`,
+    SPX_INGEST_LOG_FILE: path.join(directory, "ingest.log"),
+  };
+  command(ingestBinary, ["migrate", "--config", "src/apps/ingest/config.yaml"], {
+    env: { ...ingestEnv, SPX_INGEST_LOG_FILE: "" },
   });
   const iamEnv = {
     ...systemEnv,
@@ -200,6 +242,7 @@ try {
     SPX_CONSOLE_PORT: String(consolePort),
     SPX_WEB_HOST: "127.0.0.1",
     SPX_WEB_PORT: String(webPort),
+    SPX_INGEST_ORIGIN: `http://127.0.0.1:${ingestPort}`,
   };
   // Root startup derives backend URLs from actual module ports. Use one DB
   // connection for initialization, HTTP replicas and maintenance.
@@ -216,9 +259,11 @@ try {
         SPX_IAM_PORT: String(iamPort),
         SPX_CONSOLE_HOST: "127.0.0.1",
         SPX_CONSOLE_PORT: String(consolePort),
+        // 页面里的 /api/v1/ingest 请求由 Web 反代到 ingest 副本。
+        SPX_INGEST_ORIGIN: `http://127.0.0.1:${ingestPort}`,
       },
     });
-  const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv);
+  const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv, { name: "stack" });
   await ready(`${publicURL}/login`, stack);
   await ready(`${publicURL}/api/v1/iam/auth/context`, stack);
   const iam2 = launch(iamBinary, ["serve", "--config", "src/apps/iam/config.yaml"], {
@@ -226,7 +271,7 @@ try {
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
-  });
+  }, { name: "iam-two" });
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
   const console2 = launch(consoleBinary, ["--config", "src/apps/console/config.yaml"], {
     ...consoleEnv,
@@ -235,8 +280,15 @@ try {
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
-  });
+  }, { name: "console-two" });
   await ready(`http://127.0.0.1:${consolePort2}/health/ready`, console2);
+  // ingest 单独起一份：它需要 Kafka 与 IAM token，默认栈里没有它。
+  const ingest = launch(ingestBinary, ["serve", "--config", "src/apps/ingest/config.yaml"], {
+    ...ingestEnv,
+    SPX_IAM_HOST: "127.0.0.1",
+    SPX_IAM_PORT: String(iamPort),
+  }, { name: "ingest" });
+  await ready(`http://127.0.0.1:${ingestPort}/health/ready`, ingest);
   stackReady = true;
   if (process.argv.includes("--manual")) {
     const filename = path.join(directory, "browser.json");
@@ -295,6 +347,7 @@ try {
           SPX_E2E_USERNAME: adminUsername,
           SPX_E2E_IAM_SECOND_URL: `http://127.0.0.1:${iamPort2}`,
           SPX_E2E_CONSOLE_SECOND_URL: `http://127.0.0.1:${consolePort2}`,
+          SPX_E2E_INGEST_URL: `http://127.0.0.1:${ingestPort}`,
         },
         stdio: "inherit",
       },
@@ -381,7 +434,7 @@ try {
     await api.dispose();
   }
   stage("logs:scan");
-  for (const filename of ["iam-one.log", "iam-two.log", "console-one.log", "console-two.log"]) {
+  for (const filename of ["iam-one.log", "iam-two.log", "console-one.log", "console-two.log", "ingest.log"]) {
     const data = readFileSync(path.join(directory, filename), "utf8");
     if (![pgPassword, password, credential, ingestCredential, csrf].every((value) => !data.includes(value)))
       throw new Error("A secret reached application logs.");
@@ -397,6 +450,29 @@ try {
     env: { ...systemEnv, SPX_POSTGRES_URL: databaseURL, SPX_IAM_LOG_FILE: "" },
   });
   console.log("Structured file logs and secret exclusion verified across both replicas.");
+
+  // ingest 关停要自己走完：缓冲里可能还有事件要发出去。
+  // 只靠收尾统一终止时，卡住也只能看到"某个服务被强制终止"，定位不到是谁。
+  const ingestClosed = new Promise((resolve) => ingest.once("exit", (code, signal) => resolve({ code, signal })));
+  if (process.platform === "win32") ingest.kill();
+  else ingest.kill("SIGTERM");
+  const ingestExit = await Promise.race([
+    ingestClosed,
+    new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 15000)),
+  ]);
+  if (ingestExit.signal === "timeout") {
+    // 卡住时要指出停在哪一步，否则只能靠猜。
+    const tail = tailOf(ingest);
+    let logTail = "";
+    try {
+      logTail = readFileSync(path.join(directory, "ingest.log"), "utf8").trim().split("\n").slice(-6).join("\n");
+    } catch {
+      // 日志文件可能还没落盘：诊断信息缺失不应掩盖原始失败。
+      logTail = "";
+    }
+    throw new Error(`Ingest did not stop within the shutdown budget.\nstdout/stderr tail:\n${tail}\nlog tail:\n${logTail}`);
+  }
+  console.log(`Ingest stopped with its own shutdown path (code=${ingestExit.code}).`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
@@ -405,7 +481,7 @@ try {
     if (child.exitCode !== null || child.signalCode !== null) continue;
     await terminateProcessTree(child);
     if (child.exitCode === null && child.signalCode === null) {
-      console.error("An owned service required forced shutdown.");
+      console.error(`An owned service required forced shutdown: ${child.spxName ?? "unknown"}.`);
       process.exitCode = 1;
     }
   }

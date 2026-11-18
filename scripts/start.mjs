@@ -126,6 +126,8 @@ async function main() {
     if (webEnv) run(process.execPath, ['src/apps/web/scripts/serve.mjs', 'check-config', ...(command === 'dev' ? ['--development'] : [])], webEnv);
     if (command === 'check-config') { console.log(`SecPlexus ${modules.join(', ')} configuration valid (offline).`); return; }
     if (prepared.iam) run(prepared.iam.output, ['migrate', '--config', configs.iam], prepared.iam.moduleEnv);
+    // ingest 的表归它自己：不迁移就启动会在首个管理请求上失败。
+    if (prepared.ingest) run(prepared.ingest.output, ['migrate', '--config', configs.ingest], prepared.ingest.moduleEnv);
     for (const module of ['iam', 'console'].filter(module => modules.includes(module))) {
       const { output, moduleEnv } = prepared[module];
       const args = ['serve', '--config', configs[module]];

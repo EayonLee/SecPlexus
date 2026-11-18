@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   createMapping,
   deleteMapping,
-  listMappingsTyped,
+  listMappings,
   updateMapping,
   validateMapping,
 } from "@/spx/api/ingest/mappings";
@@ -49,7 +49,7 @@ export function MappingsPage() {
   const [samples, setSamples] = useState("");
   const [result, setResult] = useState<SampleResult | null>(null);
 
-  const mappings = useQuery({ queryKey: ["ingest", "mappings"], queryFn: listMappingsTyped });
+  const mappings = useQuery({ queryKey: ["ingest", "mappings"], queryFn: listMappings });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -60,7 +60,7 @@ export function MappingsPage() {
         throw new Error(t("invalidJSON"));
       }
 
-      const body = { name: name.trim(), spec: parsed as Record<string, unknown> };
+      const body = { name: name.trim(), definition: parsed as Record<string, unknown> };
 
       if (editingID === "") return createMapping(body);
 

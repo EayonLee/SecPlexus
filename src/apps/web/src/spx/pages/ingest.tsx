@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { createInput, deleteInput, listInputsTyped, updateInput } from "@/spx/api/ingest/inputs";
-import { listMappingsTyped } from "@/spx/api/ingest/mappings";
+import { createInput, deleteInput, listInputs, updateInput } from "@/spx/api/ingest/inputs";
+import { listMappings } from "@/spx/api/ingest/mappings";
 import type { ApiInput, ApiMapping } from "@/spx/api/ingest/schemas";
 
 import { Can, useCan } from "../components/access";
@@ -39,8 +39,8 @@ export function IngestPage() {
 
   const canWrite = useCan(permissions.IngestInputWrite);
 
-  const inputs = useQuery({ queryKey: ["ingest", "inputs"], queryFn: listInputsTyped });
-  const mappings = useQuery({ queryKey: ["ingest", "mappings"], queryFn: listMappingsTyped });
+  const inputs = useQuery({ queryKey: ["ingest", "inputs"], queryFn: listInputs });
+  const mappings = useQuery({ queryKey: ["ingest", "mappings"], queryFn: listMappings });
 
   const create = useMutation({
     mutationFn: createInput,

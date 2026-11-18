@@ -42,7 +42,10 @@ type Kafka struct {
 }
 
 // Database 描述 PostgreSQL 连接；接入点与解析规则存在这里。
+// URL 非空时优先使用 URL：编排与测试都按一个地址传参，
+// 只支持分项会让 ingest 成为唯一连不上指定库的模块。
 type Database struct {
+	URL      string `yaml:"url"`      // 可选的完整连接地址。
 	Name     string `yaml:"name"`     // 数据库名。
 	Host     string `yaml:"host"`     // 连接地址。
 	Port     int    `yaml:"port"`     // 连接端口。
@@ -51,8 +54,12 @@ type Database struct {
 	SSLMode  string `yaml:"sslmode"`  // TLS 模式。
 }
 
-// DSN 由各字段拼出连接地址，不建立连接。
+// DSN 返回连接地址：配置了 url 就直接使用，否则由各字段拼出。不建立连接。
 func (d Database) DSN() string {
+	if d.URL != "" {
+		return d.URL
+	}
+
 	query := url.Values{}
 	if d.SSLMode != "" {
 		query.Set("sslmode", d.SSLMode)

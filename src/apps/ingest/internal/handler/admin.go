@@ -73,7 +73,7 @@ func (a *Admin) CreateInput(c *gin.Context) {
 		return
 	}
 
-	result.Success(c.Writer, model.CreateInputResponse{Input: toModel(created), Token: token})
+	result.Created(c.Writer, model.CreateInputResponse{Input: toModel(created), Token: token})
 }
 
 // UpdateInput 修改接入点；换令牌时同样只返回一次明文。
@@ -133,7 +133,7 @@ func (a *Admin) ListMappings(c *gin.Context) {
 	out := make([]model.Mapping, 0, len(items))
 	for _, item := range items {
 		out = append(out, model.Mapping{
-			ID: item.ID, Name: item.Name, Spec: item.Spec, Version: item.Version,
+			ID: item.ID, Name: item.Name, Definition: item.Spec, Version: item.Version,
 			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 		})
 	}
@@ -151,7 +151,7 @@ func (a *Admin) CreateMapping(c *gin.Context) {
 	}
 
 	created, err := a.Store.CreateMapping(c.Request.Context(), repository.CreateMappingParams{
-		Name: request.Name, Spec: request.Spec,
+		Name: request.Name, Definition: request.Definition,
 	})
 	if err != nil {
 		writeRepositoryError(c.Writer, err)
@@ -159,8 +159,8 @@ func (a *Admin) CreateMapping(c *gin.Context) {
 		return
 	}
 
-	result.Success(c.Writer, model.Mapping{
-		ID: created.ID, Name: created.Name, Spec: created.Spec, Version: created.Version,
+	result.Created(c.Writer, model.Mapping{
+		ID: created.ID, Name: created.Name, Definition: created.Spec, Version: created.Version,
 		CreatedAt: created.CreatedAt, UpdatedAt: created.UpdatedAt,
 	})
 }
@@ -175,7 +175,7 @@ func (a *Admin) UpdateMapping(c *gin.Context) {
 	}
 
 	updated, err := a.Store.UpdateMapping(c.Request.Context(), c.Param("id"), repository.CreateMappingParams{
-		Name: request.Name, Spec: request.Spec,
+		Name: request.Name, Definition: request.Definition,
 	})
 	if err != nil {
 		writeRepositoryError(c.Writer, err)
@@ -184,7 +184,7 @@ func (a *Admin) UpdateMapping(c *gin.Context) {
 	}
 
 	result.Success(c.Writer, model.Mapping{
-		ID: updated.ID, Name: updated.Name, Spec: updated.Spec, Version: updated.Version,
+		ID: updated.ID, Name: updated.Name, Definition: updated.Spec, Version: updated.Version,
 		CreatedAt: updated.CreatedAt, UpdatedAt: updated.UpdatedAt,
 	})
 }

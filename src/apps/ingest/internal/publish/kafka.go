@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
 
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -24,6 +26,12 @@ type Options struct {
 	Security          kafka.Security // 传输与身份安全配置。
 	Timeout           time.Duration  // 单次生产的超时；默认 10 秒。
 }
+
+// closeFlushTimeout 是关停时等待在途事件的上限，需小于编排层的强制终止宽限期。
+const recordDeliveryTimeout = 30 * time.Second
+
+// closeFlushTimeout 是关停时等待在途事件的上限，需小于编排层的强制终止宽限期。
+const closeFlushTimeout = 3 * time.Second
 
 // Kafka 是 pipeline.Publisher 的 Kafka 实现。
 type Kafka struct {
@@ -62,6 +70,12 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		kgo.ProducerBatchMaxBytes(4 << 20),
 		kgo.RecordRetries(5),
 		kgo.ProduceRequestTimeout(timeout),
+		// 首次部署时 topic 还不存在；不显式允许，连接的集群一旦关闭自动建 topic，
+		// 每条事件都会永远投不出去。
+		kgo.AllowAutoTopicCreation(),
+		// 单条记录的交付上限要有限：默认两分钟的重试会让关停一直等这批记录，
+		// 而关停被拖住时缓冲里的事件反而更可能丢。
+		kgo.RecordDeliveryTimeout(recordDeliveryTimeout),
 	}, securityOptions...)
 
 	client, err := kgo.NewClient(clientOptions...)
@@ -124,11 +138,18 @@ func (k *Kafka) topicFor(event *pipeline.Event) string {
 
 // Close 冲刷未完成的生产请求并关闭连接。
 // 关停阶段没有调用方可以报告失败，记录日志已经是它能做的最好的事。
+// Close 送出在途事件后关闭客户端。
+//
+// Flush 必须有上限：broker 不可达时它会一直等，进程收不到 SIGTERM 的响应，
+// 只能被 SIGKILL 结束——那正好发生在最需要它把缓冲刷出去的时候。
+// 超时后放弃剩余记录并留下日志，让"丢了多少"可见，而不是静默卡死。
 func (k *Kafka) Close() {
-	// Flush 等待在途请求完成；直接 Close 会让它们失败。
-	if err := k.client.Flush(context.Background()); err != nil {
-		// 关闭路径上没有返回错误的位置；日志留给运维定位。
-		_ = err
+	ctx, cancel := context.WithTimeout(context.Background(), closeFlushTimeout)
+	defer cancel()
+
+	if err := k.client.Flush(ctx); err != nil {
+		logging.From(context.Background()).Warn("Kafka flush did not finish before shutdown",
+			"event", "kafka.flush_incomplete", "error", logging.Error(err))
 	}
 
 	k.client.Close()
