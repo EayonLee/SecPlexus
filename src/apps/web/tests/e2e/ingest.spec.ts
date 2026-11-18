@@ -1,4 +1,5 @@
 import { type APIRequestContext, expect, request, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
@@ -7,9 +8,13 @@ const environment = z
     SPX_E2E_BASE_URL: z.url(),
     SPX_E2E_USERNAME: z.string().min(1),
     SPX_E2E_PASSWORD: z.string().min(1),
+    SPX_E2E_KAFKA_BROKERS: z.string().min(1),
+    SPX_E2E_EVENT_TOPIC: z.string().min(1),
   })
   .parse(process.env);
 const baseURL = environment.SPX_E2E_BASE_URL;
+// 用例在 web 目录下运行，go run 需要仓库根目录；由 harness 传入。
+const repositoryRoot = process.env.SPX_E2E_ROOT ?? process.cwd();
 
 async function csrf(api: APIRequestContext) {
   const response = await api.get("/api/v1/iam/auth/context");
@@ -27,6 +32,26 @@ async function adminClient() {
   expect(response.status()).toBe(200);
 
   return api;
+}
+
+// readEvent 从事件 topic 读一条消息：受理成功不等于产出了正确的事件。
+function readEvent(): Record<string, any> {
+  const output = execFileSync(
+    "go",
+    [
+      "run",
+      "./tests/integration/kafka-read",
+      "-brokers",
+      environment.SPX_E2E_KAFKA_BROKERS,
+      "-topic",
+      environment.SPX_E2E_EVENT_TOPIC,
+      "-timeout",
+      "30s",
+    ],
+    { cwd: repositoryRoot, encoding: "utf8", timeout: 120000 },
+  );
+
+  return JSON.parse(output);
 }
 
 async function mutate(api: APIRequestContext, method: "post" | "delete", path: string, data?: unknown, expected = 204) {
@@ -67,12 +92,19 @@ test("解析映射与数据接入可在页面上完成创建，并真实接收�
 
     await expect(page.getByRole("cell", { name: inputName })).toBeVisible();
 
-    // 用页面给出的令牌推一条事件：设备侧不依赖浏览器会话。
-    const inputID = (await mutate(admin, "post", "/api/v1/ingest/inputs", { name: `${inputName}-api`, protocol: "http" }, 201)) as {
-      input: { id: string };
-      token: string;
-    };
-    expect(inputID.token).toBeTruthy();
+    // 页面建出的映射要能被接入点引用：拿到它的 id 后建一条绑定映射的接入点。
+    const mappings = (await admin.get("/api/v1/ingest/mappings")).ok()
+      ? (await (await admin.get("/api/v1/ingest/mappings")).json()).data
+      : [];
+    const mapping = (mappings as { id: string; name: string }[]).find((item) => item.name === mappingName);
+    expect(mapping, "页面创建的映射没有出现在列表里").toBeTruthy();
+
+    const bound = (await mutate(admin, "post", "/api/v1/ingest/inputs", {
+      name: `${inputName}-bound`,
+      protocol: "http",
+      mapping_id: mapping!.id,
+    }, 201)) as { input: { id: string }; token: string };
+    expect(bound.token).toBeTruthy();
 
     // 新建的接入点要等注册表刷新后才可接收推送；轮询到 202 为止，
     // 超过刷新周期仍 401 才是真的鉴权问题。
@@ -81,9 +113,9 @@ test("解析映射与数据接入可在页面上完成创建，并真实接收�
       await expect
         .poll(
           async () => {
-            const attempt = await device.post(`/api/v1/ingest/events/${inputID.input.id}`, {
-              data: { src: "10.0.0.7" },
-              headers: { Authorization: `Bearer ${inputID.token}`, "Content-Type": "application/json" },
+            const attempt = await device.post(`/api/v1/ingest/events/${bound.input.id}`, {
+              data: { src: "10.0.0.7", host: "e2e-host" },
+              headers: { Authorization: `Bearer ${bound.token}`, "Content-Type": "application/json" },
             });
 
             return attempt.status();
@@ -91,6 +123,17 @@ test("解析映射与数据接入可在页面上完成创建，并真实接收�
           { timeout: 20000, intervals: [500] },
         )
         .toBe(202);
+
+      // 事件必须真的到达总线，并且带上我们承诺的形状。
+      const event = readEvent();
+      const metadata = event.metadata as Record<string, any>;
+      expect(metadata?.spx?.input_id).toBe(bound.input.id);
+      expect(metadata?.spx?.["parse.outcome"]).toBe("ok");
+      expect(metadata?.uid).toBeTruthy();
+      expect(metadata?.version).toBeTruthy();
+      expect(typeof event.class_uid).toBe("number");
+      expect(event.type_uid).toBe(event.class_uid * 100 + event.activity_id);
+      expect(event.src_endpoint?.ip).toBe("10.0.0.7");
     } finally {
       await device.dispose();
     }

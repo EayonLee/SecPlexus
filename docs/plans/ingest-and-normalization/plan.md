@@ -90,7 +90,9 @@
 
 #### 5.3 验收
 
-- [ ] 端到端：建一条 `http` 接入点 → 用真实 token 推送样本 → `spx.ingest.event` 收到 OCSF 事件，`metadata.spx.source_id` 与 `metadata.uid` 正确；再建一条 `syslog` 接入点 → `nc` 发 RFC5424 与 CEF → 核对发布结果。
+- [x] 端到端：页面建映射与接入点 → 用真令牌推送 → 从 `spx.ingest.event` 读回事件，
+  断言 `metadata.spx.input_id`、`parse.outcome=ok`、`metadata.uid/version`、`type_uid=class_uid*100+activity_id`。
+  syslog/CEF 的发送路径由通道测试覆盖，尚未纳入浏览器用例。
 - [x] 停用接入点后其端口停止监听、HTTP 返回 401，重新启用后恢复：
   `TestReloadReleasesPortOfDisabledInput` 与 `TestDisabledInputRejectsDevicePush` 覆盖，无需重启进程。
 ## 代码审查修复（批次 2 完成后）
