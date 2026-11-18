@@ -19,7 +19,7 @@ func TestCreateMappingRejectsUncompilableSpec(t *testing.T) {
 
 	if _, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{
 		Name: uniqueName(t, "badrule"),
-		Spec: []byte(`{"id":"b","name":"b","parse":{"mode":"protobuf"},"field_map":{},"constants":{"class_uid":2004}}`),
+		Definition: []byte(`{"id":"b","name":"b","parse":{"mode":"protobuf"},"field_map":{},"constants":{"class_uid":2004}}`),
 	}); err == nil {
 		t.Fatal("编译不过的规则被写入")
 	}
@@ -33,7 +33,7 @@ func TestUpdateMappingBumpsVersion(t *testing.T) {
 	name := uniqueName(t, "rule")
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM ingest.mappings WHERE name = $1`, name) })
 
-	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: name, Spec: []byte(validRule)})
+	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: name, Definition: []byte(validRule)})
 	if err != nil {
 		t.Fatalf("创建失败: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestUpdateMappingBumpsVersion(t *testing.T) {
 
 	updated, err := repository.UpdateMapping(ctx, pool, created.ID, repository.CreateMappingParams{
 		Name: name,
-		Spec: []byte(`{"id":"r","name":"r","parse":{"mode":"kv"},"field_map":{"a":"actor.user.name"},"constants":{"class_uid":2004}}`),
+		Definition: []byte(`{"id":"r","name":"r","parse":{"mode":"kv"},"field_map":{"a":"actor.user.name"},"constants":{"class_uid":2004}}`),
 	})
 	if err != nil {
 		t.Fatalf("更新失败: %v", err)
@@ -61,7 +61,7 @@ func TestDeleteMappingInUseIsRejected(t *testing.T) {
 	ruleName := uniqueName(t, "usedrule")
 	sourceName := uniqueName(t, "usedsrc")
 
-	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: ruleName, Spec: []byte(validRule)})
+	created, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{Name: ruleName, Definition: []byte(validRule)})
 	if err != nil {
 		t.Fatalf("创建规则失败: %v", err)
 	}

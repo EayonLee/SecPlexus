@@ -15,3 +15,12 @@ reason = "dev-only: shadcn 主题包的传递依赖，运行时不加载，当�
 id = "GO-2025-3884"
 effectiveUntil = 2027-03-31
 reason = "not reachable: TrustedOrigins is never set and our own Origin allowlist runs first"
+
+# picomatch ≤4.0.7 的 extglob ReDoS：上游尚无修复版本（2026-10-19 公布，last_affected 4.0.7）。
+# 它只经由构建期工具链进入（fast-glob / micromatch / fdir），代码里没有任何路径把
+# 用户可控的 glob 交给它，因此不满足攻击前提。
+# 复审与判定依据见 docs/development/security-exceptions.md。
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+effectiveUntil = 2027-03-31
+reason = "build-only: glob patterns come from our own tooling, never from request input"

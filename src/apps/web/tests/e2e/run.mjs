@@ -108,7 +108,6 @@ try {
   let kafkaBrokers = process.env.SPX_TEST_KAFKA_BROKERS;
   // Kafka 的 advertised listener 必须与映射端口一致，因此先定端口再起容器。
   const kafkaPort = await port();
-  listenerPorts.push(kafkaPort);
   if (process.argv.includes("--docker")) {
     const dockerDatabase = `spx_e2e_${randomBytes(16).toString("hex")}`;
     command(
