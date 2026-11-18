@@ -23,14 +23,14 @@ type Mapping struct {
 
 // CreateMappingParams 是创建规则的入参。
 type CreateMappingParams struct {
-	Name string          `json:"name"`
-	Spec json.RawMessage `json:"definition"`
+	Name       string          `json:"name"`
+	Definition json.RawMessage `json:"definition"`
 }
 
 // CreateMapping 先编译再落库：编译不过的规则不进表，避免运行期才发现。
 // 这是唯一一处"校验与写入同处"的地方，因为校验规则本身属于本模块。
 func CreateMapping(ctx context.Context, pool *pgxpool.Pool, input CreateMappingParams) (Mapping, error) {
-	if _, err := compileMapping(input.Spec); err != nil {
+	if _, err := compileMapping(input.Definition); err != nil {
 		return Mapping{}, err
 	}
 
@@ -38,7 +38,7 @@ func CreateMapping(ctx context.Context, pool *pgxpool.Pool, input CreateMappingP
 	err := pool.QueryRow(ctx, `
 		INSERT INTO ingest.mappings (id, name, definition) VALUES (gen_random_uuid(), $1, $2::jsonb)
 		RETURNING id, name, definition, version, created_at, updated_at`,
-		input.Name, string(input.Spec),
+		input.Name, string(input.Definition),
 	).Scan(&created.ID, &created.Name, &created.Spec, &created.Version, &created.CreatedAt, &created.UpdatedAt)
 	if err != nil {
 		return Mapping{}, classify(err)
@@ -72,7 +72,7 @@ func ListMappings(ctx context.Context, pool *pgxpool.Pool) ([]Mapping, error) {
 
 // UpdateMapping 换规则内容并自增版本；事件按 version 归因解析质量。
 func UpdateMapping(ctx context.Context, pool *pgxpool.Pool, id string, input CreateMappingParams) (Mapping, error) {
-	if _, err := compileMapping(input.Spec); err != nil {
+	if _, err := compileMapping(input.Definition); err != nil {
 		return Mapping{}, err
 	}
 
@@ -80,7 +80,7 @@ func UpdateMapping(ctx context.Context, pool *pgxpool.Pool, id string, input Cre
 	err := pool.QueryRow(ctx, `
 		UPDATE ingest.mappings SET definition = $2::jsonb, version = version + 1, updated_at = now()
 		 WHERE id = $1 RETURNING id, name, definition, version, created_at, updated_at`,
-		id, string(input.Spec),
+		id, string(input.Definition),
 	).Scan(&updated.ID, &updated.Name, &updated.Spec, &updated.Version, &updated.CreatedAt, &updated.UpdatedAt)
 	if err != nil {
 		return Mapping{}, classify(err)

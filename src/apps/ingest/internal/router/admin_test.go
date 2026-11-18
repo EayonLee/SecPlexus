@@ -95,8 +95,8 @@ func TestAdminCreateReturnsTokenOnce(t *testing.T) {
 	}
 	defer func() { _ = response.Body.Close() }()
 
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("状态 = %d，期望 200", response.StatusCode)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("状态 = %d，期望 201", response.StatusCode)
 	}
 
 	var body struct {

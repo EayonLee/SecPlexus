@@ -37,7 +37,7 @@ export function loadEnvironment(root, environment = process.env) {
 }
 
 export function webEnvironment(environment) {
-  const allowed = new Set(['SPX_WEB_PORT','SPX_WEB_BIND_HOST','SPX_IAM_HOST','SPX_IAM_PORT','SPX_CONSOLE_HOST','SPX_CONSOLE_PORT']);
+  const allowed = new Set(['SPX_WEB_PORT','SPX_WEB_BIND_HOST','SPX_IAM_HOST','SPX_IAM_PORT','SPX_CONSOLE_HOST','SPX_CONSOLE_PORT','SPX_INGEST_ORIGIN']);
   return Object.fromEntries(Object.entries(environment).filter(([key]) =>
     key.startsWith('SPX_') ? allowed.has(key) : true));
 }

@@ -28,3 +28,17 @@ test('invalid binding, port, external origin and unusable connection addresses f
  assert.throws(()=>serviceConnection({SPX_IAM_HOST:'0.0.0.0',SPX_IAM_PORT:'8081'},'iam'),/connection/i);
  assert.throws(()=>serviceConnection({},'iam'),/connection/i);
 });
+
+test('Web receives the ingest proxy target only when ingest takes part in the start',()=>{
+ const services={iam:{public_addr:'127.0.0.1:18081'},console:{public_addr:'127.0.0.1:18080'},ingest:{public_addr:'127.0.0.1:18082'}};
+ const withIngest=webEndpoints({},services);
+ assert.equal(withIngest.SPX_INGEST_ORIGIN,'http://127.0.0.1:18082');
+ assert.equal(withIngest.SPX_IAM_PORT,'18081');
+
+ // 未启动 ingest 时不该给 Web 一个指向空处的目标。
+ const withoutIngest=webEndpoints({}, {iam:services.iam,console:services.console});
+ assert.equal(withoutIngest.SPX_INGEST_ORIGIN,undefined);
+
+ // IPv6 目标必须带方括号，否则 URL 不合法。
+ assert.equal(webEndpoints({SPX_INGEST_HOST:'::1',SPX_INGEST_PORT:'18082'},services).SPX_INGEST_ORIGIN,'http://[::1]:18082');
+});

@@ -23,7 +23,14 @@ export function serviceConnection(environment, module, local) {
 }
 
 export function webEndpoints(environment, services) {
-  return { ...serviceConnection(environment, 'iam', services.iam), ...serviceConnection(environment, 'console', services.console) };
+  const endpoints = { ...serviceConnection(environment, 'iam', services.iam), ...serviceConnection(environment, 'console', services.console) };
+  // Web 把 /api/v1/ingest 反代到 ingest，因此只有 ingest 参与本次启动时才提供目标地址。
+  if (services.ingest) {
+    const { SPX_INGEST_HOST: host, SPX_INGEST_PORT: port } = serviceConnection(environment, 'ingest', services.ingest);
+    endpoints.SPX_INGEST_ORIGIN = endpoint(`${isIP(host) === 6 ? `[${host}]` : host}:${port}`);
+  }
+
+  return endpoints;
 }
 
 // The public reverse-proxy origin does not determine the local listening port.

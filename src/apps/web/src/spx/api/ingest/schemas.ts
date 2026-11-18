@@ -23,7 +23,7 @@ export type ApiMappingDetail = z.infer<typeof zMappingDetail>;
 export const zMappingBody = z
   .object({
     name: z.string().min(1).max(100),
-    spec: z.record(z.string(), z.unknown()),
+    definition: z.record(z.string(), z.unknown()),
   })
   .strict();
 
@@ -86,28 +86,3 @@ export const zSampleResult = z.object({
 
 export type SampleResult = z.infer<typeof zSampleResult>;
 
-// zPullJob 描述拉模式连接器：由平台定时向上游拉取，而不是等设备推送。
-export const zPullJob = z.object({
-  id: z.string(),
-  name: z.string(),
-  url: z.string(),
-  interval_seconds: z.number(),
-  mapping_id: z.string().nullable(),
-  enabled: z.boolean(),
-  next_run_at: z.string(),
-  last_error: z.string(),
-});
-
-export type ApiPullJob = z.infer<typeof zPullJob>;
-
-// zCreatePullJobBody 是新建拉取任务的请求体；mapping_id 必填。
-export const zCreatePullJobBody = z
-  .object({
-    name: z.string().min(1).max(100),
-    url: z.string().url(),
-    interval_seconds: z.number().int().min(5).max(3600),
-    mapping_id: z.string().min(1),
-  })
-  .strict();
-
-export type CreatePullJobBody = z.infer<typeof zCreatePullJobBody>;
