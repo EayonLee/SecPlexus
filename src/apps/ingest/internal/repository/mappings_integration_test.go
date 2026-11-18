@@ -18,7 +18,7 @@ func TestCreateMappingRejectsUncompilableSpec(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := repository.CreateMapping(ctx, pool, repository.CreateMappingParams{
-		Name: uniqueName(t, "badrule"),
+		Name:       uniqueName(t, "badrule"),
 		Definition: []byte(`{"id":"b","name":"b","parse":{"mode":"protobuf"},"field_map":{},"constants":{"class_uid":2004}}`),
 	}); err == nil {
 		t.Fatal("编译不过的规则被写入")
@@ -42,7 +42,7 @@ func TestUpdateMappingBumpsVersion(t *testing.T) {
 	}
 
 	updated, err := repository.UpdateMapping(ctx, pool, created.ID, repository.CreateMappingParams{
-		Name: name,
+		Name:       name,
 		Definition: []byte(`{"id":"r","name":"r","parse":{"mode":"kv"},"field_map":{"a":"actor.user.name"},"constants":{"class_uid":2004}}`),
 	})
 	if err != nil {
