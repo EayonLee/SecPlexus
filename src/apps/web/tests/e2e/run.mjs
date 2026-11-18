@@ -52,6 +52,7 @@ function launch(binary, args, env, options = {}) {
     stdio: ["ignore", "pipe", "pipe"],
     detached: options.detached ?? process.platform !== "win32",
   });
+  child.spxName = options.name ?? path.basename(binary);
   let output = "";
   const collect = (chunk) => {
     output += chunk.toString();
@@ -262,7 +263,7 @@ try {
         SPX_INGEST_ORIGIN: `http://127.0.0.1:${ingestPort}`,
       },
     });
-  const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv);
+  const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv, { name: "stack" });
   await ready(`${publicURL}/login`, stack);
   await ready(`${publicURL}/api/v1/iam/auth/context`, stack);
   const iam2 = launch(iamBinary, ["serve", "--config", "src/apps/iam/config.yaml"], {
@@ -270,7 +271,7 @@ try {
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
-  });
+  }, { name: "iam-two" });
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
   const console2 = launch(consoleBinary, ["--config", "src/apps/console/config.yaml"], {
     ...consoleEnv,
@@ -279,14 +280,14 @@ try {
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort2),
     SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
-  });
+  }, { name: "console-two" });
   await ready(`http://127.0.0.1:${consolePort2}/health/ready`, console2);
   // ingest 单独起一份：它需要 Kafka 与 IAM token，默认栈里没有它。
   const ingest = launch(ingestBinary, ["serve", "--config", "src/apps/ingest/config.yaml"], {
     ...ingestEnv,
     SPX_IAM_HOST: "127.0.0.1",
     SPX_IAM_PORT: String(iamPort),
-  });
+  }, { name: "ingest" });
   await ready(`http://127.0.0.1:${ingestPort}/health/ready`, ingest);
   stackReady = true;
   if (process.argv.includes("--manual")) {
@@ -449,6 +450,18 @@ try {
     env: { ...systemEnv, SPX_POSTGRES_URL: databaseURL, SPX_IAM_LOG_FILE: "" },
   });
   console.log("Structured file logs and secret exclusion verified across both replicas.");
+
+  // ingest 关停要自己走完：缓冲里可能还有事件要发出去。
+  // 只靠收尾统一终止时，卡住也只能看到"某个服务被强制终止"，定位不到是谁。
+  const ingestClosed = new Promise((resolve) => ingest.once("exit", (code, signal) => resolve({ code, signal })));
+  if (process.platform === "win32") ingest.kill();
+  else ingest.kill("SIGTERM");
+  const ingestExit = await Promise.race([
+    ingestClosed,
+    new Promise((resolve) => setTimeout(() => resolve({ code: null, signal: "timeout" }), 15000)),
+  ]);
+  if (ingestExit.signal === "timeout") throw new Error("Ingest did not stop within the shutdown budget.");
+  console.log(`Ingest stopped with its own shutdown path (code=${ingestExit.code}).`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
@@ -457,7 +470,7 @@ try {
     if (child.exitCode !== null || child.signalCode !== null) continue;
     await terminateProcessTree(child);
     if (child.exitCode === null && child.signalCode === null) {
-      console.error("An owned service required forced shutdown.");
+      console.error(`An owned service required forced shutdown: ${child.spxName ?? "unknown"}.`);
       process.exitCode = 1;
     }
   }
