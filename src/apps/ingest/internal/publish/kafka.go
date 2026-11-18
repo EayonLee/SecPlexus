@@ -28,6 +28,9 @@ type Options struct {
 }
 
 // closeFlushTimeout 是关停时等待在途事件的上限，需小于编排层的强制终止宽限期。
+const recordDeliveryTimeout = 30 * time.Second
+
+// closeFlushTimeout 是关停时等待在途事件的上限，需小于编排层的强制终止宽限期。
 const closeFlushTimeout = 3 * time.Second
 
 // Kafka 是 pipeline.Publisher 的 Kafka 实现。
@@ -67,6 +70,12 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		kgo.ProducerBatchMaxBytes(4 << 20),
 		kgo.RecordRetries(5),
 		kgo.ProduceRequestTimeout(timeout),
+		// 首次部署时 topic 还不存在；不显式允许，连接的集群一旦关闭自动建 topic，
+		// 每条事件都会永远投不出去。
+		kgo.AllowAutoTopicCreation(),
+		// 单条记录的交付上限要有限：默认两分钟的重试会让关停一直等这批记录，
+		// 而关停被拖住时缓冲里的事件反而更可能丢。
+		kgo.RecordDeliveryTimeout(recordDeliveryTimeout),
 	}, securityOptions...)
 
 	client, err := kgo.NewClient(clientOptions...)

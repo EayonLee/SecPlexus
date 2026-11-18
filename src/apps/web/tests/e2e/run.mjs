@@ -466,7 +466,10 @@ try {
     let logTail = "";
     try {
       logTail = readFileSync(path.join(directory, "ingest.log"), "utf8").trim().split("\n").slice(-6).join("\n");
-    } catch {}
+    } catch {
+      // 日志文件可能还没落盘：诊断信息缺失不应掩盖原始失败。
+      logTail = "";
+    }
     throw new Error(`Ingest did not stop within the shutdown budget.\nstdout/stderr tail:\n${tail}\nlog tail:\n${logTail}`);
   }
   console.log(`Ingest stopped with its own shutdown path (code=${ingestExit.code}).`);
