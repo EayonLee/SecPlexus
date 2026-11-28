@@ -1,8 +1,9 @@
 package service
 
 import (
-	"github.com/aarondl/opt/omit"
 	"time"
+
+	"github.com/aarondl/opt/omit"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"

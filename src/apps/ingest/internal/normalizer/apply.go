@@ -84,6 +84,7 @@ type Compiled struct {
 	ignored        map[string]string
 	constraints    []events.Constraint
 	usesCatalog    bool
+	classUID       int
 	parser         parser.Parser
 	projections    []projection
 	constants      []constant
@@ -222,7 +223,7 @@ func (e *Compiled) applyFields(fields map[string]any, receivedAt time.Time) (Res
 		}
 		if path := incompleteClass(event.Fields, e.constraints); path != "" {
 			event.Issues = append(event.Issues, Issue{Path: path, Code: "required_field_missing"})
-			fallbackClass(&event, receivedAt)
+			fallbackClass(&event, receivedAt, e.classUID)
 		}
 		return event, nil
 	}

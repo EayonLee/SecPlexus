@@ -28,7 +28,7 @@ func Open(ctx context.Context, cfg Config) (*redis.Client, error) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 
-		return nil, errors.New("Redis unavailable")
+		return nil, errors.New("could not connect to Redis")
 	}
 
 	return client, nil

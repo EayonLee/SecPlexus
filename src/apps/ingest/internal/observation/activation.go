@@ -97,5 +97,7 @@ func (s *Store) Activations(ctx context.Context, ids []string, desired map[strin
 
 func (s *Store) activeInstances(ctx context.Context) ([]string, error) {
 	now := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	return s.redis.ZRangeByScore(ctx, s.prefix+"activation:members", &redis.ZRangeBy{Min: "(" + now, Max: "+inf"}).Result()
+	return s.redis.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key: s.prefix + "activation:members", Start: "(" + now, Stop: "+inf", ByScore: true,
+	}).Result()
 }

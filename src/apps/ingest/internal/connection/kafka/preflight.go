@@ -51,21 +51,21 @@ func CheckEvents(ctx context.Context, brokers []string, security Security, event
 	}
 
 	if len(metadata.Topics) != len(authorized) {
-		return errors.New("Kafka did not return metadata for all event topics")
+		return errors.New("missing Kafka metadata for one or more event topics")
 	}
 
 	configs := kmsg.NewPtrDescribeConfigsRequest()
 	for _, topic := range metadata.Topics {
 		if topic.Topic == nil || topic.ErrorCode != 0 || topic.TopicID == [16]byte{} || len(topic.Partitions) == 0 {
-			return errors.New("Kafka topic is unavailable or has no stable topic identity")
+			return errors.New("could not find a Kafka topic with a stable identity")
 		}
 		name := *topic.Topic
 		if topic.AuthorizedOperations != math.MinInt32 && topic.AuthorizedOperations&authorized[name] != authorized[name] {
-			return fmt.Errorf("Kafka topic permission is missing: %s", name)
+			return fmt.Errorf("missing permission for Kafka topic %s", name)
 		}
 		for _, partition := range topic.Partitions {
 			if partition.ErrorCode != 0 || partition.Leader < 0 {
-				return fmt.Errorf("Kafka partition has no leader: %s/%d", name, partition.Partition)
+				return fmt.Errorf("missing leader for Kafka partition %s/%d", name, partition.Partition)
 			}
 		}
 		configs.Resources = append(configs.Resources, kmsg.DescribeConfigsRequestResource{
@@ -80,7 +80,7 @@ func CheckEvents(ctx context.Context, brokers []string, security Security, event
 	want := topicSettings(retentionMS)
 	for _, resource := range settings.Resources {
 		if resource.ErrorCode != 0 {
-			return fmt.Errorf("Kafka topic settings are unavailable: %s", resource.ResourceName)
+			return fmt.Errorf("could not read settings for Kafka topic %s", resource.ResourceName)
 		}
 		actual := make(map[string]string, len(resource.Configs))
 		for _, item := range resource.Configs {
@@ -90,7 +90,7 @@ func CheckEvents(ctx context.Context, brokers []string, security Security, event
 		}
 		for _, item := range want {
 			if actual[item.Name] != *item.Value {
-				return fmt.Errorf("Kafka topic %s requires %s=%s", resource.ResourceName, item.Name, *item.Value)
+				return fmt.Errorf("expected Kafka topic %s to have %s=%s", resource.ResourceName, item.Name, *item.Value)
 			}
 		}
 	}
@@ -103,13 +103,13 @@ func CheckEvents(ctx context.Context, brokers []string, security Security, event
 		for errors.Is(err, kerr.CoordinatorNotAvailable) || errors.Is(err, kerr.CoordinatorLoadInProgress) {
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("Kafka event consumer group coordinator is not ready: %w", ctx.Err())
+				return fmt.Errorf("timed out waiting for the Kafka event consumer group coordinator: %w", ctx.Err())
 			case <-time.After(250 * time.Millisecond):
 				groups, err = request.RequestWith(ctx, client)
 			}
 		}
 		if errors.Is(err, kerr.GroupAuthorizationFailed) {
-			return fmt.Errorf("Kafka event consumer group requires READ permission: %s", consumerGroup)
+			return fmt.Errorf("missing READ permission for Kafka event consumer group %s", consumerGroup)
 		}
 		if err != nil {
 			return fmt.Errorf("inspect Kafka event consumer group %s: %w", consumerGroup, err)
@@ -119,7 +119,7 @@ func CheckEvents(ctx context.Context, brokers []string, security Security, event
 		}
 		group := groups.Groups[0]
 		if group.ErrorCode != 0 || (group.AuthorizedOperations != math.MinInt32 && group.AuthorizedOperations&read == 0) {
-			return fmt.Errorf("Kafka event consumer group requires READ permission: %s", consumerGroup)
+			return fmt.Errorf("missing READ permission for Kafka event consumer group %s", consumerGroup)
 		}
 	}
 	return nil
@@ -151,7 +151,7 @@ func InitEventTopics(ctx context.Context, brokers []string, security Security, e
 		return fmt.Errorf("create Kafka event topics: %w", err)
 	}
 	if len(response.Topics) != len(request.Topics) {
-		return errors.New("Kafka topic initialization returned incomplete results")
+		return errors.New("incomplete results from Kafka topic initialization")
 	}
 	for _, topic := range response.Topics {
 		if err := kerr.ErrorForCode(topic.ErrorCode); err != nil && !errors.Is(err, kerr.TopicAlreadyExists) {
@@ -181,10 +181,11 @@ func readEventTopicMetadata(ctx context.Context, client *kgo.Client, request *km
 		}
 		pending := false
 		for _, topic := range metadata.Topics {
-			switch kerr.ErrorForCode(topic.ErrorCode) {
-			case kerr.UnknownTopicOrPartition, kerr.LeaderNotAvailable:
+			err := kerr.ErrorForCode(topic.ErrorCode)
+			switch {
+			case errors.Is(err, kerr.UnknownTopicOrPartition), errors.Is(err, kerr.LeaderNotAvailable):
 				pending = true
-			case nil:
+			case err == nil:
 				pending = pending || topic.TopicID == [16]byte{} || len(topic.Partitions) == 0
 				for _, partition := range topic.Partitions {
 					pending = pending || partition.Leader < 0 || partition.ErrorCode == kerr.LeaderNotAvailable.Code

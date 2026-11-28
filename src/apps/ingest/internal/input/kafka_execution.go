@@ -6,7 +6,7 @@ import (
 )
 
 // ErrKafkaPosition 表示分区必须核对位移或主题身份后显式恢复。
-var ErrKafkaPosition = errors.New("Kafka partition position is unavailable")
+var ErrKafkaPosition = errors.New("could not determine the Kafka partition position")
 
 // KafkaWindow 是本次拉取中同一分区的记录范围及 broker 确认位置。
 type KafkaWindow struct {

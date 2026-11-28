@@ -18,8 +18,12 @@ func (e *Compiled) bindContract() error {
 		return err
 	}
 	uid, integral := integralValue(e.mapping.Constants["class_uid"])
+	// 事件类型 ID 在不同位宽的平台上使用同一取值范围。
+	if !integral || uid < 0 || uid > math.MaxInt32 {
+		return fmt.Errorf("%w: unsupported event class", ErrInvalidRule)
+	}
 	class, supported := catalog.Class(int(uid))
-	if !integral || !supported {
+	if !supported {
 		return fmt.Errorf("%w: unsupported event class", ErrInvalidRule)
 	}
 	fields := make(map[string]*events.Field, len(class.Fields))
@@ -50,6 +54,7 @@ func (e *Compiled) bindContract() error {
 		plan.value = converted
 	}
 	e.usesCatalog = true
+	e.classUID = class.UID
 	e.constraints = class.Constraints
 	return nil
 }

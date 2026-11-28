@@ -18,7 +18,7 @@ type InputListFilter struct {
 	Limit, Offset              int32
 	Query, Protocol, ExactName string
 	Enabled                    *bool
-	ParsingRuleID, SyslogPort      *string
+	ParsingRuleID, SyslogPort  *string
 }
 
 // MappingListFilter 是解析规则列表的已校验筛选条件。

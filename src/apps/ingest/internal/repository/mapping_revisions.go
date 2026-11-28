@@ -11,15 +11,15 @@ import (
 
 // MappingRevision 是解析规则的不可变修订和发布证据。
 type MappingRevision struct {
-	ParsingRuleID    string
-	Version      int32
-	Name         string
-	Vendor       string
-	Product      string
-	Definition   json.RawMessage
-	Verification *validation.RuleVerification
-	AuthorID     *string
-	RecordedAt   time.Time
+	ParsingRuleID string
+	Version       int32
+	Name          string
+	Vendor        string
+	Product       string
+	Definition    json.RawMessage
+	Verification  *validation.RuleVerification
+	AuthorID      *string
+	RecordedAt    time.Time
 }
 
 // ListMappingRevisions 按修订倒序读取摘要，使用规则 ID 和上一页的最早修订继续读取。

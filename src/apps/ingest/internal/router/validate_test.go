@@ -197,7 +197,7 @@ func TestExtractMappingWithoutClassification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", response.StatusCode)
 	}
@@ -248,7 +248,7 @@ func TestMappingSampleTextRemainsUTF8(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer response.Body.Close()
+			defer func() { _ = response.Body.Close() }()
 			var body struct {
 				Data struct {
 					Compiled bool

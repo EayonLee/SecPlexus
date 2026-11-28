@@ -2,6 +2,8 @@ package normalizer_test
 
 import (
 	"errors"
+	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,6 +15,20 @@ func TestCompileDefinitionRequiresExplicitContractVersion(t *testing.T) {
 	definition := []byte(`{"id":"network","parse":{"mode":"json"},"field_map":{"source":"src_endpoint.ip"},"constants":{"class_uid":4001}}`)
 	if _, err := normalizer.CompileDefinition(definition); !errors.Is(err, normalizer.ErrInvalidRule) {
 		t.Fatalf("未绑定版本的规则应被拒绝: %v", err)
+	}
+}
+
+func TestVersionedRuleRejectsOutOfRangeClassID(t *testing.T) {
+	rule := normalizer.Mapping{
+		ID: "network", ContractVersion: "v1", Parse: parser.Spec{Mode: parser.ModeJSON},
+		Constants: map[string]any{},
+		FieldMap:  map[string]string{"address": "src_endpoint.ip"},
+	}
+	for _, uid := range []int64{-1, math.MaxInt32 + 1} {
+		rule.Constants["class_uid"] = strconv.FormatInt(uid, 10)
+		if _, err := normalizer.Compile(rule); !errors.Is(err, normalizer.ErrInvalidRule) {
+			t.Fatalf("class UID %d should be rejected, got %v", uid, err)
+		}
 	}
 }
 

@@ -7,7 +7,7 @@ const KafkaPositionUnavailable = "kafka_position_unavailable"
 type SourceVersion struct {
 	Revision             int64 `json:"revision"`
 	CredentialGeneration int64 `json:"credential_generation"`
-	ParsingRuleVersion       int   `json:"parsing_rule_version"`
+	ParsingRuleVersion   int   `json:"parsing_rule_version"`
 	Enabled              bool  `json:"enabled"`
 }
 

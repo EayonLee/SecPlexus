@@ -102,7 +102,7 @@ func (s *KafkaExecutionStore) Bind(ctx context.Context, wanted input.Entry, topi
 		if state.ParsingRuleID != nil {
 			source.ParsingRuleID = *state.ParsingRuleID
 			if len(row.Definition) == 0 {
-				return nil, errors.New("Kafka execution refers to a missing rule revision")
+				return nil, errors.New("missing rule revision for Kafka execution")
 			}
 			source.Mapping, err = s.compile(row.Definition)
 			if err != nil {

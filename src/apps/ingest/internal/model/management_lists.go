@@ -18,11 +18,11 @@ type ListQuery struct {
 // InputListQuery 绑定接入点列表筛选。
 type InputListQuery struct {
 	ListQuery
-	Protocol   string  `form:"protocol" binding:"omitempty,oneof=http syslog kafka"`
-	Status     string  `form:"status" binding:"omitempty,oneof=enabled disabled"`
-	ParsingRuleID  *string `form:"rule" binding:"omitempty,uuid"`
-	ExactName  string  `form:"name" binding:"max=100"`
-	SyslogPort *int32  `form:"syslog_port" binding:"omitempty,min=1024,max=65535"`
+	Protocol      string  `form:"protocol" binding:"omitempty,oneof=http syslog kafka"`
+	Status        string  `form:"status" binding:"omitempty,oneof=enabled disabled"`
+	ParsingRuleID *string `form:"rule" binding:"omitempty,uuid"`
+	ExactName     string  `form:"name" binding:"max=100"`
+	SyslogPort    *int32  `form:"syslog_port" binding:"omitempty,min=1024,max=65535"`
 }
 
 // MappingListQuery 绑定规则列表筛选，IDs 用于批量取得绑定规则名称。

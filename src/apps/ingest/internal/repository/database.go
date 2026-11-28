@@ -46,7 +46,7 @@ func VerifySchema(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if _, err := ledger.GetMigration(ctx, db, 0); err != nil {
-		return errors.New("Ingest schema is not initialized; run the matching migration before serving")
+		return errors.New("run the matching migration to initialize the Ingest schema before serving")
 	}
 	provider, err := goose.NewProvider("", db, postgresql.Files, goose.WithStore(ledger), goose.WithDisableGlobalRegistry(true))
 	if err != nil {
@@ -54,11 +54,11 @@ func VerifySchema(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	current, target, err := provider.GetVersions(ctx)
 	if err != nil || current != target {
-		return errors.New("Ingest schema version is incompatible; run the matching migration before serving")
+		return errors.New("run the matching migration to update the incompatible Ingest schema before serving")
 	}
 	pending, err := provider.HasPending(ctx)
 	if err != nil || pending {
-		return errors.New("Ingest schema has missing migrations")
+		return errors.New("missing migrations for the Ingest schema")
 	}
 	return nil
 }
@@ -111,7 +111,7 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 		return err
 	}
 	if current > target {
-		return errors.New("Ingest schema is newer than this source baseline; initialize a new database")
+		return errors.New("initialize a new database because the Ingest schema is newer than this source baseline")
 	}
 	if _, err = provider.Up(ctx); err != nil {
 		// 保留底层 SQL 原因：只说"无法应用迁移"会让排障从错误信息重新开始。

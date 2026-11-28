@@ -391,9 +391,8 @@ func BaseResult(received time.Time) Result {
 	return Result{Fields: map[string]any{"class_uid": 0, "activity_id": 0, "time": received.UTC().UnixMilli(), "severity_id": 0}, TimeSource: "received"}
 }
 
-func fallbackClass(event *Result, received time.Time) {
-	value, _ := integralValue(event.Fields["class_uid"])
-	event.CandidateClass = int(value)
+func fallbackClass(event *Result, received time.Time, classUID int) {
+	event.CandidateClass = classUID
 	base := BaseResult(received)
 	base.Unmapped = event.Unmapped
 	for _, key := range []string{"time", "severity_id", "severity", "message", "metadata", "status_id", "status", "status_code", "status_detail"} {

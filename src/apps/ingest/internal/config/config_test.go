@@ -279,12 +279,12 @@ func TestKafkaRetentionDefaultAndOverride(t *testing.T) {
 }
 
 func TestEventResourceNamesShareTheKafkaNamespace(t *testing.T) {
- t.Setenv("SPX_KAFKA_NAMESPACE", "customer-a")
- cfg, err := Load(configFile(t))
- if err != nil {
-  t.Fatal(err)
- }
- if cfg.Events.Topic != "customer-a.ingest.events" || cfg.Events.FailureTopic != "customer-a.ingest.event-failures" || cfg.Events.ConsumerGroup != "customer-a-ingest-events" {
-  t.Fatalf("resources did not use the same Kafka namespace: %s, %s, %s", cfg.Events.Topic, cfg.Events.FailureTopic, cfg.Events.ConsumerGroup)
- }
+	t.Setenv("SPX_KAFKA_NAMESPACE", "customer-a")
+	cfg, err := Load(configFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Events.Topic != "customer-a.ingest.events" || cfg.Events.FailureTopic != "customer-a.ingest.event-failures" || cfg.Events.ConsumerGroup != "customer-a-ingest-events" {
+		t.Fatalf("resources did not use the same Kafka namespace: %s, %s, %s", cfg.Events.Topic, cfg.Events.FailureTopic, cfg.Events.ConsumerGroup)
+	}
 }

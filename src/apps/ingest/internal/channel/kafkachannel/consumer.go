@@ -187,7 +187,7 @@ func (c *Consumer) sync(ctx context.Context) error {
 func (c *Consumer) consume(ctx context.Context, entry input.Entry, runtime worker) error {
 	profile, exists := c.credentials[entry.Kafka.Credential]
 	if entry.Kafka.Credential != "" && (!exists || !profile.Allows(entry.Kafka.Brokers)) {
-		return errors.New("Kafka data source credential is unavailable")
+		return errors.New("could not find the Kafka data source credential")
 	}
 	options, err := consumerOptions(entry, profile.Security)
 	if err != nil {
@@ -206,7 +206,7 @@ func (c *Consumer) consume(ctx context.Context, entry input.Entry, runtime worke
 	connection, err := metadata.RequestWith(check, client)
 	cancel()
 	if err != nil || len(connection.Topics) != 1 || connection.Topics[0].ErrorCode != 0 || len(connection.Topics[0].Partitions) == 0 {
-		return errors.New("Kafka consumer topic is unavailable")
+		return errors.New("could not find the Kafka consumer topic")
 	}
 	runtime.ready.Store(true)
 	defer runtime.ready.Store(false)
@@ -349,7 +349,7 @@ func (c *Consumer) bind(ctx context.Context, entry input.Entry, records []*kgo.R
 		return nil, nil, nil
 	}
 	if state == nil || state.topicIDs[entry.Kafka.Topic] == uuid.Nil {
-		return nil, nil, errors.New("Kafka broker did not provide a topic identity")
+		return nil, nil, errors.New("could not read the topic identity from the Kafka broker")
 	}
 
 	committed := state.client.CommittedOffsets()[entry.Kafka.Topic]

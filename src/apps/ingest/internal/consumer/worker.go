@@ -31,10 +31,13 @@ type Worker struct {
 
 // Run 在完成写入或隔离后提交处理过的位移。依赖失败即返回，重启时从已提交位移恢复。
 func (w Worker) Run(ctx context.Context) error {
-	if err := w.Store.CheckSchema(ctx); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
+	err := w.Store.CheckSchema(ctx)
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+	if err != nil {
 		return fmt.Errorf("check event table: %w", err)
 	}
 	nextCheck := time.Now().Add(w.CheckInterval)
@@ -50,10 +53,13 @@ func (w Worker) Run(ctx context.Context) error {
 		default:
 		}
 		if checkDue || !time.Now().Before(nextCheck) {
-			if err := w.Store.CheckSchema(ctx); err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
+			err := w.Store.CheckSchema(ctx)
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+			if err != nil {
 				return fmt.Errorf("check event table: %w", err)
 			}
 			nextCheck = time.Now().Add(w.CheckInterval)
