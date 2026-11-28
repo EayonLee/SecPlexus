@@ -9,13 +9,13 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 )
 
-// Roles 返回全局角色列表；实际写入时仍须在 Manage 中重新鉴权。
-func (s *Service) Roles(ctx context.Context, limit, offset int) (repository.RolePage, error) {
+// Roles 按名称读取全局角色列表；实际写入时仍须在 Manage 中重新鉴权。
+func (s *Service) Roles(ctx context.Context, limit, offset int, query string, builtin *bool) (repository.RolePage, error) {
 	if _, err := s.Authorize(ctx, iamclient.PermissionIAMRolesRead); err != nil {
 		return repository.RolePage{}, err
 	}
 
-	return repository.ListRoles(ctx, s.Store.DB, limit, offset)
+	return repository.ListRoles(ctx, s.Store.DB, limit, offset, query, builtin)
 }
 
 // Role 返回单个角色的公开投影。

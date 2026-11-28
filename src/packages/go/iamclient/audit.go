@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
@@ -20,6 +21,8 @@ import (
 // 业务方不提交操作者身份——服务凭证证明的是"哪个服务在写"，
 // 操作者由服务在 metadata 里注明并由 IAM 侧策略决定是否采信。
 type AuditEvent struct {
+	OccurredAt *time.Time     `json:"occurred_at,omitempty"` // 异步重投保留事实发生时间；省略时使用 IAM 数据库时钟。
+	EventID    string         `json:"event_id,omitempty"`
 	Action     string         `json:"action"`
 	TargetType string         `json:"target_type"`
 	TargetID   string         `json:"target_id,omitempty"`
@@ -29,6 +32,22 @@ type AuditEvent struct {
 	DecisionID string         `json:"decision_id,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
+
+type auditContextKey struct{}
+
+// ContextWithAudit 保存当前已授权管理操作的审计事实，不保存用户凭据。
+func ContextWithAudit(ctx context.Context, event AuditEvent) context.Context {
+	return context.WithValue(ctx, auditContextKey{}, event)
+}
+
+// AuditFromContext 从当前请求读取待随变更一起提交的审计事实。
+func AuditFromContext(ctx context.Context) (AuditEvent, bool) {
+	event, ok := ctx.Value(auditContextKey{}).(AuditEvent)
+	return event, ok
+}
+
+// ErrInvalidAuditEvent 表示 IAM 因事件内容无效而拒绝了投递。
+var ErrInvalidAuditEvent = errors.New("IAM rejected the audit event content")
 
 // RecordAudit 把一条审计事实交给 IAM。
 //
@@ -54,6 +73,10 @@ func (c *Client) RecordAudit(ctx context.Context, event AuditEvent) error {
 
 	defer func() { _ = response.Body.Close() }()
 
+	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusRequestEntityTooLarge ||
+		response.StatusCode == http.StatusUnprocessableEntity {
+		return ErrInvalidAuditEvent
+	}
 	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK {
 		logging.From(ctx).Error("IAM rejected audit event", "event", "audit.rejected",
 			"action", event.Action, "status", response.StatusCode)

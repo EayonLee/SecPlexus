@@ -9,21 +9,20 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx/middleware"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
-	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
 
-// Register 保留 SSE 的原生响应和取消语义；上下文与事件流都是扁平的，没有组织段。
+// Register 区分进程健康、依赖就绪和需要用户会话的授权上下文。
 func Register(engine gin.IRouter, server *handler.Server, guard *iamclient.Client) {
-	engine.GET("/health/ready", func(c *gin.Context) { result.Success(c.Writer, map[string]bool{"ready": true}) })
+	engine.GET("/health/live", server.Live)
+	engine.GET("/health/ready", server.Ready)
 
 	// 鉴权与审计由 iamclient 的中间件统一完成，handler 里不再做权限判断。
 	if guard == nil {
 		return
 	}
 
-	group := engine.Group("/api/v1/console", middleware.Guard(guard, iamclient.PermissionConsoleEventsRead, "session"))
+	group := engine.Group("/api/v1/console", middleware.Guard(guard, iamclient.PermissionConsoleContextRead, "session"))
 	group.GET("/context", server.Context)
-	group.GET("/events", server.Events)
 }
 
 // Handler 在注册前装配公共中间件及输入边界。

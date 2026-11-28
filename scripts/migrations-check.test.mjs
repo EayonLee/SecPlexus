@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { checkMigrationBoundaries, foreignKeyTargets, moduleSchemas } from './migrations-check.mjs';
 
 function workspace() {
@@ -10,11 +12,36 @@ function workspace() {
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-function writeModule(root, app, files) {
-  const dir = join(root, app, 'migrations');
+function writeModule(root, app, files, database = '') {
+  const dir = join(root, app, 'migrations', database);
   mkdirSync(dir, { recursive: true });
   for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql);
 }
+
+test('the CLI checks nested PostgreSQL migrations and excludes ClickHouse migrations', () => {
+  const { root, cleanup } = workspace();
+  try {
+    const apps = join(root, 'src', 'apps');
+    writeModule(apps, 'ingest', {
+      '00001_init.sql': 'CREATE TABLE ingest.inputs (id uuid PRIMARY KEY);',
+    }, 'postgresql');
+    writeModule(apps, 'ingest', {
+      '00001_init.sql': 'CREATE TABLE spx.events (id UUID);',
+    }, 'clickhouse');
+    const cli = fileURLToPath(new URL('./migrations-check.mjs', import.meta.url));
+    const check = () => spawnSync(process.execPath, [cli], { cwd: root, encoding: 'utf8' });
+    assert.equal(check().status, 0);
+
+    writeModule(apps, 'ingest', {
+      '00002_owner.sql': 'ALTER TABLE ingest.inputs ADD COLUMN owner uuid REFERENCES iam.users(id);',
+    }, 'postgresql');
+    const result = check();
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /ingest\/migrations\/postgresql\/00002_owner\.sql REFERENCES iam\.users/);
+  } finally {
+    cleanup();
+  }
+});
 
 test('same-schema references pass and module schema is inferred from CREATE TABLE', () => {
   const { root, cleanup } = workspace();

@@ -20,6 +20,10 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactCompiler: true,
+  // Next 构建只检查应用。仓库的 typecheck 继续检查跨模块测试。
+  typescript: {
+    tsconfigPath: process.env.NODE_ENV === "production" ? "tsconfig.build.json" : "tsconfig.json",
+  },
   // 不暴露框架标识：响应头里的 x-powered-by 等于把技术栈和大致版本告诉扫描器。
   poweredByHeader: false,
   agentRules: false,
@@ -27,12 +31,10 @@ const nextConfig = {
   // 用 127.0.0.1 或局域网 IP 打开页面时，脚本请求会被 403 拒绝，
   // 页面只剩服务端渲染的 HTML，React 不会接管，表现为输入框无法输入。
   allowedDevOrigins: ["127.0.0.1", "localhost"],
-  // ingest 管理 API 走同源反代：浏览器只与 Web 同源通信，
-  // 会话 cookie 与 CSRF 令牌因此不需要跨域放行。
-  async rewrites() {
-    const ingest = process.env.SPX_INGEST_ORIGIN ?? "http://127.0.0.1:8082";
-
-    return [{ source: "/api/v1/ingest/:path*", destination: `${ingest}/api/v1/ingest/:path*` }];
+  async redirects() {
+    return [
+      { source: "/settings", destination: "/settings/profile", permanent: true },
+    ];
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

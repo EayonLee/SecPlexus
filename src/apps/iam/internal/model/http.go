@@ -21,7 +21,7 @@ type APIPage[T any] struct {
 // APIAuditEvent 是一条审计事实的 HTTP 投影；游标边界由服务端自己维护。
 type APIAuditEvent struct {
 	ID         string          `json:"id"`          // 事件标识。
-	OccurredAt time.Time       `json:"occurred_at"` // 事件时间，数据库时钟。
+	OccurredAt time.Time       `json:"occurred_at"` // 审计事实发生时间。
 	ActorType  string          `json:"actor_type"`  // 触发者类型。
 	ActorName  *string         `json:"actor_name"`  // 触发者名称；系统事件为 null。
 	Action     string          `json:"action"`      // 稳定动作名。
@@ -54,6 +54,8 @@ type APIChangePasswordInput struct {
 
 // APIMe 是 /me 的响应：当前账号、直接持有的角色、有效权限与展示时区偏好。
 type APIMe struct {
+	Email       *string             `json:"email"`
+	CreatedAt   time.Time           `json:"created_at"`
 	Permissions []string            `json:"permissions"`        // 有效权限键，来自角色并集。
 	Principal   iamclient.Principal `json:"principal"`          // 已验证的登录用户与版本。
 	Roles       []APIRoleRef        `json:"roles"`              // 直接持有的角色，不含继承。
@@ -105,12 +107,13 @@ type APIRoleRef struct {
 
 // APIRole 是角色的公开投影，包含是否内置与权限键。
 type APIRole struct {
-	Builtin     bool     `json:"builtin"`
-	Description string   `json:"description"`
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
-	UserCount   int64    `json:"user_count"`
+	Builtin     bool      `json:"builtin"`
+	Description string    `json:"description"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Permissions []string  `json:"permissions"`
+	UserCount   int64     `json:"user_count"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // APIRoleCreate 绑定角色创建：名称、说明与初始权限在创建时一次提交。
@@ -129,6 +132,7 @@ type APIRoleInput struct {
 // APIUser 是账号公开投影，不含密码凭据；角色让列表与服务调用方看到授权来源。
 type APIUser struct {
 	AuthEpoch   int64        `json:"auth_epoch,string"`
+	CreatedAt   time.Time    `json:"created_at"`
 	Configured  bool         `json:"configured"`
 	DisplayName string       `json:"display_name"`
 	Email       *string      `json:"email"`
@@ -167,14 +171,27 @@ type ListQuery struct {
 	Q      string `form:"q"`
 }
 
+// UserListQuery 扩展用户搜索，可按直接分配角色和账号状态筛选。
+type UserListQuery struct {
+	ListQuery
+	Status string `form:"status" binding:"omitempty,oneof=active disabled"`
+	RoleID string `form:"role_id" binding:"omitempty,uuid"`
+}
+
+// RoleListQuery 扩展角色搜索，可按内置或自定义角色筛选。
+type RoleListQuery struct {
+	ListQuery
+	Type string `form:"type" binding:"omitempty,oneof=builtin custom"`
+}
+
 // AuditQuery 绑定审计列表的筛选与分页条件。
 // 审计只支持向前游标：行数随时间单调增长，OFFSET 深翻会线性变慢。
 // 可见范围由服务端的 iam.audit.read 决定，客户端不能指定额外范围。
 type AuditQuery struct {
-	Limit   int    `form:"limit,default=20" binding:"min=1,max=100"`
-	Cursor  string `form:"cursor" binding:"omitempty,max=128"`
-	Actor   string `form:"actor" binding:"omitempty,max=100"`
-	Outcome string `form:"outcome" binding:"omitempty,oneof=success failure denied"`
-	From    string `form:"from" binding:"omitempty,datetime=2006-01-02"`
-	To      string `form:"to" binding:"omitempty,datetime=2006-01-02"`
+	Limit   int        `form:"limit,default=20" binding:"min=1,max=100"`
+	Cursor  string     `form:"cursor" binding:"omitempty,max=128"`
+	Actor   string     `form:"actor" binding:"omitempty,max=100"`
+	Outcome string     `form:"outcome" binding:"omitempty,oneof=success failure denied"`
+	From    *time.Time `form:"from" time_format:"2006-01-02T15:04:05Z07:00"`
+	To      *time.Time `form:"to" time_format:"2006-01-02T15:04:05Z07:00"`
 }

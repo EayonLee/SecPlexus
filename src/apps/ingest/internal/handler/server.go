@@ -3,6 +3,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,6 +15,9 @@ import (
 // 通道依赖走 router.Deps，管理 API 依赖在第五组加在这里——
 // 同一依赖只保留一条装配路径，避免改一处忘另一处。
 type Server struct {
+	AuditOutboxHealth    func(context.Context) (int64, int64, error)
+	SourceSnapshotAge    func() time.Duration
+	KafkaOffsetsRejected func() uint64
 	// Ready 报告外部依赖是否可用；nil 表示当前没有需要检查的依赖。
 	Ready func(ctx context.Context) error
 	// Stats 返回流水线计数；nil 表示指标端点不启用。

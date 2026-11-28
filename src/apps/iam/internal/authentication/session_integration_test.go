@@ -27,7 +27,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			failures <- store.Seed(ctx, "admin", secret)
+			failures <- store.SyncAdministrator(ctx, "admin", secret)
 		}()
 	}
 
@@ -151,7 +151,7 @@ func TestSessionLifecycleAcrossReplicas(t *testing.T) {
 		t.Fatal("stale password snapshot created a session")
 	}
 	// 重复应用相同的管理员配置不得重置已有凭据。
-	if err = store.Seed(ctx, "admin", secret); err != nil {
+	if err = store.SyncAdministrator(ctx, "admin", secret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,7 +169,7 @@ func TestSessionIdleAndAbsoluteDeadlines(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	secret := "isolated integration password"
-	if err := store.Seed(ctx, "admin", secret); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", secret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,7 +263,7 @@ func TestConcurrentReauthenticationConsumesSessionOnce(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	secret := "isolated reauthentication password"
-	if err := store.Seed(ctx, "admin", secret); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", secret); err != nil {
 		t.Fatal(err)
 	}
 

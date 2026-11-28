@@ -7,6 +7,7 @@ linters:
   enable:
     - bodyclose
     - copyloopvar
+    - depguard
     - durationcheck
     - errcheck
     - errorlint
@@ -23,6 +24,32 @@ linters:
     - staticcheck
     - unused
   settings:
+    depguard:
+      rules:
+        routing:
+          files:
+            - '**/src/apps/*/internal/router/**.go'
+            - '!$test'
+          deny:
+            - pkg: database/sql
+              desc: Route packages register handlers and middleware. Use the owning repository for data access.
+            - pkg: github.com/jackc/pgx
+              desc: Open database connections in bootstrap and pass them to the owning repository.
+            - pkg: github.com/redis/go-redis
+              desc: Assemble cache connections in bootstrap and keep cache behavior with its business owner.
+            - pkg: github.com/twmb/franz-go
+              desc: Assemble Kafka dependencies in bootstrap and keep message handling in its business package.
+            - pkg: github.com/ClickHouse
+              desc: Route packages call handlers. The event repository owns ClickHouse access.
+        business:
+          files:
+            - '**/src/apps/*/internal/service/**.go'
+            - '**/src/apps/*/internal/consumer/**.go'
+            - '**/src/apps/*/internal/repository/**.go'
+            - '!$test'
+          deny:
+            - pkg: github.com/gin-gonic/gin
+              desc: Keep Gin in the HTTP boundary and pass context and typed values into business code.
     govet:
       enable: [httpresponse]
   exclusions:

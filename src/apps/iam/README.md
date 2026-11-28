@@ -54,7 +54,7 @@ IAM 回答的是「你有没有这个能力」，不是「这条数据归不归�
 
 ### 权限目录在代码里
 
-7 个扁平权限键：
+IAM 自身管理操作使用的权限键示例：
 
 ```
 iam.users.read       查看用户与角色归属        normal   无需近期认证
@@ -69,13 +69,13 @@ iam.audit.read       查看审计事件              normal   无需近期认证
 高风险键标记 `requires_recent_auth`：操作者必须在近期认证窗口（默认 30 分钟）内确认过密码，
 否则返回 `iam.recent_auth_required`。个人资料页与每个管理表单共用同一个确认框，确认后自动重放该次提交。
 
-清单在 `internal/authorization/permissions.json`，版本化管理。数据库里有一份运行时投影，启动时同步。
+清单在 `internal/authorization/permissions.json`，版本化管理。数据库持有运行时投影，由 `iam migrate` 同步。常驻服务只读核对迁移版本和目录条目。
 
 权限键固定为 `module.resource.action`，这三段不单独存列而是由键解析得到：少一份可以漂移的副本。
-目录里删掉的键不会消失，而是在下次启动时标记为 `retired`——历史授权保留，但立即不再生效，
+目录里删掉的键不会消失，而是在下次迁移时标记为 `retired`——历史授权保留，但立即不再生效，
 因此「删权限」不会留下一个仍然可用的幽灵键。
 
-同步只按 `permission_key` upsert 元数据；键本身是唯一稳定标识，键变化等同新增权限，旧键在下次启动时标记为 `retired`。已执行的 SQL 迁移不得修改；表结构变化必须新增前向迁移，不能要求部署侧删除 schema 或 Goose 版本表。
+同步只按 `permission_key` upsert 元数据；键本身是唯一稳定标识，键变化等同新增权限，旧键在下次迁移时标记为 `retired`。已执行的 SQL 迁移不得修改；表结构变化必须新增前向迁移，不能要求部署侧删除 schema 或 Goose 版本表。
 
 模块开发者定义「能做什么」，应用使用者决定「谁能做」。使用者没法凭空造出一个后端不存在的权限。
 
@@ -97,13 +97,15 @@ iam.audit.read       查看审计事件              normal   无需近期认证
 
 判定结果只有 `{allowed, decision_id, principal}`：扁平模型没有范围字段，调用方也不需要再比对作用域。
 
+`GET /api/v1/iam/permission-catalog` 提供启动自检使用的权限键列表。Ingest 的服务凭证可读取此目录以核对引用的权限键。其管理 API 仍须携带原用户会话，由 IAM 进行权限判定。
+
 ### 内置数据来自数据库
 
-三类内置数据在启动时按配置幂等写入，前端只读接口，不在前端写死任何内置行：
+三类内置数据由显式迁移任务按配置幂等写入，前端只读接口，不在前端写死任何内置行：
 
 1. **权限目录**：以代码中的 `permissions.json` 为准，补充缺失键，更新描述、风险级别与可委派等元数据。
 2. **超级管理员角色**：`name='超级管理员'`、`builtin=true`，权限是权限目录全部有效键；只补不删。该角色不可改名称、不可改说明、不可改权限、不可删除。
-3. **配置管理员**：`bootstrap.username/password` 写入 `users.configured=true`，并授予超级管理员角色；改配置后下次启动更新用户名/密码并撤销旧会话。
+3. **配置管理员**：`bootstrap.username/password` 写入 `users.configured=true`，并授予超级管理员角色；改配置后执行迁移，更新用户名或密码并撤销旧会话。
 
 标记写在数据里：`roles.builtin` 标记内置角色，`users.configured` 标记配置托管账号。数据库对两列各有一个部分唯一索引（`roles_single_builtin`、`users_single_configured`），保证各只有一行；服务层据标记拒绝改名、改权限、删除、停用与页面改密。
 
@@ -250,7 +252,7 @@ IAM（Go + Gin，:8081）
 
 Web 只做转发，不解析账号，不合并权限。Cookie 原样传。
 
-单端口，用户接口和服务接口共用 `/api/v1/iam` 前缀，按路由分别认证。应用内明文 HTTP，HTTPS 由外层反向代理终止。
+单端口，用户接口和服务接口共用 `/api/v1/iam` 前缀，并由同一个 Gin 引擎按各自中间件注册。账户、用户、角色的组内路由按职责维护。应用内明文 HTTP，HTTPS 由外层反向代理终止。[路由入口](internal/router/routes.go)
 
 ### 技术选型
 
@@ -338,38 +340,18 @@ decision.Scope         // {kind:"platform"}，扁平模型只有这一个范围
 service_clients:
   console:
     token: "${SPX_CONSOLE_IAM_TOKEN-}"
-    actions: [iam.users.read]
+    actions: [console.context.read, iam.permissions.read]
 ```
 
 `actions` 是白名单，不在列表里的 action 一律拒绝。token 用 SHA-256 摘要比对，常数时间比较，防时序攻击。
 
 ### 当前接入情况
 
-**已接入，Console。** 它调 IAM 验证会话与 SSE 授权，是唯一配了 `service_clients` 的模块。
+Console 与 Ingest 均作为独立服务客户端直连 IAM。Console 按用户会话请求 `console.context.read`，就绪探针读取权限目录。Ingest 按数据接入、事件读取和解析规则分别请求权限，并向 IAM 投递管理审计。IAM 的服务客户端白名单与用户有效权限共同约束授权结果。部署时分别配置每个客户端的凭证，并与调用方配置匹配。[服务客户端配置](config.yaml) · [权限权威清单](internal/authorization/permissions.json)
 
-**规划中，其余模块。** 按架构设计，`llm-gateway`、`collector`、`correlator`、`agent-runtime`、`soar`、`scheduler` 等后续模块都会各自接入 IAM，方式完全一样，在自己的 `config.yaml` 里配一个 `service_clients` 条目，拿一个独立 token，声明自己需要问哪些 action。
+**维护权限时**，修改上述清单，从仓库根运行 `pnpm catalogs:generate` 和 `pnpm catalogs:check` 核对 Go / Web 派生物；再用真实授权请求验证允许、拒绝与退役键。迁移命令同步 PostgreSQL 中的权限元数据，用户和角色分配继续由 IAM 管理。遇到不一致，先比对运行版本的清单、派生常量、服务白名单和数据库权限状态，保留角色分配记录。恢复数据库后的会话处理见下文“七个命令”。
 
-**它们不经过 Console。** Console 是安全运营业务模块，不是网关，不是权限中转站。每个模块直连 IAM。
-
-模块定义还在演进，具体有哪些、叫什么名字，以后可能变。但接入方式不会变，因为它是 IAM 的契约，不是某个模块的实现细节。
-
-新增一个模块的完整动作只有两步
-
-```yaml
-# 1. IAM 侧加一段配置
-service_clients:
-  your-module:
-    token: "${SPX_YOUR_MODULE_IAM_TOKEN-}"
-    actions: [iam.users.read]
-```
-
-```go
-// 2. 调用方用 iamclient
-client, _ := iamclient.New(iamURL, yourToken)
-decision, err := client.Authorize(ctx, r, iamclient.PermissionIAMUsersRead)
-```
-
-不用改 IAM 代码，不用重启其他模块。
+新增调用方时，在 IAM 的 `service_clients` 加入独立凭证和所需 action，在调用方启动时通过 `iamclient.New` 创建客户端并处理初始化错误。将客户端传给本模块路由，按声明的权限调用 `Authorize` 或共享鉴权中间件。重载配置按各自模块的启动方式重启 IAM 和调用方。[客户端实现](../../packages/go/iamclient/client.go) · [Console 路由示例](../console/internal/router/routes.go)
 
 ### 调用方必须做和不该做
 
@@ -398,12 +380,14 @@ make dev
 
 `make dev` 先跑迁移和初始化，再启动 IAM、Console、Web。
 
-### 七个命令
+### 运维命令
 
 ```sh
 go run ./src/apps/iam/cmd check-config         --config src/apps/iam/config.yaml
 go run ./src/apps/iam/cmd serve                --config src/apps/iam/config.yaml
-go run ./src/apps/iam/cmd migrate              --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd migrate --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd initialize-administrator --config src/apps/iam/config.yaml
+go run ./src/apps/iam/cmd sync-administrator --config src/apps/iam/config.yaml
 go run ./src/apps/iam/cmd status               --config src/apps/iam/config.yaml
 go run ./src/apps/iam/cmd maintain             --config src/apps/iam/config.yaml
 go run ./src/apps/iam/cmd revoke-after-restore --config src/apps/iam/config.yaml
@@ -412,13 +396,24 @@ go run ./src/apps/iam/cmd reset-password --user-id <uuid> --config src/apps/iam/
 
 `check-config` 离线校验，不连数据库不建日志。改完配置先跑这个。
 
+端口、登录限流、锁定策略、会话与留存都在根 `.env.example`。整栈 Compose 使用 Docker 日志轮转，独立运行的文件日志选项在 IAM 分组中以注释展示。已有托管管理员改名或改密须执行 `sync-administrator`。 [配置指南](../../../docs/development/configuration.md)
+
+Compose 下修改根 `.env` 后，使用当前部署的项目名执行维护命令。
+
+```sh
+docker compose --project-directory . --env-file .env -p "$COMPOSE_PROJECT_NAME" \
+  -f deploy/compose/compose.yaml run --rm --no-deps \
+  --entrypoint /usr/local/bin/spx-entrypoint iam-initialize sync-administrator
+```
+
+
 `status` 只读，不因状态查询隐式建表。
 
-`maintain` 清理过期数据，每次每表最多 1000 条，由部署侧定时调度。
+`maintain` 清理过期数据，每次每表最多 1000 条。用部署已有的调度器执行并记录退出状态。Compose 部署沿用同一项目名和环境，可用 `docker compose run --rm --no-deps iam maintain`，完整 Compose 参数见[部署架构](../../../docs/design/architecture/03-deployment-architecture.md#开发-compose)。
 
 `revoke-after-restore` 必须在数据库恢复后、开放流量前跑。否则备份里的旧会话会复活。
 
-`reset-password` 是运维兜底，交互式无回显输入，走和普通改密一样的用例，撤销会话、写审计，不会顺便提权。配置托管的账号不走这条路径。
+`reset-password` 是运维兜底，交互式无回显输入，走和普通改密一样的用例，撤销会话、写审计，不会顺便提权。托管账号通过 `sync-administrator` 维护。
 
 ### 首次启动做了什么
 
@@ -427,7 +422,7 @@ go run ./src/apps/iam/cmd reset-password --user-id <uuid> --config src/apps/iam/
       ↓
 同步权限目录 + 内置超级管理员角色（builtin=true）
       ↓
-写入/更新配置管理员（configured=true）并授予超级管理员角色
+首次写入配置管理员（configured=true）并授予超级管理员角色
       ↓
 校验 schema 版本与唯一超管存在
       ↓
@@ -436,7 +431,7 @@ serve 就绪
 
 没有安装页面。管理员是配置给的，直接去登录页登。
 
-迁移、种子、首账号初始化都可重试，并发取 advisory 锁。配置管理员与内置角色在初始化阶段落定；改配置时更新凭据、递增账号版本并撤销旧会话。
+迁移同步权限目录与内置角色。首次管理员初始化使用已有角色，由 `initialize-administrator` 完成，重复执行保留账号及凭据。运行 `sync-administrator` 才会应用配置中的托管管理员变更，更新账号版本并撤销旧会话。命令拒绝接管已有普通账号。
 
 ### 配置
 
@@ -448,8 +443,10 @@ serve 就绪
 SPX_IAM_CSRF_KEY            32 字节，签名 CSRF token
 SPX_IAM_BOOTSTRAP_PASSWORD  超管密码，12–128 字符
 SPX_CONSOLE_IAM_TOKEN       Console 调 IAM 凭证，32–512 字节
-SPX_POSTGRES_PASSWORD       数据库密码
+SPX_INGEST_IAM_TOKEN        Ingest 调 IAM 凭证，32–512 字节，使用独立值
 ```
+
+管理员密码没有默认值。IAM 用 `SPX_IAM_BIND_HOST` 监听；其他模块用 `SPX_IAM_HOST` 连接 IAM。
 
 关键默认值
 
@@ -481,7 +478,7 @@ POST /auth/reauthenticate    二次认证
 **本人**
 
 ```
-GET   /me                    账号、角色与有效权限
+GET   /me                    账号、角色、有效权限与本人联系资料
 PATCH /me                    更新时区偏好
 POST  /me/password           本人改密
 ```
@@ -489,7 +486,7 @@ POST  /me/password           本人改密
 **用户**
 
 ```
-GET    /users                      列表（含角色）
+GET    /users                      列表（含角色与创建时间，可按 role_id、status 筛选）
 POST   /users                      创建
 GET    /users/:id                  详情
 PATCH  /users/:id                  修改
@@ -501,7 +498,7 @@ POST   /users/:id/reset-password   重置密码
 **角色**
 
 ```
-GET    /roles                      列表（含内置行、用户数）
+GET    /roles                      列表（含更新时间、用户数，按 q 搜索名称、按 type 筛选）
 POST   /roles                      创建
 GET    /roles/:id                  详情（含权限键）
 PATCH  /roles/:id                  修改名称与说明
@@ -524,9 +521,12 @@ GET  /audit-events           审计日志（单一列表，无范围裁剪）
 
 ```
 POST /authorize              服务凭证 + action 白名单 + 原用户上下文
+POST /audit-events           服务凭证 + iam.audit.write，提交审计事实
 ```
 
-`/me` 返回 `principal`（含 `user_id`、`session_id`、`username`、`display_name`、`configured`、`auth_epoch`）、`roles`、`permissions` 与时区偏好。
+服务审计的 `occurred_at` 可传 RFC 3339 发生时间。IAM 按 UTC 保存，省略时使用数据库时钟。同一个 `event_id` 重投只记录一次。
+
+`/me` 返回 `principal`（含 `user_id`、`session_id`、`username`、`display_name`、`configured`、`auth_epoch`）、`roles`、`permissions` 与时区偏好，并带本人联系邮箱与账号创建时间。
 
 统一响应 `{code, message, data, request_id}`。401 会话失效、403 授权拒绝、409 冲突、429 限流、503 依赖故障。
 

@@ -26,12 +26,12 @@ func (s *Service) Me(ctx context.Context) (Identity, error) {
 		return Identity{}, err
 	}
 
-	permissions, err := repository.EffectivePermissions(ctx, s.Store.DB, userID)
+	permissions, err := sessionPermissions(ctx, s.Store.DB, userID)
 	if err != nil {
 		return Identity{}, err
 	}
 
-	timeZone, err := repository.UserTimeZone(ctx, s.Store.DB, userID)
+	profile, err := repository.ReadUserProfile(ctx, s.Store.DB, userID)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -40,5 +40,5 @@ func (s *Service) Me(ctx context.Context) (Identity, error) {
 		roles = []repository.RoleRef{}
 	}
 
-	return Identity{Principal: p, Permissions: permissions, TimeZone: timeZone, Roles: roles}, nil
+	return Identity{Principal: p, Permissions: permissions, TimeZone: profile.TimeZone, Email: profile.Email, CreatedAt: profile.CreatedAt, Roles: roles}, nil
 }

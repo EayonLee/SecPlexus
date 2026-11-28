@@ -8,15 +8,16 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
 	"github.com/EayonLee/SecPlexus/src/packages/go/configuration"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
-	"github.com/jackc/pgx/v5"
+	"github.com/EayonLee/SecPlexus/src/packages/go/postgresql"
+	redisconn "github.com/EayonLee/SecPlexus/src/packages/go/redis"
 )
 
 // App 描述 IAM 的统一监听和反向代理配置。
@@ -28,30 +29,6 @@ type App struct {
 
 // Addr 返回统一 HTTP 服务的监听地址。
 func (a App) Addr() string { return net.JoinHostPort(a.Host, strconv.Itoa(a.Port)) }
-
-// Database 描述 PostgreSQL 连接；URL 非空时优先使用 URL。
-type Database struct {
-	Name     string `yaml:"name"`                            // 数据库名称。
-	Host     string `yaml:"host" validate:"required"`        // 监听或连接地址。
-	Port     int    `yaml:"port" validate:"gte=1,lte=65535"` // 监听或连接端口。
-	User     string `yaml:"user"`                            // 数据库用户名。
-	Password string `yaml:"password"`                        // 数据库连接密码。
-	SSLMode  string `yaml:"sslmode"`                         // PostgreSQL TLS 模式。
-	URL      string `yaml:"url"`                             // 可选的完整连接地址。
-}
-
-// connection 依据配置字段构造连接地址，不建立网络连接。
-func (d Database) connection(user, password string) string {
-	u := url.URL{
-		Scheme: "postgres",
-		Host:   net.JoinHostPort(d.Host, strconv.Itoa(d.Port)),
-		Path:   "/" + d.Name,
-		User:   url.UserPassword(user, password),
-	}
-	q := url.Values{"sslmode": {d.SSLMode}}
-	u.RawQuery = q.Encode()
-	return u.String()
-}
 
 // ServiceClient 描述允许请求鉴权的服务及其权限。
 type ServiceClient struct {
@@ -72,7 +49,7 @@ type Auth struct {
 	LoginAccountRate       int           `yaml:"login_account_rate"`       // 每个账号每 15 分钟允许的认证请求数。
 }
 
-// Bootstrap 描述配置托管的内置管理员：每次启动都幂等写入数据库。
+// Bootstrap 描述首次初始化及显式维护使用的托管管理员配置。
 type Bootstrap struct {
 	Username string `yaml:"username"` // 内置管理员用户名；改名会收回旧账号的内置标记。
 	Password string `yaml:"password"` // 内置管理员密码；只能由配置更新。
@@ -87,8 +64,8 @@ type Retention struct {
 // Config 包含 IAM 启动、基础组件和账号与授权所需的配置。
 type Config struct {
 	App            App                      `yaml:"app"`             // 公开服务配置。
-	DB             Database                 `yaml:"db"`              // PostgreSQL 连接配置。
-	Cache          cache.Config             `yaml:"cache"`           // Redis 连接配置。
+	PostgreSQL     postgresql.Config        `yaml:"postgresql"`      // PostgreSQL 连接配置。
+	Redis          redisconn.Config         `yaml:"redis"`           // Redis 连接配置。
 	ServiceClients map[string]ServiceClient `yaml:"service_clients"` // 服务调用方及允许的操作。
 	Auth           Auth                     `yaml:"auth"`            // 认证策略配置。
 	Bootstrap      Bootstrap                `yaml:"bootstrap"`       // 配置托管管理员的权威来源。
@@ -111,11 +88,7 @@ func Load(filename string) (Config, error) {
 		return c, err
 	}
 
-	if c.DB.URL == "" {
-		c.DB.URL = c.DB.connection(c.DB.User, c.DB.Password)
-	}
-
-	c.Cache.URL = c.Cache.ResolveURL()
+	c.Redis.URL = c.Redis.ResolveURL()
 
 	return c, c.Validate()
 }
@@ -163,19 +136,13 @@ func (c Config) Validate() error {
 	if c.Retention.SessionDays < 1 || c.Retention.SessionDays > 36500 {
 		return errors.New("retention.session_days must be between 1 and 36500")
 	}
-	if c.DB.Name == "" {
-		return errors.New("db.name must not be empty")
+	if err := c.PostgreSQL.Validate(); err != nil {
+		return err
 	}
-	if c.DB.User == "" {
-		return errors.New("db.user must not be empty")
-	}
-	if err := c.Cache.Validate(); err != nil {
+	if err := c.Redis.Validate(); err != nil {
 		return err
 	}
 
-	if _, err := pgx.ParseConfig(c.DB.URL); err != nil {
-		return errors.New("db.url must be a valid PostgreSQL connection string; check db fields")
-	}
 	if err := c.ValidateSecurity(false); err != nil {
 		return err
 	}
@@ -218,8 +185,11 @@ func (c Config) ValidateSecurity(required bool) error {
 	// 这是配置错误，必须启动即拒绝，而不是让同一个 Token 随机以某个服务身份出现。
 	owners := make(map[string]string, len(c.ServiceClients))
 	for id, client := range c.ServiceClients {
-		if id == "" || len(client.Actions) == 0 || ((required || client.Token != "") && (len(client.Token) < 32 || len(client.Token) > 512)) {
-			return errors.New("service_clients requires a nonempty ID, a 32–512 byte token (SPX_CONSOLE_IAM_TOKEN for Console) and allowed actions")
+		if id == "" || len(client.Actions) == 0 {
+			return errors.New("service_clients requires a nonempty ID and allowed actions")
+		}
+		if (required || client.Token != "") && (len(client.Token) < 32 || len(client.Token) > 512) {
+			return fmt.Errorf("service_clients.%s.token (SPX_%s_IAM_TOKEN) must contain 32–512 bytes", id, strings.ToUpper(id))
 		}
 		for _, action := range client.Actions {
 			if !slices.ContainsFunc(catalog, func(permission authorization.Permission) bool { return permission.Key == action }) {
@@ -240,9 +210,6 @@ func (c Config) ValidateSecurity(required bool) error {
 // ValidateServe 在创建运行资源前校验服务专用前置条件。
 func (c Config) ValidateServe() error {
 	if err := c.Validate(); err != nil {
-		return err
-	}
-	if err := c.ValidateAdministrator(); err != nil {
 		return err
 	}
 	if err := c.ValidateSecurity(true); err != nil {

@@ -2,10 +2,11 @@
 //
 // 契约（spec）：POST /api/v1/ingest/events/{input_id}，Bearer 令牌按接入点校验，
 // 请求体 10 MiB、数组 1000 条上限，成功 202 返回受理计数；
-// 解析与发布在响应之后异步完成，失败不回传设备。
+// 响应只确认已发布到标准或诊断主题的连续前缀。
 package httpchannel
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
@@ -25,7 +27,8 @@ const (
 	// DefaultMaxBodyBytes 是请求体上限的默认值，与 spec 一致；超出返回 413。
 	DefaultMaxBodyBytes int64 = 10 << 20
 	// MaxBatch 是一次请求允许的事件条数上限；超出返回 413。
-	MaxBatch = 1000
+	MaxBatch        = 1000
+	deliveryTimeout = 15 * time.Second
 )
 
 // acceptedContentTypes 是允许的请求体类型。
@@ -43,6 +46,9 @@ type Channel struct {
 	// MaxBodyBytes 是请求体上限；零值使用 DefaultMaxBodyBytes。
 	// 由配置注入而不是读全局：同一进程里不同部署可以给不同上限。
 	MaxBodyBytes int64
+	// MaxConcurrentRequests 由服务配置注入。独立构造处理器时，零表示不限制并发。
+	MaxConcurrentRequests int
+	activeRequests        atomic.Int64
 }
 
 // New 创建 HTTP 通道。
@@ -89,6 +95,14 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 		return
 	}
 
+	activeRequests := c.activeRequests.Add(1)
+	defer c.activeRequests.Add(-1)
+	if c.MaxConcurrentRequests > 0 && activeRequests > int64(c.MaxConcurrentRequests) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "ingest request capacity reached")
+		return
+	}
+
 	body, ok := c.readBody(w, r)
 	if !ok {
 		return
@@ -97,28 +111,46 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 	// 拆分顺序：映射声明了多行合并就先用它把连续行合成逻辑消息，
 	// 否则按线格式拆分。多行合并必须在解析之前，否则堆栈会被切成独立事件。
 	messages, err := splitBody(entry, r.Header.Get("Content-Type"), body)
+	if errors.Is(err, parser.ErrBatchLimit) {
+		writeError(w, http.StatusRequestEntityTooLarge, "batch exceeds limit")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "malformed payload")
 		return
 	}
-	if len(messages) > MaxBatch {
-		writeError(w, http.StatusRequestEntityTooLarge, "batch exceeds limit")
-		return
-	}
 
 	received := time.Now()
-	accepted := 0
+	delivery, cancel := context.WithTimeout(r.Context(), deliveryTimeout)
+	defer cancel()
 
+	receipts := make([]<-chan struct{}, 0, len(messages))
 	for _, message := range messages {
-		// 队列满时此处阻塞，背压直接传到设备：不丢数据。
-		if err = c.pipeline.Submit(r.Context(), entry, message, received, pipeline.Meta{}); err != nil {
+		confirmed, submitErr := c.pipeline.SubmitTracked(delivery, entry, message, received)
+		if submitErr != nil {
 			logging.From(r.Context()).Warn("Submit aborted", "event", "ingest.submit_aborted",
-				"input_id", entry.ID, "accepted", accepted, "rejected", len(messages)-accepted,
-				"error", logging.Error(err))
-
+				"input_id", entry.ID, "queued", len(receipts), "rejected", len(messages)-len(receipts),
+				"error", logging.Error(submitErr))
 			break
 		}
+		receipts = append(receipts, confirmed)
+	}
 
+	accepted := 0
+waiting:
+	for _, confirmed := range receipts {
+		// 到达期限时仍计入已经确认的记录。
+		select {
+		case <-confirmed:
+		default:
+			select {
+			case <-confirmed:
+			case <-delivery.Done():
+				break waiting
+			case <-c.pipeline.Done():
+				break waiting
+			}
+		}
 		accepted++
 	}
 
@@ -141,13 +173,8 @@ func (c *Channel) Handle(w http.ResponseWriter, r *http.Request, sourceID string
 
 // splitBody 按映射与请求体类型把报文切成消息。
 func splitBody(entry input.Entry, contentType string, body []byte) ([][]byte, error) {
-	if entry.Mapping != nil {
-		if merge := entry.Mapping.Multiline(); merge != nil {
-			return merge(body)
-		}
-	}
 
-	return parser.Split(splitMode(entry, contentType), body)
+	return parser.SplitLimited(splitMode(entry, contentType), body, MaxBatch)
 }
 
 // splitMode 决定用什么线格式拆分请求体。

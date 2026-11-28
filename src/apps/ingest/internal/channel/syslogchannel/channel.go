@@ -23,10 +23,16 @@ import (
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
+const (
+	maxTCPConnections = 256
+	tcpReadTimeout    = 2 * time.Minute
+)
+
 // Channel 管理所有 syslog 接入点的监听器。
 type Channel struct {
 	registry input.Lookup
 	pipeline *pipeline.Pipeline
+	tcpSlots chan struct{} // 所有 Syslog 端口共用的连接预算。
 
 	mu        sync.Mutex
 	listeners map[string]*binding // 接入点 ID → 监听器。
@@ -40,6 +46,8 @@ type binding struct {
 	entry  input.Entry
 	udp    net.PacketConn
 	tcp    net.Listener
+	cancel context.CancelFunc
+	done   sync.WaitGroup
 	closed atomic.Bool
 }
 
@@ -52,10 +60,19 @@ func New(registry input.Lookup, line *pipeline.Pipeline, reloadInterval time.Dur
 	return &Channel{
 		registry:       registry,
 		pipeline:       line,
+		tcpSlots:       make(chan struct{}, maxTCPConnections),
 		listeners:      make(map[string]*binding),
 		reloadInterval: reloadInterval,
 		bindHost:       bindHost,
 	}
+}
+
+// Ready 报告指定接入的实际 TCP、UDP 监听器是否已绑定。
+func (c *Channel) Ready(entry input.Entry) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	active := c.listeners[entry.ID]
+	return active != nil && active.entry.Port == entry.Port && !active.closed.Load()
 }
 
 // Start 首次绑定并进入周期刷新；SIGHUP 触发立即重载。
@@ -101,10 +118,10 @@ func (c *Channel) Reload(ctx context.Context) error {
 		desired[entry.ID] = entry
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	var failures []error
+	var retired []*binding
+
+	c.mu.Lock()
 
 	// 关掉不再需要或端口已变的监听器。
 	for id, active := range c.listeners {
@@ -114,6 +131,7 @@ func (c *Channel) Reload(ctx context.Context) error {
 		}
 
 		active.close()
+		retired = append(retired, active)
 		delete(c.listeners, id)
 	}
 
@@ -130,6 +148,11 @@ func (c *Channel) Reload(ctx context.Context) error {
 		}
 
 		c.listeners[id] = created
+	}
+	c.mu.Unlock()
+
+	for _, active := range retired {
+		active.done.Wait()
 	}
 
 	return errors.Join(failures...)
@@ -156,13 +179,14 @@ func (c *Channel) bind(ctx context.Context, entry input.Entry) (*binding, error)
 		return nil, fmt.Errorf("tcp bind: %w", err)
 	}
 
-	created := &binding{entry: entry, udp: udp, tcp: tcp}
+	bindingCtx, cancel := context.WithCancel(ctx)
+	created := &binding{entry: entry, udp: udp, tcp: tcp, cancel: cancel}
 
 	logging.From(ctx).Info("Syslog listener bound", "event", "syslog.bound",
 		"input_id", entry.ID, "port", entry.Port)
 
-	go c.readUDP(ctx, created)
-	go c.readTCP(ctx, created)
+	created.done.Go(func() { c.readUDP(bindingCtx, created) })
+	created.done.Go(func() { c.readTCP(bindingCtx, created) })
 
 	return created, nil
 }
@@ -195,6 +219,9 @@ func (c *Channel) readUDP(ctx context.Context, active *binding) {
 
 // readTCP 按 RFC6587 分帧读取；解析失败只计数，不断开连接。
 func (c *Channel) readTCP(ctx context.Context, active *binding) {
+	var connections sync.WaitGroup
+	defer connections.Wait()
+
 	for {
 		connection, err := active.tcp.Accept()
 		if err != nil {
@@ -208,18 +235,32 @@ func (c *Channel) readTCP(ctx context.Context, active *binding) {
 			continue
 		}
 
-		go c.serveTCPConnection(ctx, active.entry, connection)
+		select {
+		case c.tcpSlots <- struct{}{}:
+			connections.Go(func() {
+				defer func() { <-c.tcpSlots }()
+				c.serveTCPConnection(ctx, active.entry, connection)
+			})
+		default:
+			_ = connection.Close()
+		}
 	}
 }
 
 // serveTCPConnection 处理一条长连接；分帧残留在连接内累积。
 func (c *Channel) serveTCPConnection(ctx context.Context, entry input.Entry, connection net.Conn) {
 	defer func() { _ = connection.Close() }()
+	// 取消 binding 时唤醒阻塞的 Read，包括刚从 Accept 返回的连接。
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
 
 	chunk := make([]byte, 8<<10)
 	var pending []byte
 
-	for {
+	for ctx.Err() == nil {
+		if err := connection.SetReadDeadline(time.Now().Add(tcpReadTimeout)); err != nil {
+			return
+		}
 		size, err := connection.Read(chunk)
 		if size > 0 {
 			pending = append(pending, chunk[:size]...)
@@ -243,7 +284,13 @@ func (c *Channel) serveTCPConnection(ctx context.Context, entry input.Entry, con
 }
 
 // deliver 把一条报文交给流水线；失败只记日志，不影响连接。
-func (c *Channel) deliver(ctx context.Context, entry input.Entry, frame []byte) {
+func (c *Channel) deliver(ctx context.Context, binding input.Entry, frame []byte) {
+	// 已建立的 TCP 连接和 UDP 监听器复用端口，每条报文取当前内存配置。
+	entry, ok := c.registry.ByID(binding.ID)
+	if !ok {
+		return
+	}
+
 	original := len(frame)
 	trimmed, truncated := truncate(frame)
 	if truncated {
@@ -252,7 +299,7 @@ func (c *Channel) deliver(ctx context.Context, entry input.Entry, frame []byte) 
 	}
 
 	// 截断信息随事件落库：分析师必须能看出这条数据不完整。
-	meta := pipeline.Meta{Truncated: truncated, OriginalBytes: original, DroppedBytes: original - len(trimmed)}
+	meta := pipeline.Meta{Truncated: truncated, OriginalBytes: original}
 
 	if len(trimmed) == 0 {
 		return
@@ -263,11 +310,13 @@ func (c *Channel) deliver(ctx context.Context, entry input.Entry, frame []byte) 
 	if entry.Mapping != nil {
 		decoded, decodeErr := entry.Mapping.Decode(trimmed)
 		if decodeErr != nil {
+			meta.DecodeFailed = true
 			logging.From(ctx).Warn("Syslog message could not be decoded", "event", "syslog.decode_failed", "input_id", entry.ID)
 
 			// 解码失败仍然受理：按原文透传，事件带 parse.outcome=error 可查。
 		} else {
 			trimmed = decoded
+			meta.Decoded = true
 		}
 	}
 
@@ -294,20 +343,25 @@ func (c *Channel) deliver(ctx context.Context, entry input.Entry, frame []byte) 
 // Close 关闭全部监听器。
 func (c *Channel) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for id, active := range c.listeners {
+	retired := c.listeners
+	c.listeners = make(map[string]*binding)
+	for _, active := range retired {
 		active.close()
-		delete(c.listeners, id)
+	}
+	c.mu.Unlock()
+
+	for _, active := range retired {
+		active.done.Wait()
 	}
 }
 
-// close 幂等关闭两个监听器。
+// close 取消连接处理并释放两个监听器。调用方在锁外等待退出。
 func (b *binding) close() {
 	if b.closed.Swap(true) {
 		return
 	}
 
+	b.cancel()
 	_ = b.udp.Close()
 	_ = b.tcp.Close()
 }

@@ -40,7 +40,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelStartup()
 
-	if err = client.ValidateActions(startupCtx, consoleActions...); err != nil {
+	if err = client.ValidateActions(startupCtx, iamclient.PermissionConsoleContextRead); err != nil {
 		// 目录漂移是配置错误，必须停在启动期；IAM 暂时不可达则先启动，
 		// 请求会因为拿不到授权结论返回 503，依赖恢复后自动可用。
 		if errors.Is(err, iamclient.ErrCatalogDrift) {
@@ -53,7 +53,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	server := &http.Server{
 		Addr:              cfg.App.Addr(),
-		Handler:           router.Handler(&handler.Server{IAM: client, ReauthInterval: cfg.Stream.ReauthInterval}, client),
+		Handler:           router.Handler(&handler.Server{IAM: client}, client),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -66,9 +66,4 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		return err
 	}
 	return nil
-}
-
-// consoleActions 是 Console 依赖的权限键：新增路由时必须同步加入。
-var consoleActions = []string{
-	iamclient.PermissionConsoleEventsRead,
 }

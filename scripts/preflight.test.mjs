@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { readRuntime, writeRuntime } from './runtime.mjs';
+
 const root = fileURLToPath(new URL('..', import.meta.url));
 test('all selected modules are checked before migration or runtime side effects', { timeout: 120000 }, () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'spx-preflight-'));
@@ -18,7 +20,7 @@ test('all selected modules are checked before migration or runtime side effects'
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('SPX_')));
     Object.assign(env, {
       SPX_WEB_PORT: '15173', SPX_IAM_CSRF_KEY: 'c'.repeat(32), SPX_CONSOLE_IAM_TOKEN: 't'.repeat(32),
-      SPX_POSTGRES_HOST: '127.0.0.1', SPX_POSTGRES_PORT: '1',
+      SPX_POSTGRESQL_HOST: '127.0.0.1', SPX_POSTGRESQL_PORT: '1',
       SPX_REDIS_HOST: '127.0.0.1', SPX_REDIS_PORT: '1', SPX_IAM_PORT: '18081', SPX_CONSOLE_PORT: '0',
       // IAM is valid; Console's listener is deliberately invalid.
       SPX_INGEST_IAM_TOKEN: 'i'.repeat(32), SPX_IAM_BOOTSTRAP_PASSWORD: 'preflight-bootstrap-password',
@@ -31,11 +33,14 @@ test('all selected modules are checked before migration or runtime side effects'
     assert.doesNotMatch(result.stdout + result.stderr, /migrations and initialization completed|connection refused/);
     assert.equal(existsSync(path.join(directory, 'logs')), false);
     env.SPX_CONSOLE_PORT = '18080';
+    const running = [{ pid: process.pid, module: 'web' }];
+    writeRuntime(directory, running);
     for (const modules of [['iam', 'console'], ['iam'], ['console']]) {
       const check = spawnSync(process.execPath, ['scripts/start.mjs', 'check-config', ...modules], {
         cwd: directory, env, encoding: 'utf8', timeout: 110000,
       });
       assert.equal(check.status, 0, check.stderr);
+      assert.deepEqual(readRuntime(directory), running);
       assert.match(check.stdout, /configuration valid \(offline\)/);
       assert.equal(existsSync(path.join(directory, 'logs')), false);
     }

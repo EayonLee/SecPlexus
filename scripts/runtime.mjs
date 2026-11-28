@@ -34,6 +34,22 @@ export function readRuntime(root) {
   }
 }
 
+/** 检查工作目录是否已有服务占用，必须在构建或申请测试资源前执行。 */
+export function assertStackAvailable(root, includesWeb) {
+  const running = readRuntime(root).filter((entry) => processAlive(entry.pid));
+  if (running.length)
+    throw new Error(`Another SecPlexus stack is already running (PID ${running.map((entry) => entry.pid).join(', ')}). Use a separate checkout to run both stacks.`);
+  if (!includesWeb) return;
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync(path.join(root, 'src/apps/web/.next/dev/lock'), 'utf8'));
+  } catch {
+    return;
+  }
+  if (processAlive(lock?.pid))
+    throw new Error(`A Web dev server is already running (PID ${lock.pid}). Use a separate checkout to run both stacks.`);
+}
+
 /** Replace the registry atomically so a concurrent stop never reads half a record. */
 export function writeRuntime(root, processes) {
   const filename = runtimeFile(root);

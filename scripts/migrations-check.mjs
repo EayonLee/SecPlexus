@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // 迁移边界检查：每个模块的迁移只能改动并引用自己 schema 内的对象。
 // 背景：全平台共用一个 PostgreSQL，模块按 schema 隔离（iam.、ingestor.…）。
@@ -13,18 +14,19 @@ export function moduleSchemas(root) {
   const schemas = new Map();
   for (const app of readdirSync(root, { withFileTypes: true })) {
     if (!app.isDirectory()) continue;
-    let dir;
+    let dir = join(root, app.name, 'migrations');
+    let entries;
     try {
-      dir = join(root, app.name, 'migrations');
-    } catch {
-      continue;
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
     }
-    let files;
-    try {
-      files = readdirSync(dir).filter((name) => name.endsWith('.sql'));
-    } catch {
-      continue;
+    if (entries.some((entry) => entry.isDirectory() && entry.name === 'postgresql')) {
+      dir = join(dir, 'postgresql');
+      entries = readdirSync(dir, { withFileTypes: true });
     }
+    const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.sql')).map((entry) => entry.name);
     if (files.length === 0) continue;
     const schema = schemaUsedBy(app.name, files.map((name) => readFileSync(join(dir, name), 'utf8')));
     if (schema) schemas.set(app.name, { schema, dir, files });
@@ -65,7 +67,8 @@ export function checkMigrationBoundaries(root = moduleRoot) {
       const sql = readFileSync(join(dir, name), 'utf8');
       for (const target of foreignKeyTargets(sql)) {
         if (target.startsWith(`${schema}.`)) continue;
-        violations.push({ module: app, file: name, target });
+        const file = relative(join(root, app, 'migrations'), join(dir, name)).split(sep).join('/');
+        violations.push({ module: app, file, target });
       }
     }
   }
@@ -84,3 +87,5 @@ export function main() {
   }
   console.log(`Migration boundaries valid (${checkMigrationBoundaries.name}).`);
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

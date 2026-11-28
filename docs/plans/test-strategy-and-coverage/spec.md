@@ -83,7 +83,7 @@ Superpowers 的 `test-driven-development` 技能给出核心法则：**没有失
 ## 验收
 
 - `docs/development/testing.md` 含判定表，`AGENTS.md` 含强制最低要求并指向它。
-- 覆盖率基线已记录（当前实测：全仓 Go 约 63%，多个包 0%，其中部分 0% 是因为集成测试需要 `SPX_TEST_POSTGRES_URL` 而默认不运行，需在基线中区分）。
+- 覆盖率基线已记录（当前实测：全仓 Go 约 63%，多个包 0%，其中部分 0% 是因为集成测试需要 `SPX_TEST_POSTGRESQL_URL` 而默认不运行，需在基线中区分）。
 - 上表每一行至少有一个能失败的测试，且该测试在移除对应实现后确实失败。
 - `pnpm test:unit`、`go test ./src/...`、`pnpm typecheck`、`pnpm lint`、`node scripts/build.mjs` 全部通过。
 - 集成测试在有数据库时通过；无数据库时明确跳过而非报错。
@@ -91,4 +91,4 @@ Superpowers 的 `test-driven-development` 技能给出核心法则：**没有失
 ## 风险
 
 - 存量补齐工作量大。按「对外行为」而非「文件数」衡量，允许分多次提交，但每次提交必须是完整可验证的一小组。
-- 需要区分「真的没测」与「集成测试默认不跑」。已确认 `iam/internal/service`、`iam/internal/authentication` 的 0% 属于后者（缺 `SPX_TEST_POSTGRES_URL`），误判会导致重复劳动。
+- 需要区分「真的没测」与「集成测试默认不跑」。已确认 `iam/internal/service`、`iam/internal/authentication` 的 0% 属于后者（缺 `SPX_TEST_POSTGRESQL_URL`），误判会导致重复劳动。

@@ -13,7 +13,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/syslogchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
 
@@ -49,15 +48,7 @@ func (c *collector) count() int {
 func syslogRule(t *testing.T) *normalizer.Compiled {
 	t.Helper()
 
-	engine, err := normalizer.Compile(normalizer.Mapping{
-		ID:    "syslog-test",
-		Parse: parser.Spec{Mode: parser.ModeKV},
-		FieldMap: map[string]string{
-			"syslog.hostname": "device.hostname",
-			"message":         "message",
-		},
-		Constants: map[string]any{"class_uid": 2004},
-	})
+	engine, err := normalizer.CompileDefinition([]byte(`{"contract_version":"v1","parse":{"mode":"kv"},"branches":[{"id":"network","name":"Network","class_uid":4001,"field_map":{"host":"src_endpoint.hostname"}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,13 +99,18 @@ func freePort(t *testing.T) int {
 // harness 启动一个绑定端口的 syslog 通道。
 func harness(t *testing.T, port int) (*collector, *pipeline.Pipeline, func()) {
 	t.Helper()
+	return harnessWithRule(t, port, syslogRule(t))
+}
+
+func harnessWithRule(t *testing.T, port int, rule *normalizer.Compiled) (*collector, *pipeline.Pipeline, func()) {
+	t.Helper()
 
 	registry := input.NewMemory()
 	registry.Replace([]input.Entry{{
 		ID:       "syslog-1",
 		Protocol: input.ProtocolSyslog,
 		Port:     port,
-		Mapping:  syslogRule(t),
+		Mapping:  rule,
 	}})
 
 	publisher := &collector{}
@@ -239,9 +235,16 @@ func TestReloadBindsNewConnector(t *testing.T) {
 		<-lineDone
 	}()
 
-	// 追加一个接入点，周期刷新应当把它绑定。
+	waitListening(t, firstPort, true)
+	connection, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", firstPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+
+	// 修改已有接入点，并追加第二个接入点。原 TCP 连接也应使用新的来源。
 	registry.Replace([]input.Entry{
-		{ID: "syslog-1", Protocol: input.ProtocolSyslog, Port: firstPort, Mapping: syslogRule(t)},
+		{ID: "syslog-1", Protocol: input.ProtocolSyslog, Port: firstPort, Mapping: syslogRule(t), Vendor: "New vendor", Product: "Live edge"},
 		{ID: "syslog-2", Protocol: input.ProtocolSyslog, Port: secondPort, Mapping: syslogRule(t)},
 	})
 
@@ -260,6 +263,29 @@ func TestReloadBindsNewConnector(t *testing.T) {
 
 	if !bound {
 		t.Fatal("reload did not bind the new source port")
+	}
+
+	if _, err = connection.Write([]byte("<34>1 2026-11-14T10:00:00Z fw01 app - - - refreshed\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for publisher.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	events := publisher.all()
+	if len(events) != 1 {
+		t.Fatalf("已有 TCP 连接收到 %d 条事件", len(events))
+	}
+	var body struct {
+		Metadata struct {
+			SPX struct{ Vendor, Product string }
+		}
+	}
+	if err := json.Unmarshal(events[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Metadata.SPX.Vendor != "New vendor" || body.Metadata.SPX.Product != "Live edge" {
+		t.Fatalf("已有连接未采用新的来源配置: %+v", body.Metadata.SPX)
 	}
 }
 
@@ -284,7 +310,7 @@ func TestUDPBurstKeepsMessagesIntact(t *testing.T) {
 		host := fmt.Sprintf("host-%02d-abcdefghijklmnopqrstuvwxyz0123456789", index)
 		expected[host] = struct{}{}
 
-		payload := fmt.Sprintf("<34>1 2026-11-14T10:00:00Z %s app - - - message %d", host, index)
+		payload := fmt.Sprintf("<34>1 2026-11-14T10:00:00Z %s app - - - host=%s seq=%d", host, host, index)
 		if _, err = connection.Write([]byte(payload)); err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +329,7 @@ func TestUDPBurstKeepsMessagesIntact(t *testing.T) {
 
 	for index, event := range events {
 		if event.Outcome.Status != pipeline.StatusOK {
-			t.Fatalf("第 %d 条解析失败（内容已被覆盖）: %s", index, event.Outcome.Detail)
+			t.Fatalf("第 %d 条解析失败（内容已被覆盖）: %s", index, event.Outcome.Reason)
 		}
 
 		var body map[string]any
@@ -311,10 +337,64 @@ func TestUDPBurstKeepsMessagesIntact(t *testing.T) {
 			t.Fatalf("第 %d 条事件体非法: %v", index, err)
 		}
 
-		device, _ := body["device"].(map[string]any)
+		device, _ := body["src_endpoint"].(map[string]any)
 		host, _ := device["hostname"].(string)
 		if _, ok := expected[host]; !ok {
 			t.Fatalf("第 %d 条 hostname = %q，不在发送集合内", index, host)
 		}
+	}
+}
+
+func TestSyslogCEFUsesTheMatchedBranch(t *testing.T) {
+	rule, err := normalizer.CompileDefinition([]byte(`{
+		"contract_version":"v1","parse":{"mode":"cef"},
+		"branches":[{"id":"auth","name":"Authentication","class_uid":3002,
+			"match":[{"field":"SignatureID","equals":"32002"}],
+			"field_map":{"duser":"user.name","dst":"dst_endpoint.ip"},
+			"constants":{"activity_id":1,"status_id":2}}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	published, _, cleanup := harnessWithRule(t, port, rule)
+	defer cleanup()
+	connection, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	for _, log := range []string{
+		"CEF:0|Fortinet|FortiGate|7|32002|Login failed|5|duser=operator dst=192.0.2.2",
+		"CEF:0|Fortinet|FortiGate|7|99000|Other event|4|password=private-device-marker",
+	} {
+		frame := "<34>1 2026-11-26T10:00:00Z fw01 fortigate - - - " + log
+		if _, err := connection.Write([]byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for published.count() < 2 {
+		select {
+		case <-timeout.C:
+			t.Fatal("Syslog did not publish both records")
+		case <-poll.C:
+		}
+	}
+	classes := make(map[int]pipeline.Status)
+	for _, event := range published.all() {
+		var evidence struct {
+			Class int `json:"class_uid"`
+		}
+		if err := json.Unmarshal(event.Body, &evidence); err != nil {
+			t.Fatalf("invalid published event: %s, %v", event.Body, err)
+		}
+		classes[evidence.Class] = event.Outcome.Status
+	}
+	if classes[3002] != pipeline.StatusOK || classes[0] != pipeline.StatusError {
+		t.Fatalf("unexpected Syslog classification: %v", classes)
 	}
 }

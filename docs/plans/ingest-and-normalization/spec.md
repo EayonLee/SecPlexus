@@ -1,6 +1,6 @@
 # 数据接入与归一化（ingest）
 
-状态：待审核，未实施。范围是 ingest 服务的第一版：三种通道接收、解析映射为 OCSF 事件、发布 Kafka。告警提升与合并归 correlator（另一项规则），事件落 ClickHouse 归 correlator/存储方案，均不在本计划。
+状态：首版主链路已实施。当前配置、路由与 Kafka topic 以 [Ingest README](../../../src/apps/ingest/README.md) 为准，首版验收见[首版收尾](../ingest-closeout/plan.md)，当前 Web 入口与工作流见[控制台数据接入](../ingest-console-redesign/spec.md)。本计划记录接收、OCSF 解析映射和 Kafka 发布。告警提升与合并、ClickHouse 存储属于下游方案。
 
 ## 背景与调研依据
 
@@ -31,7 +31,9 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 
 未知字符集在 `Compile` 阶段被拒绝，不会等到运行期第一条报文才失败。
 
-## 死信 topic（解析失败事件分流）
+## 死信 topic（历史首版行为）
+
+这一节记录 Event 1.0.0 的发布方式。当前实现将解析结果随统一 Event 主题发布，ClickHouse 归档另有自己的失败主题。见 [Ingest 运行契约](../../../src/apps/ingest/README.md#event-字段与存储设计)。
 
 解析失败事件固定发到 `kafka.parse_failure_topic`（默认 `spx.ingest.parse-failures`），正常事件发 `kafka.event_topic`（默认 `spx.ingest.events`）。两者都是必填配置，不再有「留空就混发」的语义——Splunk 同样把解析错误写进 `_internal` 而非业务索引。
 
@@ -187,7 +189,7 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 **性能、稳定性与资源约束**（容量目标：单机 5 万 EPS，sustained）：
 
 - **OCSF 必填属性与私有簿记分家（审查修订，2026-11-15）**：`ocsf/ocsf-schema` 的 `events/base_event.json` 把 `class_uid`、`severity_id`、`category_uid`、`type_uid`、`activity_id`、`metadata` 标为 `required`，`objects/metadata.json` 又要求 `metadata.version`（OCSF schema 版本）与 `metadata.product`。产出事件据此补齐：`category_uid = class_uid/1000`、`type_uid = class_uid*100 + activity_id`（未声明活动时用 OCSF 的 `0` Unknown）、`metadata.version` 与 `metadata.product` 由引擎盖章。**我方簿记（`source_id`/`parse.outcome`/`parse_error`/`truncated`/`original_bytes`）放在 `metadata.spx` 扩展命名空间**，不占用 OCSF 标准属性；事件标识映射到 `metadata.uid`。规则若已写 `metadata.*` 则合并保留，不覆盖。
-- **设备接入与管理面是两条协议边界（审查修订，2026-11-15）**：设备推送（`/api/v1/ingest/events/:input_id`）**不得继承**管理面的 `middleware.InputBoundary`——后者是给浏览器与管理 API 的 32 KiB + `application/json` 边界，套在设备推送上会把 10 MiB 配置压成 32 KiB、并拒绝设备常用的 `text/plain`。两条边界共用同一监听端口，由 `router.RootHandler` 按路径前缀分流。
+- **设备接入与管理面是两条协议边界（审查修订，2026-11-15）**：设备推送（`/api/v1/ingest/events/:input_id`）**不得继承**管理面的 `middleware.InputBoundary`——后者是给浏览器与管理 API 的 32 KiB + `application/json` 边界，套在设备推送上会把 10 MiB 配置压成 32 KiB、并拒绝设备常用的 `text/plain`。两条边界共用同一监听端口，由同一个 Gin 引擎按业务路由和中间件分组。
 - **解析失败的三层表达（对照 Elastic 与 Vector）**：失败原因拆成三个字段回答三个问题——`stage`（decode/map/limit，哪一层失败）、`reason`（稳定枚举：no_rule / format_mismatch / truncated / engine_panic，供聚合告警）、`message`（人类可读细节，供排查）。**原因码与描述必须分开**：Elastic 用 `event.kind=pipeline_error` + `error.message` + processor tag，Vector 要求错误事件带机器可读的 `error_type` 标签；混成一个字符串则既不能聚合也不能排查。注意 Splunk 的做法相反——它不给事件加解析状态，错误只进 `_internal` 索引；我们不采用，因为事件存储需要能按解析质量做看板。
 - **截断不覆盖规则产出的分类**：失败事件只在缺失字段上兜底（`class_uid`、`severity_id`、`time`、`message`），已解析出的字段与规则声明的类一律保留——头部完整的 CEF 仍属 2004，覆盖成通用类会让下游按 class_uid 路由时找不到它。
 - **报文大小上限与截断语义（证据驱动）**：行业默认值各不相同——RFC5424 要求接收方 **MUST 支持 480 字节**、**SHOULD 支持 2048**，且规定「若截断，MUST 截在末尾」；RFC5426 对 UDP 的 IPv4 要求 480、IPv6 要求 1180；rsyslog 默认 **8 KiB**（`$MaxMessageSize`，官方注明不要低于 1k）；Splunk 默认 **10 000 字节/行**（`TRUNCATE`，0 表示永不截断）；Vector 默认 **102 400 字节**（`max_length`）。我们的取值：syslog 单条 **64 KiB**（远高于各规范下限，覆盖含结构化数据的 Windows 事件日志），HTTP 请求体 **10 MiB**（对齐 Splunk 事件量级与常见批量推送），Kafka 单条由 broker 的 `message.max.bytes` 约束。
@@ -199,19 +201,12 @@ ingest 是一切外部安全数据的唯一入口。前一轮调研（AiSOC、Ve
 - **引擎拥有键（二轮修订）**：`severity_id` 与 `time` 由引擎保障写入；field_map 不得映射到这两个键（加载即拒绝，用 severity/time 规则声明），常量可以覆盖（最后盖章机制，固定级别源的唯一写法）。
 - **设备时区（审查修订）**：规则的 time.location 声明设备时区（IANA 名称，如 Asia/Shanghai），无时区的时间串按它解析；默认 UTC。国产设备普遍发本地时间，按 UTC 解析会让时间线整体偏移。
 - **值表键归一化（二轮修订）**：severity 值表键在编译期归一化（小写、去空白），与事件值同规则；归一后冲突的键加载即拒绝。
-- **容量模型（5w EPS 的算术）**：5w 事件/秒 = 每秒 5 万次 解析+映射+发布。按 Go 单核约 5-10 万次轻量 map 操作/秒，解析+映射在 4 核上绰绰有余；瓶颈在 JSON 序列化与 Kafka 发布——批量 500 条/批 = 100 批/秒，单分区顺序写，Kafka 单机可承 10 万+ msg/s。**8C16G 单机支撑 5w EPS 是工程上宽裕的配置**（AiSOC 同构架构按同容量设计）。
-- **实测校准**（Intel Ultra 7 155H 单核，`go test -bench=Apply`，审查修复后）：CEF 解析+映射 **约 4670 ns/op（21.4 万条/秒）**、JSON **约 3400 ns/op（29.4 万条/秒）**；CEF 6598 B/op、70 次分配。5 万 EPS 占 **0.23 核**，单核余量约 4 倍。较修复前（2900/47 次分配）慢约 60%——这是正确性的代价：json.Number 保数字精度、unmapped 敏感名单检查、级别与时间的恒写保障。投影路径编译期预切分仍有收益（同进程对照 229→208 ns/op/字段）。
-- **goroutine 模型**：固定 worker 池（SPX_INGEST_WORKERS，默认 = CPU 核数），从 channel 消费事件，无 per-event goroutine 创建。channel 缓冲 = SPX_INGEST_BUFFER（默认 10000，约 0.2 秒的量）。
-- **批处理贯穿全链**：接收→解析→发布全程按批流转（batch 500 条或 2 秒先到为准）。5w EPS 下每批 500 条 = 100 批/秒，每批一次 Kafka produce 调用（摊薄 syscall 与网络往返）。
-- **零分配热路径**：sync.Pool 复用扁平 map 与 OCSF map；字符串字段引用原始字节切片（[]byte → string 零拷贝转换 unsafe 仅限标准模式已支持的场合，默认用 string(bytes) 让编译器优化）；正则预编译缓存 *regexp.Regexp，运行期零编译。GC 目标：稳态下 < 10% CPU 花在 GC。
-- **正则安全**：Go regexp 是 RE2 线性引擎，无灾难性回溯——恶意样本不会拖垮 worker（结构性优势，不需要超时机制）。
-- **panic 隔离**：每批（非每条）包 recover——单批坏消息只丢该批的 parse.outcome，worker 不崩。批内逐条解析失败已由 error 返回值覆盖，panic 是引擎 bug 兜底。
-- **流式解码**：NDJSON 用 json.Decoder 逐条解码，不整包 Unmarshal；大 body 不翻倍占内存。
+- **容量目标与证据**：单机持续 5 万 EPS 仍待验收。现有短时 HTTP → Kafka 实测和规则微基准分别记录于[性能计划](../event-contract/performance.md)。部署容量按实际报文大小、规则组合、分区、确认延迟和归档追赶能力核算。
+- **工作队列与批次**：HTTP/Syslog 逐条提交给固定解析 worker，发布器按条数或等待时间组批。Kafka 拉取按接入点消费，独立确认发布后提交位移。默认条数、worker 与等待时间见[模块配置](../../../src/apps/ingest/config.yaml)。两条路径均须验证并发在途字节上限。
+- **分配与解析**：将解析器和规则编译放在配置加载阶段，以样本核对每条分配、GC CPU 和大请求存活时间。原有稳态 GC CPU 目标为低于 10%，与进程的实际 CPU 用量一并度量。HTTP 入口目前先读取有大小上限的完整请求；拆分预算、资源释放和异常输入回归见性能计划。
+- **正则与异常隔离**：正则使用 Go regexp 并在规则加载时编译；压测覆盖不同规则数量与输入长度。流水线在单条报文的规则执行边界捕获 panic，记录计数与可诊断结果，继续处理后续报文。
 - **分发 O(1)**：Parser 注册为 map[string]Parser（Parser interface { Parse(raw []byte) (map[string]any, error) }），新增模式实现接口注册即可。
-- **优雅停机顺序**：停接收（通道关闭）→ 排空在途解析 → 发布剩余批次 → 提交 Kafka 位移 → 退出。禁止直接退出丢在途数据。
-- **资源上限**：worker goroutine 数与 channel 缓冲可配（`SPX_INGEST_WORKERS`/`SPX_INGEST_BUFFER`）；单条上限 64 KiB（syslog）/10 MiB（HTTP）已定；**不落盘原则不变**——Kafka 是唯一缓冲层。
-- **背压语义不变**：Kafka 不可用阻塞接收，不丢数据。
-- **可用性**：Kafka 不可用时接收阻塞（已有）；解析引擎 bug 只影响 parse.outcome 不丢事件（已有）；单 worker panic 由 recover 兜底并重启该 worker（worker 池模式：panic 后向池重新提交 worker）。健康检查暴露 workers/busy/batchBacklog 三个指标。
+- **停机与背压**：停止受理后，在进程总排空期限内完成已受理记录的解析、发布及适用的位移提交。按协议分别核对 HTTP 部分受理、Syslog UDP 丢包、Kafka 未提交重放和停机丢弃。超时与数据缺口进入运行报告。运行现状、优先整改和验收见[性能计划](../event-contract/performance.md)。
 - **可维护性**：五模式各自一个文件（parser/json.go、parser/cef.go、parser/kv.go、parser/regex.go、parser/delim.go）+ registry.go 注册 + parser_test.go 表驱动；新增模式 = 新文件 + 一行注册，不改既有代码（开闭原则）。
 
 **样本驱动校验**：解析规则必须携带多条真实样本（规则内嵌 `samples` 数组），保存与加载时全部样本逐条过解析引擎，任何一条失败即拒绝——规则质量由样本守护，不靠人眼。「通用接入」= 不挂规则运行引擎：只做格式探测与原文透传，事件带 parse.outcome=error（原因码 format_mismatch），可查询、后续可换正式解析规则。

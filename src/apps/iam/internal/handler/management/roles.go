@@ -13,7 +13,7 @@ import (
 
 // ListRoles 读取全局角色列表。
 func (s *Handler) ListRoles(c *gin.Context) {
-	var params model.ListQuery
+	var params model.RoleListQuery
 	if err := c.ShouldBindQuery(&params); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -21,7 +21,13 @@ func (s *Handler) ListRoles(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
 
-	page, err := s.Service.Roles(r.Context(), params.Limit, params.Offset)
+	var builtin *bool
+	if params.Type != "" {
+		value := params.Type == "builtin"
+		builtin = &value
+	}
+
+	page, err := s.Service.Roles(r.Context(), params.Limit, params.Offset, params.Q, builtin)
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -146,5 +152,6 @@ func apiRole(role repository.Role) model.APIRole {
 		Builtin:     role.Builtin,
 		Permissions: permissions,
 		UserCount:   role.UserCount,
+		UpdatedAt:   role.UpdatedAt,
 	}
 }

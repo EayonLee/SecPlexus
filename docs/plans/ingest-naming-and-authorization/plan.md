@@ -15,7 +15,7 @@ IAM 基线角色 + 权限目录 ────────────────
 
 ## 第一组：命名统一（纯重构）
 
-- [x] 失败测试先行：断言代码中不再出现旧标识符——`grep -r "parse_rules\|ParseRule\|source.Entry\|TransportHTTP" src/apps/ingest` 为空；这条测试用脚本实现并在 CI 跑。
+- [x] [命名回归测试](../../../src/apps/ingest/internal/naming_guard_test.go)检查 Ingest 的现行 Go 源码，随模块测试运行。
 - [x] **前向迁移** `00003`：`ALTER TABLE ingest.sources RENAME TO inputs`、`RENAME COLUMN transport TO protocol`、`parse_rules → mappings`、`spec → definition`、`sources.parse_rule_id → mappings.mapping_id`（外键与索引随之改名），并同步 `COMMENT ON`；**不修改已应用的 00001/00002**。
 - [x] 迁移 `ingest.sources` → `ingest.inputs`、`sources.transport` → `inputs.protocol`、`ingest.parse_rules` → `ingest.mappings`、`parse_rules.spec` → `mappings.definition`。表为空，直接改基线迁移（项目未发版，历史迁移可合并）。
 - [x] 代码改名：`internal/source` → `internal/input`；`Entry`；`Protocol`；`Lookup`；`normalizer.Rule` → `normalizer.Mapping`；`normalizer.Engine` → `normalizer.Compiled`；`repository/model` 的 `ParseRule` → `Mapping`。
@@ -73,7 +73,7 @@ IAM 基线角色 + 权限目录 ────────────────
 
 ```sh
 go test ./src/...
-go test -tags=integration ./src/apps/ingest/... ./src/apps/iam/...   # 需 SPX_TEST_POSTGRES_URL
+go test -tags=integration ./src/apps/ingest/... ./src/apps/iam/...   # 需 SPX_TEST_POSTGRESQL_URL
 pnpm catalogs:check
 make build
 gofmt -l src/
@@ -116,3 +116,5 @@ go vet ./src/...
 |---|---|
 | 审计写失败返回 503 | 现取 fail-open（Kubernetes admission webhook 的 `failurePolicy: Ignore` 同语义），改为阻断需要事务性投递 |
 | 部署 expand/contract 两阶段顺序 | 迁移已合并为单基线且未部署，前提消失，记作不适用 |
+
+Ingest 管理写操作的审计已由[收尾方案](../ingest-closeout/spec.md)接续。业务写入与待投递审计在同一事务提交，IAM 暂不可用时后台重投并按事件 ID 去重。只有同事务持久化失败且业务写入回滚时，该请求才返回失败。

@@ -132,6 +132,52 @@ func TestDrainTimeoutDropsAndCounts(t *testing.T) {
 	}
 }
 
+func TestShutdownUsesOneDeadlineForAllBatches(t *testing.T) {
+	publisher := &strictPublisher{failAll: true}
+	line := pipeline.New(pipeline.Options{
+		Workers: 1, BatchSize: 1, DrainTimeout: 100 * time.Millisecond,
+	}, publisher)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- line.Start(ctx) }()
+	entry := input.Entry{ID: "c1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
+
+	for range 10 {
+		if err := line.Submit(ctx, entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), pipeline.Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(850 * time.Millisecond):
+		t.Fatal("停机等待时间随批次数累加")
+	}
+
+	if stats := line.Stats(); stats.Dropped != 10 || stats.Published != 0 {
+		t.Fatalf("停机应记录所有未发布的事件: %+v", stats)
+	}
+}
+
+func TestQueueRejectsWhenInFlightBytesReachLimit(t *testing.T) {
+	line := pipeline.New(pipeline.Options{Workers: 1, QueueDepth: 8, MaxInFlightBytes: 64}, &strictPublisher{})
+	entry := input.Entry{ID: "c1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
+	raw := make([]byte, 32)
+	ctx := context.Background()
+	for range 2 {
+		if err := line.Submit(ctx, entry, raw, time.Now(), pipeline.Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := line.Submit(ctx, entry, []byte("excess"), time.Now(), pipeline.Meta{}); !errors.Is(err, pipeline.ErrBusy) {
+		t.Fatalf("在途字节已达上限，应拒绝新提交: %v", err)
+	}
+}
+
 // 停机后 Flush 不应永久阻塞。
 func TestFlushAfterShutdownReturns(t *testing.T) {
 	publisher := &strictPublisher{}

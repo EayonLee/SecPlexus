@@ -36,7 +36,7 @@
 
 ```sh
 go test ./src/apps/iam/...
-go test -tags=integration ./src/apps/iam/...          # 需 SPX_TEST_POSTGRES_URL 或 --docker
+go test -tags=integration ./src/apps/iam/...          # 需 SPX_TEST_POSTGRESQL_URL 或 --docker
 pnpm --dir src/apps/web test:unit
 pnpm --dir src/apps/web exec tsc --noEmit
 node scripts/build.mjs

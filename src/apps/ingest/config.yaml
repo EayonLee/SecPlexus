@@ -1,144 +1,144 @@
-# Ingest 数据接入模块配置。
-#
-# 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
-# 每项写作 ${环境变量名-默认值}：变量未设置时取默认值；
-# 写 ${变量名:-默认值} 表示空值也算未设置。
-# 密钥类（token、密码）只通过环境变量或私有 .env 注入，不写进本文件的默认值。
-#
-# 段的分层规则：模块级（app/db/cache/iam/logging）+ 能力级（input/output/pipeline）。
-# input 是数据进来的通道，output 是数据出去的目标，两者不混在同一个段里，
-# 因为 Kafka 既可能是入站通道，也可能是出站目标，同名会让运维判断不了改的是哪一侧。
+# Ingest 模块配置。部署选项集中在根 .env.example。
+# 根启动入口按进程环境、根 .env、模块默认值的顺序取值。
+# 二进制直接运行时读取进程环境和本文件。修改后重启进程或重新创建容器。
 
-# ---- 进程监听 -
-# 对外 HTTPS 由反向代理终止，本进程只监听明文 HTTP。
+# 进程监听
+# 整栈 Compose 使用 HTTP，对外 HTTPS 由反向代理终止。
+# 独立运行可在 input.http 配置原生 TLS。
 app:
-  # 本服务地址：既是本进程绑定的地址，也是调用方连接它的地址。
-  #   127.0.0.1 默认值，本机部署或前面有反向代理时使用。
-  #   0.0.0.0   容器内需要接受其他容器的连接时使用（由编排层限制暴露面）。
-  host: "${SPX_INGEST_HOST-127.0.0.1}"
-  # 监听端口：本进程实际监听的端口。调用方连接的也是这个端口，因此只在这里定义一次。
+  # 本机监听地址。Compose 在容器内监听 0.0.0.0。
+  host: "${SPX_INGEST_BIND_HOST-127.0.0.1}"
+  # 同一端口同时用于监听和服务间连接。
   port: "${SPX_INGEST_PORT-8082}"
 
-# ---- PostgreSQL ----
-# 接入点与解析映射存这里。接收路径不写库：事件一律走 Kafka。
-db:
-  # 完整连接地址；非空时忽略下面的分项。
-  url: "${SPX_POSTGRES_URL-}"
-  # 以下分项与 url 二者择一：填了 url 就忽略分项。
-  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
-  port: "${SPX_POSTGRES_PORT-5432}"
-  name: "${SPX_POSTGRES_DATABASE-secplexus}"
-  user: "${SPX_POSTGRES_USER-secplexus}"
+# 上游 IAM
+# Ingest 通过 IAM 接口校验用户会话与操作权限。
+iam:
+  # 同机启动使用本机地址。Compose 使用 IAM 的服务名。
+  host: "${SPX_IAM_HOST-127.0.0.1}"
+  # IAM 服务端口，必须与 IAM 实际监听端口一致。
+  port: "${SPX_IAM_PORT-8081}"
+  # 调用 IAM 的独立服务凭据，长度 32–512 字节。
+  token: "${SPX_INGEST_IAM_TOKEN-}"
+
+# PostgreSQL
+# 存放数据接入、解析规则及运行位移边界。
+postgresql:
+  # 以下是自带实例的连接参数。
+  host: "${SPX_POSTGRESQL_HOST-127.0.0.1}"
+  port: "${SPX_POSTGRESQL_PORT-5432}"
+  database: "${SPX_POSTGRESQL_DATABASE-secplexus}"
+  user: "${SPX_POSTGRESQL_USER-secplexus}"
   # 密码只从环境变量/私有 .env 注入，不要写进版本库。
-  password: "${SPX_POSTGRES_PASSWORD-secplexus}"
-  # 远程库必须用 require/verify-full；disable 仅限本机或可信内网。
-  sslmode: "${SPX_POSTGRES_SSLMODE-disable}"
+  password: "${SPX_POSTGRESQL_PASSWORD-secplexus}"
+  # 独立运行连接外部实例时填写。TLS 模式使用 URL 的 sslmode 参数。
+  url: "${SPX_POSTGRESQL_URL-}"
 
-# ---- 入站：数据从哪里进来 ----
-input:
-  # 设备推送（HTTP）。限流按接入点分别计数，存在 Redis 里。
-  http:
-    # 请求体上限（字节），超出返回 413。默认 10 MiB。
-    max_body_bytes: "${SPX_INGEST_HTTP_MAX_BODY_BYTES-10485760}"
-    # 每接入点每秒请求配额。默认 50。
-    rate_per_sec: "${SPX_INGEST_HTTP_RATE_PER_SEC-50}"
-    # 每接入点突发额度。默认 200。
-    rate_burst: "${SPX_INGEST_HTTP_RATE_BURST-200}"
-    # 入站 TLS：证书与私钥必须同时配置（或同时留空）。
-    # 对外 HTTPS 建议由反向代理终止；这里是服务间链路的纵深防御。
-    tls_cert_file: "${SPX_INGEST_TLS_CERT_FILE-}"
-    tls_key_file: "${SPX_INGEST_TLS_KEY_FILE-}"
-
-  # 消费客户已有总线。broker 与 topic 属于每个接入点（存在数据库里），
-  # 这里只放进程级行为：接入点集合的刷新间隔。
-  kafka:
-    reload_interval: "${SPX_INGEST_INPUT_KAFKA_RELOAD_INTERVAL-30s}"
-
-  # syslog 收包：RFC5424/3164/6587 自动识别，CEF 前缀自动路由。
-  # 端口绑定关系来自接入点配置（每个接入点一个端口，UDP 与 TCP 同端口）。
-  # 改端口不需要重启进程：周期刷新，或 kill -HUP 立即重载。
-  syslog:
-    # syslog 监听地址。留空跟随 app.host —— syslog 的暴露面不应比主监听更宽松；
-    # 只允许本机接收时显式填 127.0.0.1。
-    host: "${SPX_INGEST_SYSLOG_HOST-}"
-    # 端口绑定关系的刷新间隔。
-    reload_interval: "${SPX_INGEST_SYSLOG_RELOAD_INTERVAL-10s}"
-
-# ---- 出站：归一化后的 OCSF 事件写到哪里 ----
-# 按业务含义拆开：成功事件与解析失败事件是两类数据，不是一个开关。
-# 一个笼统的 topic 会让下游无法区分"正常数据"与"解析不了的数据"。
-output:
-  kafka:
-    # 两类事件共用的 broker 列表，逗号分隔。
-    # 必填：没有 broker 时服务无法启动（check-config 与 serve 都会失败）。
-    brokers: "${SPX_INGEST_KAFKA_BROKERS-}"
-    # 归一化成功事件（OCSF）发布的 topic。
-    event_topic: "${SPX_INGEST_KAFKA_EVENT_TOPIC-spx.ingest.events}"
-    # 解析失败事件的 topic。解析失败的数据进不了 OCSF，与正常事件是两类留存：
-    # 混在一起会让坏数据占掉正常事件的保留期与带宽。
-    # 内部错误有自己的留存路径，不能占用正常事件的保留期与带宽。
-    parse_failure_topic: "${SPX_INGEST_KAFKA_PARSE_FAILURE_TOPIC-spx.ingest.parse-failures}"
-    # 传输安全：plaintext / ssl / sasl_plaintext / sasl_ssl（与 Kafka 官方取值一致）。
-    security_protocol: "${SPX_INGEST_KAFKA_SECURITY_PROTOCOL-plaintext}"
-    # 身份认证：PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512；仅 SASL 协议下使用。
-    sasl_mechanism: "${SPX_INGEST_KAFKA_SASL_MECHANISM-}"
-    sasl_username: "${SPX_INGEST_KAFKA_SASL_USERNAME-}"
-    # 口令只存环境变量名，配置里不出现明文。
-    sasl_password_env: "${SPX_INGEST_KAFKA_SASL_PASSWORD_ENV-}"
-    # 自定义 CA；留空使用系统根证书。
-    tls_ca_file: "${SPX_INGEST_KAFKA_TLS_CA_FILE-}"
-
-# ---- 解析流水线 ----
-# 接收与发布之间的解析环节。容量按 5w EPS 设计：默认值即推荐配置，
-# 只有在压测或资源受限时才需要调。
-pipeline:
-  # 解析 worker 数。留空/0 = 按 CPU 核数。
-  workers: "${SPX_INGEST_WORKERS-0}"
-  # 待解析队列长度。队列满时接收阻塞（背压），不丢数据。
-  queue_depth: "${SPX_INGEST_QUEUE_DEPTH-10000}"
-  # 每批事件数。批越大单次发布越省，但延迟越高。
-  batch_size: "${SPX_INGEST_BATCH_SIZE-500}"
-  # 批量最长等待：未满批也会在这个时间后发出。
-  flush_interval: "${SPX_INGEST_FLUSH_INTERVAL-2s}"
-
-# ---- Redis（HTTP 通道令牌限流） ----
-# 全平台共用一个 Redis，用 key 前缀（spx:ingest:...）区分模块。
-# 令牌限流计数丢了会让暴力推送防护短暂失效，所以 Redis 挂了 HTTP 通道要拒绝。
-cache:
+# Redis
+# IAM 和 Ingest 共用一个逻辑库，HTTP 接入限流按模块键前缀区分。
+redis:
   # 分项与 url 二者择一；url 优先级更高。
   host: "${SPX_REDIS_HOST-127.0.0.1}"
   port: "${SPX_REDIS_PORT-6379}"
   user: "${SPX_REDIS_USER-default}"
   password: "${SPX_REDIS_PASSWORD-secplexus}"
-  # 库号：与 IAM/Console 共用实例时靠它隔离数据。
+  # 与 IAM 共用逻辑库，使用模块前缀区分数据。
   db: "${SPX_REDIS_DB-0}"
   # 完整 Redis 连接串；填了就替代上面的分项字段。
   url: "${SPX_REDIS_URL-}"
 
-# ---- 上游 IAM ----
-# 每个受保护请求向 IAM 换取会话与授权结论；IAM 不可用时返回 503，绝不放行。
-iam:
-  # IAM 服务地址。不能填 0.0.0.0 —— 那是监听地址，不是可连接的地址。
-  host: "${SPX_IAM_HOST-127.0.0.1}"
-  # IAM 服务端口，必须与 IAM 实际监听端口一致。
-  port: "${SPX_IAM_PORT-8081}"
-  # 调用 IAM 的服务凭证，必须与 IAM 侧 service_clients.ingest.token 一致。
-  token: "${SPX_INGEST_IAM_TOKEN-}"
+# 平台 Kafka
+kafka:
+  # 独立运行填写集群连接。Compose 使用自带 Kafka。
+  brokers: "${SPX_KAFKA_BROKERS-}"
+  security_protocol: "${SPX_KAFKA_SECURITY_PROTOCOL-plaintext}"
+  tls_ca_file: "${SPX_KAFKA_TLS_CA_FILE-}"
+  namespace: "${SPX_KAFKA_NAMESPACE-spx}"
+  retention_days: "${SPX_KAFKA_RETENTION_DAYS-7}"
 
-# ---- 日志 -
-# 结构化 JSON 输出；审计事实不在这里，走 iam.audit_events。
+# ClickHouse 事件存储。写入、回查和迁移身份分别配置。
+clickhouse:
+  url: "${SPX_CLICKHOUSE_URL-}"
+  database: "${SPX_INGEST_CLICKHOUSE_DATABASE-spx}"
+  username: "${SPX_INGEST_CLICKHOUSE_USERNAME-}"
+  password: "${SPX_INGEST_CLICKHOUSE_PASSWORD-}"
+
+  reader_username: "${SPX_INGEST_CLICKHOUSE_READER_USERNAME-}"
+  reader_password: "${SPX_INGEST_CLICKHOUSE_READER_PASSWORD-}"
+
+  migration_username: "${SPX_INGEST_CLICKHOUSE_MIGRATION_USERNAME-}"
+  migration_password: "${SPX_INGEST_CLICKHOUSE_MIGRATION_PASSWORD-}"
+
+  timeout: 15s
+
+# 数据接入
+input:
+  # 设备推送（HTTP）。限流按数据接入分别计数。
+  http:
+    # 请求体上限按字节计，并发上限为同一实例同时处理的请求数。
+    max_body_bytes: "${SPX_INGEST_HTTP_MAX_BODY_BYTES-10485760}"
+    max_concurrent_requests: "${SPX_INGEST_HTTP_MAX_CONCURRENT_REQUESTS-16}"
+    # 每个数据接入的每秒请求配额与突发额度。
+    rate_per_sec: "${SPX_INGEST_HTTP_RATE_PER_SEC-50}"
+    rate_burst: "${SPX_INGEST_HTTP_RATE_BURST-200}"
+
+    # 独立运行的原生 TLS。证书和私钥须同时填写。
+    tls_cert_file: "${SPX_INGEST_TLS_CERT_FILE-}"
+    tls_key_file: "${SPX_INGEST_TLS_KEY_FILE-}"
+
+  # 外部 Kafka 接入。broker 和主题由对应的数据接入指定。
+  kafka:
+    reload_interval: "${SPX_INGEST_INPUT_KAFKA_RELOAD_INTERVAL-30s}"
+    # 生产连接按数据接入选择凭据名，口令由环境注入，见 README。
+    credentials: {}
+
+  # Syslog 接入。TCP 和 UDP 使用数据接入登记的端口。
+  syslog:
+    # 端口绑定关系的刷新间隔。
+    reload_interval: "${SPX_INGEST_SYSLOG_RELOAD_INTERVAL-10s}"
+    # 独立运行可指定监听地址，留空时跟随 Ingest 监听地址。
+    host: "${SPX_INGEST_SYSLOG_HOST-}"
+
+# 解析与批量发布
+pipeline:
+  # Worker 数为 0 时按可用 CPU 自动选择。
+  workers: "${SPX_INGEST_WORKERS-0}"
+  # 待解析队列按条数计，待解析及正在解析的输入共用字节预算。
+  queue_depth: "${SPX_INGEST_QUEUE_DEPTH-10000}"
+  max_in_flight_bytes: "${SPX_INGEST_MAX_IN_FLIGHT_BYTES-67108864}"
+
+  # 发布批量按条数计，未满批时按最长等待时间发布。
+  batch_size: "${SPX_INGEST_BATCH_SIZE-500}"
+  flush_interval: "${SPX_INGEST_FLUSH_INTERVAL-2s}"
+
+# 事件写入
+# Kafka 发布与写入使用独立身份。
+events:
+  publisher:
+    sasl_mechanism: "${SPX_INGEST_KAFKA_PUBLISH_SASL_MECHANISM-}"
+    sasl_username: "${SPX_INGEST_KAFKA_PUBLISH_SASL_USERNAME-}"
+    sasl_password: "${SPX_INGEST_KAFKA_PUBLISH_SASL_PASSWORD-}"
+
+  consumer:
+    sasl_mechanism: "${SPX_INGEST_KAFKA_STORE_SASL_MECHANISM-}"
+    sasl_username: "${SPX_INGEST_KAFKA_STORE_SASL_USERNAME-}"
+    sasl_password: "${SPX_INGEST_KAFKA_STORE_SASL_PASSWORD-}"
+
+  # ClickHouse 写入批次与表结构核对间隔。
+  batch_records: 1000
+  batch_bytes: 4194304
+  check_interval: 1m
+
+# 日志
+# 输出结构化 JSON。Compose 由 Docker 管理标准输出及轮转。
 logging:
-  # 最低级别：debug / info / warn / error。生产用 info；排查时临时调 debug，记得改回。
+  # 日志级别，支持 debug、info、warn、error。
   level: "${SPX_INGEST_LOG_LEVEL-info}"
-  # 是否输出到标准输出。容器部署保持 true，由运行时收集。
+  # 以下选项用于独立运行。文件路径留空时关闭文件日志。
   stdout: "${SPX_INGEST_LOG_STDOUT-true}"
-  # 日志文件路径。留空 = 不写文件（容器里通常这样，只走 stdout）。
   file: "${SPX_INGEST_LOG_FILE-logs/ingest.log}"
-  # 单个日志文件的最大体积（MB）。写满后按 max_backups 轮转。
+  # MAX_SIZE_MB 按 MiB 计，MAX_AGE_DAYS 按天计。
   max_size_mb: "${SPX_INGEST_LOG_MAX_SIZE_MB-50}"
-  # 保留的历史文件个数。磁盘紧张时先调小这里。
   max_backups: "${SPX_INGEST_LOG_MAX_BACKUPS-5}"
-  # 历史文件最长保留天数，超过即删除。
   max_age_days: "${SPX_INGEST_LOG_MAX_AGE_DAYS-14}"
-  # 轮转后的历史文件是否压缩；压缩省磁盘、查询时需先解压。
   compress: "${SPX_INGEST_LOG_COMPRESS-true}"

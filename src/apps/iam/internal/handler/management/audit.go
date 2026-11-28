@@ -14,7 +14,7 @@ import (
 // 客户端只能收窄结果（操作者、时间范围、结果），不能扩大范围。
 func (s *Handler) ListAuditEvents(c *gin.Context) {
 	var params model.AuditQuery
-	if err := c.ShouldBindQuery(&params); err != nil {
+	if err := c.ShouldBindQuery(&params); err != nil || (params.From != nil && params.To != nil && !params.From.Before(*params.To)) {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
 	}

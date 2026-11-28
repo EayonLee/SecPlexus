@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -33,7 +34,8 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/router"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/service"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
+	rediskey "github.com/EayonLee/SecPlexus/src/packages/go/redis/key"
 )
 
 // apiClient 为单个测试保存独立 Cookie 和 CSRF 状态。
@@ -183,7 +185,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 	memberUsername := "auditor" + uuid.NewString()[:8]
 	initial := "isolated initial password"
 	password := initial
-	if err := store.Seed(ctx, adminUsername, initial); err != nil {
+	if err := store.SyncAdministrator(ctx, adminUsername, initial); err != nil {
 		t.Fatal(err)
 	}
 
@@ -221,7 +223,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		defer cleanup.Close()
 		keys := []string{}
 		digest := sha256.Sum256([]byte(sourceIP))
-		keys = append(keys, cachekey.IAMLoginIP.Format(hex.EncodeToString(digest[:])))
+		keys = append(keys, rediskey.IAMLoginIP.Format(hex.EncodeToString(digest[:])))
 		accounts := []string{adminUsername, memberUsername}
 		connection, err := pgx.Connect(context.Background(), store.Pool.Config().ConnConfig.ConnString())
 		if err != nil {
@@ -246,7 +248,7 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		connection.Close(context.Background())
 		for _, account := range accounts {
 			digest := sha256.Sum256([]byte(account))
-			keys = append(keys, cachekey.IAMLoginAccount.Format(hex.EncodeToString(digest[:])))
+			keys = append(keys, rediskey.IAMLoginAccount.Format(hex.EncodeToString(digest[:])))
 		}
 		if err := cleanup.Del(context.Background(), keys...).Err(); err != nil {
 			t.Error("cannot clean owned rate-limit keys")
@@ -287,6 +289,42 @@ func newFixture(t *testing.T, configure func(*config.Config)) *httpFixture {
 		initial:    initial,
 		password:   password,
 		credential: credential,
+	}
+}
+
+func TestServiceAuditKeepsOriginalOccurrenceTime(t *testing.T) {
+	f := newFixture(t, func(cfg *config.Config) {
+		client := cfg.ServiceClients["console"]
+		client.Actions = append(client.Actions, iamclient.PermissionIAMAuditWrite)
+		cfg.ServiceClients["console"] = client
+	})
+	client, err := iamclient.New(f.public.URL, f.credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	occurredAt := time.Now().Add(-2 * time.Hour).Truncate(time.Second).In(time.FixedZone("UTC+8", 8*60*60))
+	event := iamclient.AuditEvent{
+		EventID: uuid.NewString(), Action: "ingest.input.write", TargetType: "input",
+		Outcome: "success", RequestID: "delayed-audit", OccurredAt: &occurredAt,
+	}
+	ctx := context.Background()
+	if err := client.RecordAudit(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	retryTime := occurredAt.Add(time.Hour)
+	event.OccurredAt = &retryTime
+	if err := client.RecordAudit(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	var got time.Time
+	var rows int
+	if err := f.server.Service.Store.DB.QueryRowContext(ctx,
+		"SELECT min(occurred_at), count(*) FROM iam.audit_events WHERE request_id = $1", event.RequestID,
+	).Scan(&got, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || !got.Equal(occurredAt) {
+		t.Fatalf("audit occurrence = %v (%d rows), want %v (1 row)", got, rows, occurredAt)
 	}
 }
 
@@ -364,10 +402,38 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	roleID := admin.request("POST", "/api/v1/iam/roles", map[string]any{"name": "审计员", "permissions": []string{"iam.audit.read"}}, 201)["id"].(string)
 	admin.code("POST", "/api/v1/iam/roles", map[string]any{"name": "审计员", "permissions": []string{}}, 409, "iam.role_name_taken")
 
+	filteredRoles := admin.request("GET", "/api/v1/iam/roles?q="+url.QueryEscape("审计员")+"&limit=1", nil, 200)
+	filteredItems := filteredRoles["items"].([]any)
+	if filteredRoles["total"] != float64(1) || len(filteredItems) != 1 || filteredItems[0].(map[string]any)["id"] != roleID {
+		t.Fatalf("unexpected filtered role page: %v", filteredRoles)
+	}
+
+	noRoles := admin.request("GET", "/api/v1/iam/roles?q="+url.QueryEscape("%"), nil, 200)
+	if noRoles["total"] != float64(0) || len(noRoles["items"].([]any)) != 0 {
+		t.Fatalf("percent must match literally: %v", noRoles)
+	}
+
 	// 创建用户并在同一事务内授予角色。
 	memberPassword := "isolated member password"
 	memberID := admin.request("POST", "/api/v1/iam/users", map[string]any{"username": f.member, "display_name": "审计用户", "password": memberPassword, "role_ids": []string{roleID}}, 201)["id"].(string)
 	user := admin.request("GET", "/api/v1/iam/users/"+memberID, nil, 200)
+	if _, err := time.Parse(time.RFC3339Nano, fmt.Sprint(user["created_at"])); err != nil {
+		t.Fatal("user creation date is missing or invalid")
+	}
+	roleMatches := admin.request("GET", "/api/v1/iam/users?role_id="+roleID+"&status=active", nil, 200)
+	if roleMatches["total"] != float64(1) {
+		t.Fatalf("unexpected role filter count: %v", roleMatches["total"])
+	}
+	disabledMatches := admin.request("GET", "/api/v1/iam/users?role_id="+roleID+"&status=disabled", nil, 200)
+	if disabledMatches["total"] != float64(0) {
+		t.Fatalf("unexpected status filter count: %v", disabledMatches["total"])
+	}
+	customRoles := admin.request("GET", "/api/v1/iam/roles?type=custom", nil, 200)["items"].([]any)
+	for _, item := range customRoles {
+		if item.(map[string]any)["builtin"] != false {
+			t.Fatal("custom roles filter returned a built-in role")
+		}
+	}
 	if user["username"] != f.member || user["configured"] != false || len(user["roles"].([]any)) != 1 {
 		t.Fatalf("unexpected user projection %v", user)
 	}
@@ -378,11 +444,12 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	// PUT /users/:id/roles 生效后，成员自身 /me 的权限随之变化。
 	member := newAPIClient(t, public.URL, public.URL)
 	member.login(f.member, memberPassword)
-	if got := member.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 1 || got[0] != "iam.audit.read" {
+	if got := member.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); !slices.Equal(got, []any{"console.context.read", "iam.audit.read", "ingest.input.read", "ingest.parsing_rule.read"}) {
 		t.Fatalf("member permissions = %v", got)
 	}
 	member.request("GET", "/api/v1/iam/audit-events", nil, 200)
 	member.request("GET", "/api/v1/iam/users", nil, 403)
+	member.request("GET", "/api/v1/iam/roles?q="+url.QueryEscape("审计员"), nil, 403)
 
 	// 抽屉里的「保存」正是这条路径：给已存在用户追加角色，列表行必须立刻反映。
 	admin.request("PUT", "/api/v1/iam/users/"+memberID+"/roles", map[string]any{"role_ids": []string{roleID}}, 204)
@@ -393,7 +460,7 @@ func TestFlatAuthorizationRoleAndUserLifecycle(t *testing.T) {
 	}
 
 	admin.request("PUT", "/api/v1/iam/users/"+memberID+"/roles", map[string]any{"role_ids": []string{}}, 204)
-	if got := member.request("GET", "/api/v1/iam/me", nil, 200); len(got["permissions"].([]any)) != 0 || len(got["roles"].([]any)) != 0 {
+	if got := member.request("GET", "/api/v1/iam/me", nil, 200); !slices.Equal(got["permissions"].([]any), []any{"console.context.read", "ingest.input.read", "ingest.parsing_rule.read"}) || len(got["roles"].([]any)) != 0 {
 		t.Fatalf("member grants survived role removal: %v", got)
 	}
 	member.request("GET", "/api/v1/iam/audit-events", nil, 403)
@@ -648,13 +715,13 @@ func TestDelegationLimitsAndPreview(t *testing.T) {
 	delegator.request("PUT", "/api/v1/iam/users/"+delegatorID+"/roles", map[string]any{"role_ids": []string{builtin["id"].(string)}}, 403)
 
 	// 预览与写入共享委派边界，且不落库。
-	if got := delegator.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 3 {
+	if got := delegator.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); !slices.Equal(got, []any{"console.context.read", "iam.users.manage", "iam.users.read", "iam.users.roles", "ingest.input.read", "ingest.parsing_rule.read"}) {
 		t.Fatalf("delegator permissions = %v", got)
 	}
 
 	sub := newAPIClient(t, f.public.URL, f.public.URL)
 	sub.login(memberUsername, memberPassword)
-	if got := sub.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); len(got) != 1 || got[0] != "iam.users.read" {
+	if got := sub.request("GET", "/api/v1/iam/me", nil, 200)["permissions"].([]any); !slices.Equal(got, []any{"console.context.read", "iam.users.read", "ingest.input.read", "ingest.parsing_rule.read"}) {
 		t.Fatalf("subordinate permissions = %v", got)
 	}
 	sub.request("GET", "/api/v1/iam/users", nil, 200)
@@ -677,6 +744,8 @@ func TestManagementBindingRejectsInvalidInputBeforeService(t *testing.T) {
 	// 审计列表使用游标分页，offset 不是它的参数；改断言真实的绑定边界。
 	admin.request("GET", "/api/v1/iam/audit-events?limit=1000", nil, 400)
 	admin.request("GET", "/api/v1/iam/audit-events?from=2026-13-01", nil, 400)
+	admin.request("GET", "/api/v1/iam/audit-events?from=2026-03-07T05:00:00Z&to=2026-03-08T05:00:00Z", nil, 200)
+	admin.request("GET", "/api/v1/iam/audit-events?from=2026-03-08T05:00:00Z&to=2026-03-07T05:00:00Z", nil, 400)
 	admin.request("GET", "/api/v1/iam/roles/not-a-uuid", nil, 400)
 }
 

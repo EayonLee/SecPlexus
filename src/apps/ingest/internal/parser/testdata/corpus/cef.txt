@@ -1,0 +1,3 @@
+CEF:0|Fortinet|Fortigate|7.0|13|traffic:forward close|3|src=192.0.2.12 dst=198.51.100.4 spt=51000 dpt=443 act=close FTNTFGTeventtime=1700000000
+<134>1 2026-11-25T00:00:00Z edge-01 logger - - - CEF:0|Fortinet|Fortigate|7.0|13|traffic:forward deny|7|src=192.0.2.12 dst=198.51.100.4 act=deny msg=Policy A\=B FTNTFGTeventtime=1700000000
+CEF: 0|Example|Gateway|2.0|42|Certificate \| renewal|5|dhost=edge.example msg=Renewed device certificate

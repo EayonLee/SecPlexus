@@ -5,20 +5,17 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
-// delimiterParser 按分隔符切列，列名与列位置一一对应。
+// delimiterParser 按分隔符提取字段，字段名与位置一一对应。
 type delimiterParser struct {
-	separator rune
-	columns   []string
+	separator  rune
+	fieldNames []string
 }
 
 func newDelimiter(spec Spec) (Parser, error) {
-	if len(spec.Delimiter.Columns) == 0 {
-		return nil, fmt.Errorf("%w: delimiter mode needs columns", ErrInvalidSpec)
-	}
-
 	separator := spec.Delimiter.Separator
 	if separator == "" {
 		separator = ","
@@ -29,10 +26,10 @@ func newDelimiter(spec Spec) (Parser, error) {
 		return nil, fmt.Errorf("%w: delimiter separator must be a single character", ErrInvalidSpec)
 	}
 
-	return delimiterParser{separator: runes[0], columns: spec.Delimiter.Columns}, nil
+	return delimiterParser{separator: runes[0], fieldNames: spec.Delimiter.FieldNames}, nil
 }
 
-// Parse 用 encoding/csv 切一列行：它已经处理好引号包围与双引号转义，
+// Parse 按分隔符切一条记录。encoding/csv 处理引号包围与双引号转义，
 // 自己按分隔符 split 会在值里出现分隔符时切错。
 func (p delimiterParser) Parse(raw []byte) (map[string]any, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -54,17 +51,18 @@ func (p delimiterParser) Parse(raw []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 
-	fields := make(map[string]any, len(p.columns))
-	for index, column := range p.columns {
-		if index >= len(record) {
-			break
+	if len(p.fieldNames) == 0 {
+		fields := make(map[string]any, len(record))
+		for index, value := range record {
+			fields["field_"+strconv.Itoa(index+1)] = value
 		}
-
-		fields[column] = record[index]
+		return fields, nil
 	}
 
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("%w: no columns matched the record", ErrMalformed)
+	count := min(len(record), len(p.fieldNames))
+	fields := make(map[string]any, count)
+	for index, name := range p.fieldNames[:count] {
+		fields[name] = record[index]
 	}
 
 	return fields, nil

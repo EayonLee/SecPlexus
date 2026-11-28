@@ -37,10 +37,10 @@ func newCEF(spec Spec) (Parser, error) {
 	// （msg=user said "hi 这种不配对情况）会让扫描器一直处于引号内，
 	// 把后面所有字段一起吞掉。含空格的值由 keyAhead 边界判定处理。
 	return cefParser{pairs: pairOptions{
-		keyDelimiter: '=',
-		entrySep:     ' ',
-		escapes:      true,
-		keyAhead:     true,
+		keyValueSeparator: '=',
+		fieldSeparator:    ' ',
+		escapes:           true,
+		keyAhead:          true,
 	}}, nil
 }
 
@@ -69,7 +69,9 @@ func (p cefParser) Parse(raw []byte) (map[string]any, error) {
 	fields[cefFieldSeverity] = unescapeCEF(segments[6])
 
 	for key, value := range parsePairs([]byte(segments[cefHeaderFields]), p.pairs) {
-		fields[key] = value
+		if _, reserved := fields[key]; !reserved {
+			fields[key] = value
+		}
 	}
 
 	return fields, nil

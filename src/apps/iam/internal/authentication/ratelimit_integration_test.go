@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	rediskey "github.com/EayonLee/SecPlexus/src/packages/go/redis/key"
 )
 
 func TestLimiterAtomicWindowAndFailClosed(t *testing.T) {
@@ -35,12 +35,12 @@ func TestLimiterAtomicWindowAndFailClosed(t *testing.T) {
 	ip, account := uuid.NewString(), uuid.NewString()
 	for _, rule := range []struct {
 		value  string
-		key    cachekey.Template
+		key    rediskey.Template
 		period time.Duration
 		limit  int
 		check  func(context.Context, string) error
 	}{
-		{ip, cachekey.IAMLoginIP, time.Minute, 60, counter.CheckIP}, {account, cachekey.IAMLoginAccount, 15 * time.Minute, 20, counter.CheckAccount},
+		{ip, rediskey.IAMLoginIP, time.Minute, 60, counter.CheckIP}, {account, rediskey.IAMLoginAccount, 15 * time.Minute, 20, counter.CheckAccount},
 	} {
 		hash := sha256.Sum256([]byte(rule.value))
 		key := rule.key.Format(hex.EncodeToString(hash[:]))

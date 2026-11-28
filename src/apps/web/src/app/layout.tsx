@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 
 import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
-import { getLocale, getMessages, getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_CONFIG } from "@/config/app-config";
+import { ClientMessages } from "@/i18n/client-provider";
 import { openGraphLocales } from "@/i18n/config";
 import { fontVars } from "@/lib/fonts/registry";
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
@@ -30,9 +31,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const locale = await getLocale();
-  const messages = await getMessages();
-  const { theme_mode, content_layout, navbar_style, sidebar_variant, sidebar_collapsible, font } =
-    PREFERENCE_DEFAULTS;
+  const { theme_mode, content_layout, navbar_style, sidebar_variant, sidebar_collapsible, font } = PREFERENCE_DEFAULTS;
   return (
     <html
       lang={locale}
@@ -50,13 +49,15 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <TimeZoneBootScript />
       </head>
       <body className={`${fontVars} min-h-screen antialiased`}>
-        <NextIntlClientProvider locale={locale} messages={messages}>
-          <TooltipProvider>
-            <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
-              {children}
-              <Toaster />
-            </PreferencesStoreProvider>
-          </TooltipProvider>
+        <NextIntlClientProvider>
+          <ClientMessages>
+            <TooltipProvider>
+              <PreferencesStoreProvider initialValues={PREFERENCE_DEFAULTS}>
+                {children}
+                <Toaster />
+              </PreferencesStoreProvider>
+            </TooltipProvider>
+          </ClientMessages>
         </NextIntlClientProvider>
       </body>
     </html>

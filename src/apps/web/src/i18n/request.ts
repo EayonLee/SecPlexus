@@ -4,7 +4,7 @@ import { getRequestConfig } from "next-intl/server";
 
 import { apiOrigins } from "@/spx/server/config";
 
-import { localeCookie, resolveLocale, timeZoneCookie, timeZonePreferenceCookie } from "./config";
+import { localeCookie, messageFallback, resolveLocale, timeZoneCookie, timeZonePreferenceCookie } from "./config";
 import { resolveTimeZone } from "./timezone";
 
 const catalogs = {
@@ -45,5 +45,11 @@ export default getRequestConfig(async () => {
     userTimeZone,
     browserTimeZone: store.get(timeZoneCookie)?.value,
   });
-  return { locale, messages: (await catalogs[locale]()).default, timeZone, now: new Date() };
+  return {
+    locale,
+    messages: (await catalogs[locale]()).default,
+    timeZone,
+    now: new Date(),
+    getMessageFallback: messageFallback,
+  };
 });

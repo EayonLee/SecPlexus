@@ -12,6 +12,7 @@ import (
 	"golang.org/x/text/encoding"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/schema/events"
 )
 
 // projection 是一条预编译的字段映射：从源字段取到的值写到目标路径。
@@ -19,6 +20,9 @@ import (
 type projection struct {
 	source   string
 	segments []string
+	field    *events.Field
+	values   map[string]int
+	fallback any
 }
 
 // constant 是一条预编译的常量写入。
@@ -56,11 +60,15 @@ func isSensitiveKey(key string) bool {
 	return false
 }
 
-// Event 是一条归一化后的结果。
-type Event struct {
-	Fields   map[string]any // 展开为嵌套结构的 OCSF 事件。
-	Unmapped map[string]any // 规则未使用的源字段；没有时保持 nil，省一次分配。
-	Warnings []string       // 非致命问题：级别或时间无法折算等。
+// Result 是一条归一化后的结果。
+type Result struct {
+	BranchID        string
+	CandidateClass  int
+	Issues          []Issue
+	AppliedDefaults []string
+	TimeSource      string
+	Fields          map[string]any // 规则生成的候选字段，供事件组装及校验。
+	Unmapped        map[string]any // 规则未使用的源字段；没有时保持 nil，省一次分配。
 }
 
 // Compiled 把一条规则与它的解析器、投影计划绑定在一起。
@@ -68,10 +76,15 @@ type Event struct {
 type Compiled struct {
 	// encoding 是来源字符集解码器；nil 表示报文已是 UTF-8。
 	encoding encoding.Encoding
-	// multiline 是多行合并器；nil 表示该映射不做行合并。
-	multiline func([]byte) ([][]byte, error)
 
 	mapping        Mapping
+	branches       []branch
+	processors     []Processor
+	fallback       *Compiled
+	ignored        map[string]string
+	constraints    []events.Constraint
+	usesCatalog    bool
+	classUID       int
 	parser         parser.Parser
 	projections    []projection
 	constants      []constant
@@ -89,9 +102,6 @@ func (e *Compiled) Mapping() Mapping { return e.mapping }
 // 若等到字段解析之后再解码，信封里的主机名与消息已经是乱码。
 func (e *Compiled) Decode(raw []byte) ([]byte, error) { return decode(e.encoding, raw) }
 
-// Multiline 返回多行合并器；nil 表示该映射不做行合并。
-func (e *Compiled) Multiline() func([]byte) ([][]byte, error) { return e.multiline }
-
 // Apply 解析一条消息并投影成 OCSF 事件。
 //
 // receivedAt 是通道收到这条消息的时刻，事件时间解析失败时作为回退，
@@ -100,38 +110,84 @@ func (e *Compiled) Multiline() func([]byte) ([][]byte, error) { return e.multili
 // 解析失败返回错误，调用方记为 parse.outcome=error；
 // 级别或时间折算不了只记 warning，事件照常产出——
 // 不因一个字段不可信就丢掉整条日志。
-func (e *Compiled) Apply(raw []byte, receivedAt time.Time) (Event, error) {
-	// 先在报文层转成 UTF-8：按错误字符集解析出来的字段是乱码，后续映射救不回来。
-	decoded, err := decode(e.encoding, raw)
+func (e *Compiled) Apply(raw []byte, receivedAt time.Time) (Result, error) {
+	fields, err := e.ParseFields(raw)
 	if err != nil {
-		return Event{}, err
+		return Result{}, err
 	}
 
-	fields, err := e.parser.Parse(decoded)
+	return e.ApplyFields(fields, receivedAt)
+}
+
+// ParseFields 按规则字符集解码原始报文并提取字段。
+func (e *Compiled) ParseFields(raw []byte) (map[string]any, error) {
+	decoded, err := e.Decode(raw)
 	if err != nil {
-		return Event{}, err
+		return nil, err
 	}
 
-	return e.ApplyFields(fields, receivedAt), nil
+	return e.ParseDecodedFields(decoded)
+}
+
+// ParseDecodedFields 提取已经转换为 UTF-8 的载荷字段。
+func (e *Compiled) ParseDecodedFields(decoded []byte) (map[string]any, error) {
+	return e.parser.Parse(decoded)
 }
 
 // ApplyFields 只做第 2 层：把已解析的扁平字段投影成 OCSF 事件。
 // 第 1 层由通道自己做时用它——syslog 通道先用 go-syslog 剥信封，
 // 再把字段交给规则映射，两层职责仍然不混。
-func (e *Compiled) ApplyFields(fields map[string]any, receivedAt time.Time) Event {
-	event := Event{Fields: make(map[string]any, len(e.projections)+len(e.constants)+4)}
+func (e *Compiled) ApplyFields(fields map[string]any, receivedAt time.Time) (Result, error) {
+	event, _, err := e.ApplyFieldsWithExtraction(fields, receivedAt)
+	return event, err
+}
+
+// ApplyFieldsWithExtraction 返回归一化结果及同一次处理产生的字段。
+func (e *Compiled) ApplyFieldsWithExtraction(fields map[string]any, receivedAt time.Time) (Result, map[string]any, error) {
+	if e.fallback != nil {
+		prepared, issues := e.ProcessFields(fields)
+		result, err := e.applyRule(fields, prepared, receivedAt)
+		result.Issues = append(result.Issues, issues...)
+		return result, prepared, err
+	}
+	result, err := e.applyFields(fields, receivedAt)
+	return result, fields, err
+}
+
+func (e *Compiled) applyFields(fields map[string]any, receivedAt time.Time) (Result, error) {
+	event := Result{Fields: make(map[string]any, len(e.projections)+len(e.constants)+4)}
 
 	for index := range e.projections {
 		plan := &e.projections[index]
 		value, ok := fields[plan.source]
 		if !ok {
+			if plan.fallback != nil {
+				writePath(event.Fields, plan.segments, plan.fallback)
+				event.AppliedDefaults = append(event.AppliedDefaults, plan.field.Path)
+			}
 			continue
 		}
 
+		if plan.field != nil {
+			var valid bool
+			if plan.values != nil {
+				var mapped int
+				mapped, valid = plan.values[textValue(value)]
+				value = mapped
+			} else {
+				value, valid = convertField(*plan.field, value)
+			}
+			if !valid {
+				event.Issues = append(event.Issues, Issue{Path: plan.field.Path, Code: "invalid_value"})
+				continue
+			}
+		}
 		writePath(event.Fields, plan.segments, value)
 	}
 
-	e.collectUnmapped(&event, fields)
+	if !e.usesCatalog {
+		e.collectUnmapped(&event, fields)
+	}
 	e.stampSeverity(&event, fields)
 	e.stampTime(&event, fields, receivedAt)
 
@@ -141,13 +197,43 @@ func (e *Compiled) ApplyFields(fields map[string]any, receivedAt time.Time) Even
 		writePath(event.Fields, plan.segments, plan.value)
 	}
 
-	return event
+	if e.usesCatalog {
+		if connection, ok := event.Fields["connection_info"].(map[string]any); ok {
+			if _, present := connection["direction_id"]; !present {
+				// OCSF 连接对象需要方向。无来源信息时使用标准的 Unknown 编码。
+				const directionUnknown int64 = 0
+				connection["direction_id"] = directionUnknown
+			}
+		}
+		for source, target := range e.ignored {
+			if _, present := fields[source]; present {
+				event.Issues = append(event.Issues, Issue{Path: target, Code: "field_not_applicable"})
+			}
+		}
+		for _, path := range []string{"src_endpoint", "dst_endpoint"} {
+			if object, present := event.Fields[path]; present &&
+				!hasIdentity(object, "ip", "mac", "uid", "hostname", "domain") {
+				if event.Unmapped == nil {
+					event.Unmapped = make(map[string]any, 2)
+				}
+				event.Unmapped[path] = object
+				delete(event.Fields, path)
+				event.Issues = append(event.Issues, Issue{Path: path, Code: "required_field_missing"})
+			}
+		}
+		if path := incompleteClass(event.Fields, e.constraints); path != "" {
+			event.Issues = append(event.Issues, Issue{Path: path, Code: "required_field_missing"})
+			fallbackClass(&event, receivedAt, e.classUID)
+		}
+		return event, nil
+	}
+	return event, nil
 }
 
 // collectUnmapped 记录规则没有用到的源字段；一个都没有时不分配 map。
 // 命中敏感名单的字段保留键名、替换值：
 // 规则作者仍能看到"这里有个字段值得映射"，凭证却不进入事件存储。
-func (e *Compiled) collectUnmapped(event *Event, fields map[string]any) {
+func (e *Compiled) collectUnmapped(event *Result, fields map[string]any) {
 	for source, value := range fields {
 		if _, ok := e.consumed[source]; ok {
 			continue
@@ -169,46 +255,52 @@ func (e *Compiled) collectUnmapped(event *Event, fields map[string]any) {
 // stampSeverity 把级别折算成 severity_id。
 // OCSF 事件必须带级别：规则没声明、字段缺失或值表未命中都落到 Unknown（0）并记 warning，
 // 绝不产出缺级别的伪 OCSF 事件。
-func (e *Compiled) stampSeverity(event *Event, fields map[string]any) {
-	if e.mapping.Severity.Field == "" {
+func (e *Compiled) stampSeverity(event *Result, fields map[string]any) {
+	severity := e.mapping.Severity
+	raw, present := fields[severity.Field]
+	if severity.Field == "" || !present {
 		event.Fields["severity_id"] = SeverityUnknown
-		return
-	}
-
-	raw, ok := fields[e.mapping.Severity.Field]
-	if !ok {
-		event.Warnings = append(event.Warnings, "severity field missing: "+e.mapping.Severity.Field)
-		event.Fields["severity_id"] = SeverityUnknown
+		if severity.Default != nil {
+			event.Fields["severity_id"] = *severity.Default
+			event.AppliedDefaults = append(event.AppliedDefaults, "severity_id")
+		} else if severity.Field != "" {
+			event.Issues = append(event.Issues, Issue{Path: "severity_id", Code: "severity_field_missing"})
+		}
 		return
 	}
 
 	key := normalizeKey(textValue(raw))
 	id, ok := e.severityValues[key]
 	if !ok {
-		event.Warnings = append(event.Warnings, "severity value unmapped: "+key)
+		event.Issues = append(event.Issues, Issue{Path: "severity_id", Code: "severity_value_unmapped"})
 		id = SeverityUnknown
 	}
 
 	event.Fields["severity_id"] = id
+	if id == severityOther {
+		event.Fields["severity"] = textValue(raw)
+	}
 }
 
 // stampTime 写事件时间：规则声明的时间字段优先，解析失败或未声明时回退接收时间。
 // 两种来源都写成 OCSF 的 time（epoch 毫秒），事件永远带时间。
-func (e *Compiled) stampTime(event *Event, fields map[string]any, receivedAt time.Time) {
+func (e *Compiled) stampTime(event *Result, fields map[string]any, receivedAt time.Time) {
 	if e.mapping.Time.Field != "" {
 		raw, ok := fields[e.mapping.Time.Field]
 		if !ok {
-			event.Warnings = append(event.Warnings, "time field missing: "+e.mapping.Time.Field)
+			event.Issues = append(event.Issues, Issue{Path: "time", Code: "time_field_missing"})
 		} else if millis, err := parseTime(textValue(raw), e.mapping.Time.Formats, e.location); err == nil {
 			event.Fields["time"] = millis
+			event.TimeSource = "source"
 
 			return
 		} else {
-			event.Warnings = append(event.Warnings, "time value unparsed: "+textValue(raw))
+			event.Issues = append(event.Issues, Issue{Path: "time", Code: "time_value_unparsed"})
 		}
 	}
 
 	event.Fields["time"] = receivedAt.UTC().UnixMilli()
+	event.TimeSource = "received"
 }
 
 // textValue 把字段值转成用于匹配与解析的文本。
@@ -239,8 +331,23 @@ func parseTime(value string, formats []string, location *time.Location) (int64, 
 
 	for _, format := range formats {
 		switch format {
+		case "unix_auto":
+			value, err := strconv.ParseInt(trimmed, 10, 64)
+			if err != nil || value < 0 {
+				continue
+			}
+			switch len(trimmed) {
+			case 10:
+				return value * 1000, nil
+			case 13:
+				return value, nil
+			case 16:
+				return value / 1000, nil
+			case 19:
+				return value / 1000000, nil
+			}
 		case "unix":
-			if seconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			if seconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil && seconds >= -9223372036854775 && seconds <= 9223372036854775 {
 				return seconds * 1000, nil
 			}
 		case "unix_ms":

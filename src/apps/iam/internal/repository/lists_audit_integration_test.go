@@ -16,7 +16,7 @@ import (
 func TestListAuditEventsPagesWithoutGaps(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "audit paging password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "audit paging password"); err != nil {
 		t.Fatal(err)
 	}
 

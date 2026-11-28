@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
@@ -73,6 +74,23 @@ func (s *Service) Authorize(ctx context.Context, action string) (decision iamcli
 	return decision, nil
 }
 
+// sessionPermissions 为授权和会话投影合并同一组权限，继承的读取能力不参与角色委派。
+func sessionPermissions(ctx context.Context, db repository.DB, userID uuid.UUID) ([]string, error) {
+	permissions, err := repository.EffectivePermissions(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	baseline, err := repository.BaselinePermissions(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	permissions = append(permissions, baseline...)
+	slices.Sort(permissions)
+
+	return slices.Compact(permissions), nil
+}
+
 // resolve 在当前事务内解析并复核逻辑会话。
 func (s *Service) resolve(ctx context.Context, tx *sql.Tx) (iamclient.Principal, error) {
 	id, err := uuid.Parse(s.Sessions.Manager.GetString(ctx, authentication.LogicalSessionKey))
@@ -99,18 +117,10 @@ func (s *Service) authorizeTx(ctx context.Context, tx *sql.Tx, p iamclient.Princ
 		return repository.ErrUnauthenticated
 	}
 
-	permissions, err := repository.EffectivePermissions(ctx, tx, userID)
+	permissions, err := sessionPermissions(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
-
-	// 基线角色：所有已登录用户共享的最小读取权限，来自数据库而非代码分支。
-	baseline, err := repository.BaselinePermissions(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	permissions = append(permissions, baseline...)
 
 	now, err := repository.DatabaseTime(ctx, tx)
 	if err != nil {

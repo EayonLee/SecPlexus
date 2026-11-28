@@ -17,11 +17,9 @@ var receivedAt = time.Unix(1762986541, 0).UTC()
 // cefRule 是供应商规则的典型形态：CEF 解析 + 字段映射 + 级别值表 + 常量 + 样本。
 func cefRule() normalizer.Mapping {
 	return normalizer.Mapping{
-		ID:      "fortinet-fortigate",
-		Name:    "FortiGate 攻击日志",
-		Vendor:  "Fortinet",
-		Product: "FortiGate",
-		Parse:   parser.Spec{Mode: parser.ModeCEF},
+		ID:    "fortinet-fortigate",
+		Name:  "FortiGate 攻击日志",
+		Parse: parser.Spec{Mode: parser.ModeCEF},
 		FieldMap: map[string]string{
 			"src":          "src_endpoint.ip",
 			"dst":          "dst_endpoint.ip",
@@ -133,7 +131,7 @@ func TestUnmappedSeverityWarnsAndFallsBack(t *testing.T) {
 	if event.Fields["severity_id"] != normalizer.SeverityUnknown {
 		t.Fatalf("severity = %#v", event.Fields["severity_id"])
 	}
-	if len(event.Warnings) == 0 {
+	if len(event.Issues) == 0 {
 		t.Fatal("expected a warning for the unmapped severity")
 	}
 }
@@ -188,7 +186,7 @@ func TestUnparsableTimeWarnsAndFallsBackToReceivedAt(t *testing.T) {
 	if event.Fields["time"] != int64(1762986541000) {
 		t.Fatalf("fallback time = %#v, want the received time", event.Fields["time"])
 	}
-	if len(event.Warnings) == 0 {
+	if len(event.Issues) == 0 {
 		t.Fatal("expected a warning")
 	}
 }
@@ -439,6 +437,25 @@ func TestCompileRejectsFieldMapWritingEngineOwnedKeys(t *testing.T) {
 
 			if _, err := normalizer.Compile(rule); !errors.Is(err, normalizer.ErrInvalidRule) {
 				t.Fatalf("field_map to %q accepted: %v", target, err)
+			}
+		})
+	}
+}
+
+func TestCompileRejectsPlatformMetadataTargets(t *testing.T) {
+	for _, target := range []string{"metadata", "metadata.uid", "metadata.version", "metadata.spx.vendor"} {
+		t.Run(target, func(t *testing.T) {
+			mapping := normalizer.Mapping{
+				ID: "platform", Parse: parser.Spec{Mode: parser.ModeJSON},
+				Constants: map[string]any{"class_uid": 4001, target: "bad"},
+			}
+			if _, err := normalizer.Compile(mapping); err == nil {
+				t.Fatal("常量不应覆盖平台元数据")
+			}
+			mapping.Constants = map[string]any{"class_uid": 4001}
+			mapping.FieldMap = map[string]string{"value": target}
+			if _, err := normalizer.Compile(mapping); err == nil {
+				t.Fatal("映射不应覆盖平台元数据")
 			}
 		})
 	}

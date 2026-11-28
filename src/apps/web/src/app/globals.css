@@ -2,6 +2,23 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/lora";
+@import "@fontsource-variable/merriweather";
+@import "@fontsource-variable/montserrat";
+@import "@fontsource-variable/noto-sans";
+@import "@fontsource-variable/noto-serif";
+@import "@fontsource-variable/nunito-sans";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/playfair-display";
+@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/raleway";
+@import "@fontsource-variable/roboto";
+@import "@fontsource-variable/roboto-slab";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -50,20 +67,33 @@
   --font-sans: var(--font-sans);
 }
 
-/* Meta 设计系统令牌（项目根 DESIGN.md）。
- * 只换取值、不改令牌名，既有 shadcn 组件无需修改。
- * 取值严格取自 DESIGN.md 的 colors:，暗色沿用 shadcn 的中性灰阶（Meta 未发布暗色令牌，
- * 见 DESIGN.md "Known Gaps"），保持中性不带色相偏色。 */
+/* 表面层级与品牌令牌见项目根 DESIGN.md。共享 shadcn 组件消费这些语义值。 */
 :root {
+  --font-dm-sans: "DM Sans Variable";
+  --font-figtree: "Figtree Variable";
+  --font-inter: "Inter Variable";
+  --font-jetbrains-mono: "JetBrains Mono Variable";
+  --font-lora: "Lora Variable";
+  --font-merriweather: "Merriweather Variable";
+  --font-montserrat: "Montserrat Variable";
+  --font-noto-sans: "Noto Sans Variable";
+  --font-noto-serif: "Noto Serif Variable";
+  --font-nunito-sans: "Nunito Sans Variable";
+  --font-outfit: "Outfit Variable";
+  --font-playfair-display: "Playfair Display Variable";
+  --font-public-sans: "Public Sans Variable";
+  --font-raleway: "Raleway Variable";
+  --font-roboto: "Roboto Variable";
+  --font-roboto-slab: "Roboto Slab Variable";
   --radius: 0.75rem;
 
-  /* Canvas White / Deep Ink */
+  /* Canvas / content surface / overlay. The sidebar and overlays share the content neutral. */
   --background: #ffffff;
   --foreground: #0a1317;
-  --card: #ffffff;
-  --card-foreground: #0a1317;
-  --popover: #ffffff;
-  --popover-foreground: #0a1317;
+  --card: #fafafa;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
 
   /* Cobalt Primary，白字 5.39:1 */
   --primary: #0064e0;
@@ -95,15 +125,15 @@
   --chart-4: #8a8a8a;
   --chart-5: #6b6b6b;
 
-  /* 侧栏与画布同色，靠发丝线分隔 */
-  --sidebar: #ffffff;
-  --sidebar-foreground: #0a1317;
-  --sidebar-primary: #0064e0;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1f4f7;
-  --sidebar-accent-foreground: #0a1317;
-  --sidebar-border: #dee3e9;
-  --sidebar-ring: #1876f2;
+  /* 所有控制台路由共用侧栏表面、主色与焦点环。 */
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 
   --font-sans: var(--font-montserrat);
   --font-mono: var(--font-geist-mono);
@@ -114,9 +144,6 @@
   --background: #0a0a0a;
   --foreground: #fafafa;
   --card: #171717;
-  --card-foreground: #fafafa;
-  --popover: #171717;
-  --popover-foreground: #fafafa;
 
   /* {colors.primary} 与 {colors.on-primary} 是规范固定值：白字 5.39:1，
      钴蓝在 #0a0a0a 上 3.68:1（组件阈值 3:1 达标），因此不改造文字色。 */
@@ -140,15 +167,6 @@
   --chart-3: #0064e0;
   --chart-4: #a3a3a3;
   --chart-5: #d4d4d4;
-
-  --sidebar: #0a0a0a;
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #0091ff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #262626;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: #262626;
-  --sidebar-ring: #0091ff;
 }
 
 @layer base {
@@ -162,7 +180,52 @@
   }
   html {
     @apply font-sans;
+    color-scheme: light;
   }
+
+  html.dark {
+    color-scheme: dark;
+  }
+}
+
+/* Shared business tables keep one left edge for labels and cells. */
+[data-slot="table"] :is([data-slot="table-head"], [data-slot="table-cell"]) {
+  text-align: left;
+}
+
+.value-type-badge {
+  color-scheme: light;
+  color: var(--value-type-color, var(--muted-foreground));
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: inherit;
+}
+
+.dark .value-type-badge {
+  color-scheme: dark;
+}
+
+.value-type-badge[data-value-type="string"] {
+  --value-type-color: light-dark(#075aa8, #80baff);
+}
+
+.value-type-badge[data-value-type="number"] {
+  --value-type-color: light-dark(#633e9d, #c7a7f5);
+}
+
+.value-type-badge[data-value-type="boolean"] {
+  --value-type-color: light-dark(#09644c, #78d9ba);
+}
+
+.value-type-badge[data-value-type="array"] {
+  --value-type-color: light-dark(#755014, #efbf72);
+}
+
+.value-type-badge[data-value-type="object"] {
+  --value-type-color: light-dark(#963f68, #f0a4c6);
+}
+
+.value-type-badge[data-value-type="null"] {
+  --value-type-color: light-dark(#4d5966, #b4b4b4);
 }
 
 @layer utilities {
@@ -185,7 +248,7 @@
     --font-sans: var(--font-roboto);
   }
   html[data-font="geist"] body {
-    --font-sans: var(--font-geist);
+    --font-sans: var(--font-geist-sans);
   }
   html[data-font="raleway"] body {
     --font-sans: var(--font-raleway);
@@ -225,7 +288,7 @@
   }
 
   html body:has([data-landing-page]) {
-    --font-sans: var(--font-geist);
+    --font-sans: var(--font-geist-sans);
   }
 }
 
@@ -309,4 +372,94 @@ html:has([data-landing-page]) {
   --status-success: #5fd37a;
   --status-warning: #f7b928;
   --status-info: #7ab4ff;
+}
+
+/* ConsoleFrame 的宽度由根节点偏好统一控制，顶栏和每个业务路由共享同一内容边缘。 */
+.console-frame {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: var(--console-content-width, 100%);
+  min-inline-size: 0;
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 2vw, 1.5rem);
+}
+
+@media (min-width: 64rem) {
+  html[data-content-layout="centered"] {
+    --console-content-width: min(80rem, 92%);
+  }
+}
+
+/* 状态区与工具条相邻，外壳之外的路由可以显式占满视口。 */
+.state-panel {
+  min-block-size: clamp(13rem, 24vh, 18rem);
+}
+
+.state-panel[data-placement="viewport"] {
+  min-block-size: 100dvh;
+}
+
+.state-panel[data-placement="notice"] {
+  min-block-size: auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  padding-block: 0.75rem;
+}
+
+.state-panel[data-placement="notice"] [data-slot="empty-header"] {
+  flex-direction: row;
+  max-width: none;
+  flex-wrap: wrap;
+}
+
+.state-panel[data-placement="notice"] [data-slot="empty-content"] {
+  width: auto;
+}
+
+:root {
+  --sheet-inline-size: 100vw;
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --sheet-inline-size: min(90vw, 84rem);
+  }
+}
+
+/* 标题、编辑区和操作栏共享对齐线。字段跟随抽屉的可用宽度排布。 */
+.sheet-panel {
+  container-type: inline-size;
+}
+
+.sheet-panel[data-layout="management"] {
+  --sheet-inline-size: min(100vw, 32rem);
+}
+
+.sheet-panel > :is([data-slot="sheet-header"], [data-slot="sheet-footer"], .sheet-body) {
+  padding-inline: max(1.5rem, calc((100% - 64rem) / 2));
+}
+
+.sheet-panel[data-layout="management"] > :is([data-slot="sheet-header"], [data-slot="sheet-footer"], .sheet-body) {
+  padding-inline: 1rem;
+}
+
+.sheet-panel[data-layout="management"] > [data-slot="sheet-header"] {
+  padding-inline-end: 3rem;
+}
+
+.sheet-body [data-slot="field-group"] {
+  align-items: start;
+}
+
+@container (min-width: 44rem) {
+  .sheet-body [data-slot="field-group"] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 2rem;
+  }
+
+  .sheet-body [data-full-row="true"] {
+    grid-column: 1 / -1;
+    width: calc(50% - 1rem);
+  }
 }

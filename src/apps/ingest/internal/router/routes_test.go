@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
@@ -28,6 +29,15 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", recorder.Code)
+	}
+}
+
+func TestDevicePathUsesTheSameCanonicalRoutingBoundary(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/events//device", nil)
+	recorder := httptest.NewRecorder()
+	router.Handler(&handler.Server{}, router.Deps{}).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound || recorder.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("noncanonical device path returned %d with request ID %q", recorder.Code, recorder.Header().Get("X-Request-ID"))
 	}
 }
 
@@ -54,6 +64,12 @@ func (f *fakePublisher) Publish(_ context.Context, events []pipeline.Event) erro
 type allowAllLimiter struct{}
 
 func (allowAllLimiter) Allow(context.Context, string) error { return nil }
+
+func devicePush(registry input.Lookup, line *pipeline.Pipeline) gin.HandlerFunc {
+	channel := httpchannel.New(registry, allowAllLimiter{}, line)
+	channel.MaxBodyBytes = 8 << 20
+	return handler.DevicePush(channel)
+}
 
 func TestReadyReportsUnavailableWhenCheckFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -151,11 +167,8 @@ func TestDevicePushBypassesAdminInputBoundary(t *testing.T) {
 	t.Cleanup(cancel)
 	go func() { _ = line.Start(ctx) }()
 
-	server := httptest.NewServer(router.RootHandler(&handler.Server{}, router.Deps{
-		Registry: registry,
-		Limiter:  allowAllLimiter{},
-		Pipeline: line,
-		MaxBody:  8 << 20,
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{
+		Push: devicePush(registry, line),
 	}))
 	t.Cleanup(server.Close)
 

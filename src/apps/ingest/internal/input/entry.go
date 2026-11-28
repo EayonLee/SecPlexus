@@ -1,13 +1,16 @@
-// Package source 定义通道所需的最小接入点视图与它的查询端口。
+// Package input 定义通道所需的最小接入点视图与它的查询端口。
 //
 // 通道不认识数据库：它只拿到一份不可变的 Entry（接入点 + 已编译的解析规则），
-// 因此通道实现可以完全用内存注册表测试，注册表从数据库加载是第五组的事。
+// 仓储层从数据库加载快照，通道通过 Lookup 查询。
 package input
 
 import (
 	"crypto/sha256"
+	"regexp"
 	"sync"
+	"time"
 
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
 )
 
@@ -26,20 +29,35 @@ const (
 // Entry 是通道运行期需要知道的全部接入点信息。
 // 通道不改它，也不持有数据库连接。
 type Entry struct {
-	ID       string               // 接入点标识，事件里回填。
-	Name     string               // 展示名称，仅用于日志与诊断。
-	Protocol Protocol             // 接入方式。
-	Mapping  *normalizer.Compiled // 已编译的解析规则；nil 表示"通用接入"，只做原文透传。
-	Token    [sha256.Size]byte    // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
-	Port     int                  // syslog 通道的监听端口；0 表示未绑定。
-	Kafka    KafkaBinding         // Kafka 消费绑定；仅 ProtocolKafka 使用。
+	Revision             int64 // 数据接入配置修订。
+	CredentialGeneration int64 // 设备凭据代次。
+
+	ParsingRuleID      string               // 实际编译使用的解析规则 ID。
+	ParsingRuleVersion int                  // 实际编译使用的规则修订。
+	Vendor             string               // 来源厂商，由接入配置提供。
+	Product            string               // 来源产品，可独立于厂商配置。
+	ID                 string               // 接入点标识，事件里回填。
+	Name               string               // 展示名称，仅用于日志与诊断。
+	Protocol           Protocol             // 接入方式。
+	Mapping            *normalizer.Compiled // 已编译的解析规则；nil 表示未绑定。
+	Token              [sha256.Size]byte    // HTTP 通道的令牌摘要；空值表示该接入点不走 HTTP。
+	Port               int                  // syslog 通道的监听端口；0 表示未绑定。
+	Kafka              KafkaBinding         // Kafka 消费绑定；仅 ProtocolKafka 使用。
 }
 
 // KafkaBinding 描述要消费的外部总线。
 type KafkaBinding struct {
-	Brokers []string // 客户已有总线的 broker 列表。
-	Topic   string   // 外部 topic 名。
+	Credential    string                  // 部署侧配置中的凭据名，空值表示明文连接。
+	Brokers       []string                // 客户已有总线的 broker 列表。
+	Topic         string                  // 外部 topic 名。
+	StartPosition enum.KafkaStartPosition // 首次消费位置，有提交时沿用已提交位移。
+	CreatedAt     time.Time               // 接入创建时间，用作固定的 Kafka 消息时间下界。
 }
+
+var kafkaCredentialName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+// ValidKafkaCredential 验证数据接入使用的部署侧凭据名。
+func ValidKafkaCredential(name string) bool { return kafkaCredentialName.MatchString(name) }
 
 // Usable 报告绑定是否完整。不完整的接入点不启动消费循环。
 func (k KafkaBinding) Usable() bool {
@@ -70,13 +88,14 @@ type Lookup interface {
 	KafkaSources() []Entry
 }
 
-// Memory 是内存注册表：测试与第五组数据库加载之前的占位实现。
+// Memory 是通道共享的不可变来源快照索引。
 // 加载责任在调用方，Memory 只提供并发安全的读。
 type Memory struct {
 	mu      sync.RWMutex
 	byID    map[string]Entry
 	byToken map[[sha256.Size]byte]string
 	loaded  bool
+	expires time.Time
 }
 
 // NewMemory 创建空注册表。
@@ -90,6 +109,11 @@ func NewMemory() *Memory {
 // Replace 用给定集合整体替换注册表内容，供热重载使用。
 // 整体替换而不是增量修改：一条接入点被删除时，旧令牌必须立刻失效。
 func (m *Memory) Replace(entries []Entry) {
+	m.ReplaceUntil(entries, time.Time{})
+}
+
+// ReplaceUntil 切换快照。有效期届满时，所有通道停止受理旧配置。
+func (m *Memory) ReplaceUntil(entries []Entry, expires time.Time) {
 	byID := make(map[string]Entry, len(entries))
 	byToken := make(map[[sha256.Size]byte]string, len(entries))
 
@@ -107,21 +131,29 @@ func (m *Memory) Replace(entries []Entry) {
 	m.byID = byID
 	m.byToken = byToken
 	m.loaded = true
+	m.expires = expires
 }
 
-// Loaded 报告注册表是否至少被加载过一次。
-// 与"当前是否为空"不同：加载完成但确实没有接入点，也算已加载。
+// Loaded 报告当前快照是否完成加载且仍有效，空集合也是有效快照。
 func (m *Memory) Loaded() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.loaded
+	return m.available()
+}
+
+// available 需要持有注册表的读锁或写锁。
+func (m *Memory) available() bool {
+	return m.loaded && (m.expires.IsZero() || time.Now().Before(m.expires))
 }
 
 // ByID 按标识查找接入点。
 func (m *Memory) ByID(id string) (Entry, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.available() {
+		return Entry{}, false
+	}
 
 	entry, ok := m.byID[id]
 	return entry, ok
@@ -131,6 +163,9 @@ func (m *Memory) ByID(id string) (Entry, bool) {
 func (m *Memory) ByTokenDigest(digest [sha256.Size]byte) (Entry, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.available() {
+		return Entry{}, false
+	}
 
 	id, ok := m.byToken[digest]
 	if !ok {
@@ -144,6 +179,9 @@ func (m *Memory) ByTokenDigest(digest [sha256.Size]byte) (Entry, bool) {
 func (m *Memory) SyslogBindings() []Entry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.available() {
+		return nil
+	}
 
 	bindings := make([]Entry, 0, len(m.byID))
 	for _, entry := range m.byID {
@@ -159,6 +197,9 @@ func (m *Memory) SyslogBindings() []Entry {
 func (m *Memory) KafkaSources() []Entry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if !m.available() {
+		return nil
+	}
 
 	sources := make([]Entry, 0, len(m.byID))
 	for _, entry := range m.byID {

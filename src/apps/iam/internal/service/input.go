@@ -1,6 +1,8 @@
 package service
 
 import (
+	"time"
+
 	"github.com/aarondl/opt/omit"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
@@ -58,14 +60,30 @@ type AuditFilter struct {
 	Cursor  string
 	Actor   string
 	Outcome string
-	From    string
-	To      string
+	From    *time.Time
+	To      *time.Time
 }
 
 // Identity 是当前账号的授权投影：账号、直接角色、有效权限与展示时区。
 type Identity struct {
+	Email       *string
+	CreatedAt   time.Time
 	Permissions []string
 	Principal   iamclient.Principal
 	Roles       []repository.RoleRef
 	TimeZone    string
+}
+
+// ServiceAuditInput 是平台服务提交给 IAM 的审计事实。
+type ServiceAuditInput struct {
+	OccurredAt *time.Time
+	EventID    string
+	Action     string
+	TargetType string
+	TargetID   string
+	Outcome    string
+	Reason     string
+	RequestID  string
+	DecisionID string
+	Metadata   map[string]any
 }

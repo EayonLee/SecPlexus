@@ -16,7 +16,7 @@ func TestIngestTablesAndColumnsKeepComments(t *testing.T) {
 	ctx := context.Background()
 
 	// 表注释。
-	for _, table := range []string{"inputs", "mappings"} {
+	for _, table := range []string{"inputs", "parsing_rules"} {
 		var comment *string
 		if err := pool.QueryRow(ctx, `
 			SELECT obj_description(('ingest.' || $1)::regclass, 'pg_class')`, table).Scan(&comment); err != nil {
@@ -30,8 +30,8 @@ func TestIngestTablesAndColumnsKeepComments(t *testing.T) {
 
 	// 业务列注释：每个暴露给运维的列都必须说明含义，否则改配置只能猜。
 	required := map[string][]string{
-		"inputs":   {"name", "protocol", "mapping_id", "configuration", "enabled"},
-		"mappings": {"name", "definition", "version"},
+		"inputs":        {"name", "protocol", "parsing_rule_id", "configuration", "enabled"},
+		"parsing_rules": {"name", "definition", "version"},
 	}
 
 	for table, columns := range required {

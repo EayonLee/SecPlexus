@@ -1,0 +1,1861 @@
+{
+  "contract_version": "v1",
+  "upstream": {
+    "version": "1.10.0",
+    "commit": "2d209039d9c476ab76e83fb58b6f99374d40a994",
+    "compiler": "1.0.1"
+  },
+  "category_labels": {
+    "other": {"zh-CN": "未分类"},
+    "system": {"zh-CN": "系统活动"},
+    "findings": {"zh-CN": "安全发现"},
+    "iam": {"zh-CN": "身份与访问管理"},
+    "network": {"en": "Network Events", "zh-CN": "网络类"},
+    "discovery": {"zh-CN": "发现"},
+    "application": {"zh-CN": "应用活动"},
+    "remediation": {"zh-CN": "修复"},
+    "unmanned_systems": {"zh-CN": "无人系统"}
+  },
+  "recommended_mapping_paths": ["message", "status_id"],
+  "classes": [
+    {
+      "name": "基础事件",
+      "description": "记录能够归档但尚未归入其他事件类的来源观测。",
+      "fields": {
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        }
+      },
+      "enum_labels": {
+        "activity_id": {
+          "0": {
+            "name": "未知",
+            "description": "活动类型未知。"
+          },
+          "99": {
+            "name": "其他",
+            "description": "采用 activity_name 中的来源标签。"
+          }
+        },
+        "class_uid": {
+          "0": {
+            "name": "基础事件",
+            "description": "通用的 OCSF 基础事件。"
+          }
+        },
+        "category_uid": {
+          "0": {
+            "description": "记录尚未归入业务类别。"
+          }
+        },
+        "type_uid": {
+          "0": {
+            "name": "基础事件 · 未知",
+            "description": "活动类型未知。"
+          },
+          "99": {
+            "name": "基础事件 · 其他",
+            "description": "采用 activity_name 中的来源标签。"
+          }
+        }
+      },
+      "class": "base_event",
+      "constraints": []
+    },
+    {
+      "name": "认证活动",
+      "description": "记录认证过程、登录、登出及其执行结果。",
+      "aliases": {
+        "en": ["sign-in", "login", "logon", "logout"],
+        "zh-CN": ["登录事件", "登录失败", "登出事件", "身份认证"]
+      },
+      "recommended_mapping_paths": ["user.name", "user.uid", "service.name", "dst_endpoint.hostname", "dst_endpoint.ip", "src_endpoint.ip", "logon_type_id"],
+      "fields": {
+        "logon_type_id": {},
+        "auth_protocol_id": {},
+        "is_mfa": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "标识登录、登出、认证票据操作等认证活动。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "src_endpoint": {
+          "name": "源端点",
+          "description": "发起认证请求的网络端点。",
+          "owner": "platform"
+        },
+        "src_endpoint.ip": {
+          "name": "源 IP",
+          "description": "源端点的 IPv4 或 IPv6 地址。"
+        },
+        "src_endpoint.port": {
+          "name": "源端口",
+          "description": "源端点的传输层端口，取值为 0 到 65535。"
+        },
+        "src_endpoint.hostname": {
+          "name": "源主机名",
+          "description": "用于识别源端点的主机名。"
+        },
+        "src_endpoint.domain": {
+          "name": "源域名",
+          "description": "用于识别源端点的域名。"
+        },
+        "src_endpoint.uid": {
+          "name": "源端点标识",
+          "description": "来源系统为源端点提供的唯一标识。"
+        },
+        "src_endpoint.mac": {
+          "name": "源 MAC 地址",
+          "description": "源端点的链路层地址。"
+        },
+        "src_endpoint.intermediate_ips": {
+          "name": "源中间节点地址",
+          "description": "该端点经由的中间网络节点的 IP 地址。"
+        },
+        "dst_endpoint": {
+          "name": "目的端点",
+          "description": "认证请求到达的网络端点。",
+          "owner": "platform",
+          "condition": {
+            "en": "Provide the destination endpoint or the authentication service.",
+            "zh-CN": "目的端点与认证服务至少提供一个。"
+          }
+        },
+        "dst_endpoint.ip": {
+          "name": "目的 IP",
+          "description": "目的端点的 IPv4 或 IPv6 地址。"
+        },
+        "dst_endpoint.port": {
+          "name": "目的端口",
+          "description": "目的端点的传输层端口，取值为 0 到 65535。"
+        },
+        "dst_endpoint.hostname": {
+          "name": "目的主机名",
+          "description": "用于识别目的端点的主机名。"
+        },
+        "dst_endpoint.domain": {
+          "name": "目的域名",
+          "description": "用于识别目的端点的域名。"
+        },
+        "dst_endpoint.uid": {
+          "name": "目的端点标识",
+          "description": "来源系统为目的端点提供的唯一标识。"
+        },
+        "dst_endpoint.mac": {
+          "name": "目的 MAC 地址",
+          "description": "目的端点的链路层地址。"
+        },
+        "dst_endpoint.intermediate_ips": {
+          "name": "目的中间节点地址",
+          "description": "该端点经由的中间网络节点的 IP 地址。"
+        },
+        "user": {
+          "name": "认证用户",
+          "description": "被认证的用户或账号。",
+          "owner": "platform",
+          "condition": {
+            "en": "Provide a user name or identifier.",
+            "zh-CN": "账号名称与账号标识至少提供一个。"
+          }
+        },
+        "user.name": {
+          "name": "账号名称",
+          "description": "发起认证的账号名称。"
+        },
+        "user.uid": {
+          "name": "账号标识",
+          "description": "来源系统中的账号唯一标识。"
+        },
+        "service": {
+          "name": "认证服务",
+          "description": "执行认证的目标服务。",
+          "owner": "platform",
+          "condition": {
+            "en": "Provide the destination endpoint or the authentication service.",
+            "zh-CN": "目的端点与认证服务至少提供一个。"
+          }
+        },
+        "service.name": {
+          "name": "服务名称",
+          "description": "执行认证的服务名称。"
+        }
+      },
+      "enum_labels": {
+        "activity_id": {
+          "0": {
+            "name": "未知动作"
+          },
+          "99": {
+            "name": "其他认证动作",
+            "description": "采用 activity_name 中的来源活动名称。"
+          },
+          "1": {
+            "name": "登录",
+            "description": "尝试登录系统、应用或服务，结果由 status_id 表示。"
+          },
+          "2": {
+            "name": "登出",
+            "description": "离开已登录的系统、应用或服务。"
+          },
+          "3": {
+            "name": "认证票据操作"
+          },
+          "4": {
+            "name": "请求服务票据"
+          },
+          "5": {
+            "name": "续期服务票据"
+          },
+          "6": {
+            "name": "预认证"
+          },
+          "7": {
+            "name": "切换账号"
+          }
+        },
+        "class_uid": {
+          "3002": {
+            "name": "认证活动",
+            "description": "登录、登出及其他认证活动。"
+          }
+        },
+        "category_uid": {
+          "3": {
+            "description": "身份识别和访问控制相关记录。"
+          }
+        },
+        "type_uid": {
+          "300200": {
+            "name": "认证活动 · 未知动作",
+            "description": "未知动作。"
+          },
+          "300299": {
+            "name": "认证活动 · 其他认证动作",
+            "description": "其他认证动作。"
+          },
+          "300201": {
+            "name": "认证活动 · 登录",
+            "description": "登录。"
+          },
+          "300202": {
+            "name": "认证活动 · 登出",
+            "description": "登出。"
+          },
+          "300203": {
+            "name": "认证活动 · 认证票据操作",
+            "description": "认证票据操作。"
+          },
+          "300204": {
+            "name": "认证活动 · 请求服务票据",
+            "description": "请求服务票据。"
+          },
+          "300205": {
+            "name": "认证活动 · 续期服务票据",
+            "description": "续期服务票据。"
+          },
+          "300206": {
+            "name": "认证活动 · 预认证",
+            "description": "预认证。"
+          },
+          "300207": {
+            "name": "认证活动 · 切换账号",
+            "description": "切换账号。"
+          }
+        }
+      },
+      "class": "authentication",
+      "constraints": [
+        {
+          "paths": [
+            "user"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "service",
+            "dst_endpoint"
+          ],
+          "mode": "at_least_one"
+        }
+      ]
+    },
+    {
+      "name": "网络活动",
+      "description": "描述网络连接的建立、关闭、监听及流量观测。",
+      "recommended_mapping_paths": ["src_endpoint.ip", "dst_endpoint.ip", "src_endpoint.hostname", "dst_endpoint.hostname", "src_endpoint.port", "dst_endpoint.port", "connection_info.protocol_name"],
+      "fields": {
+        "connection_info.direction_id": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "在网络活动类内标识连接或流量操作。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "src_endpoint": {
+          "name": "源端点",
+          "description": "网络通信的源端，其中至少一个端点须可识别。",
+          "owner": "platform",
+          "condition": {
+            "en": "Provide at least one of the source or destination endpoints.",
+            "zh-CN": "源端点和目的端点至少提供一个。"
+          }
+        },
+        "src_endpoint.ip": {
+          "name": "源 IP",
+          "description": "源端点的 IPv4 或 IPv6 地址。"
+        },
+        "src_endpoint.port": {
+          "name": "源端口",
+          "description": "源端点的传输层端口，取值为 0 到 65535。"
+        },
+        "src_endpoint.hostname": {
+          "name": "源主机名",
+          "description": "用于识别源端点的主机名。"
+        },
+        "src_endpoint.domain": {
+          "name": "源域名",
+          "description": "用于识别源端点的域名。"
+        },
+        "src_endpoint.uid": {
+          "name": "源端点标识",
+          "description": "来源系统为源端点提供的唯一标识。"
+        },
+        "src_endpoint.mac": {
+          "name": "源 MAC 地址",
+          "description": "源端点的链路层地址。"
+        },
+        "src_endpoint.intermediate_ips": {
+          "name": "源中间节点地址",
+          "description": "该端点经由的中间网络节点的 IP 地址。"
+        },
+        "dst_endpoint": {
+          "name": "目的端点",
+          "description": "网络通信的目的端，其中至少一个端点须可识别。",
+          "owner": "platform",
+          "condition": {
+            "en": "Provide at least one of the source or destination endpoints.",
+            "zh-CN": "源端点和目的端点至少提供一个。"
+          }
+        },
+        "dst_endpoint.ip": {
+          "name": "目的 IP",
+          "description": "目的端点的 IPv4 或 IPv6 地址。"
+        },
+        "dst_endpoint.port": {
+          "name": "目的端口",
+          "description": "目的端点的传输层端口，取值为 0 到 65535。"
+        },
+        "dst_endpoint.hostname": {
+          "name": "目的主机名",
+          "description": "用于识别目的端点的主机名。"
+        },
+        "dst_endpoint.domain": {
+          "name": "目的域名",
+          "description": "用于识别目的端点的域名。"
+        },
+        "dst_endpoint.uid": {
+          "name": "目的端点标识",
+          "description": "来源系统为目的端点提供的唯一标识。"
+        },
+        "dst_endpoint.mac": {
+          "name": "目的 MAC 地址",
+          "description": "目的端点的链路层地址。"
+        },
+        "dst_endpoint.intermediate_ips": {
+          "name": "目的中间节点地址",
+          "description": "该端点经由的中间网络节点的 IP 地址。"
+        },
+        "connection_info": {
+          "name": "连接信息",
+          "description": "网络连接的协议等上下文。",
+          "owner": "platform"
+        },
+        "connection_info.protocol_num": {
+          "name": "协议编号",
+          "description": "IANA IP 协议编号。"
+        },
+        "connection_info.protocol_name": {
+          "name": "协议名称",
+          "description": "网络连接使用的协议。"
+        },
+        "cumulative_traffic": {
+          "name": "累计流量",
+          "description": "连接生命周期内累计的字节数和包数。",
+          "owner": "platform"
+        },
+        "cumulative_traffic.bytes_in": {
+          "name": "累计入站字节数",
+          "description": "累计接收的字节数。"
+        },
+        "cumulative_traffic.bytes_out": {
+          "name": "累计出站字节数",
+          "description": "累计发送的字节数。"
+        },
+        "cumulative_traffic.packets_in": {
+          "name": "累计入站包数",
+          "description": "累计接收的网络包数。"
+        },
+        "cumulative_traffic.packets_out": {
+          "name": "累计出站包数",
+          "description": "累计发送的网络包数。"
+        },
+        "action_id": {
+          "name": "安全控制动作",
+          "description": "防火墙等控制措施对观测活动的处置动作。"
+        }
+      },
+      "enum_labels": {
+        "activity_id": {
+          "0": {
+            "name": "未知",
+            "description": "活动类型未知。"
+          },
+          "1": {
+            "name": "建立",
+            "description": "建立了新的网络连接。"
+          },
+          "2": {
+            "name": "关闭连接",
+            "description": "网络连接已经关闭。"
+          },
+          "3": {
+            "name": "重置",
+            "description": "连接异常终止，或被防火墙等中间设备关闭。"
+          },
+          "4": {
+            "name": "失败",
+            "description": "连接失败，例如超时或无路由。"
+          },
+          "5": {
+            "name": "拒绝",
+            "description": "连接被拒绝，例如目的端口未开放。"
+          },
+          "6": {
+            "name": "流量",
+            "description": "报告网络流量。"
+          },
+          "7": {
+            "name": "监听",
+            "description": "端点开始监听新的连接。"
+          },
+          "99": {
+            "name": "其他",
+            "description": "采用 activity_name 中的来源标签。"
+          }
+        },
+        "class_uid": {
+          "4001": {
+            "name": "网络活动",
+            "description": "网络连接和流量事件。"
+          }
+        },
+        "category_uid": {
+          "4": {
+            "description": "网络连接、流量及相关网络记录。"
+          }
+        },
+        "action_id": {
+          "0": {
+            "name": "动作未知"
+          },
+          "1": {
+            "name": "允许活动"
+          },
+          "2": {
+            "name": "阻止活动"
+          },
+          "99": {
+            "name": "标准以外的动作"
+          },
+          "3": {
+            "name": "观察活动"
+          },
+          "4": {
+            "name": "修改活动"
+          }
+        },
+        "type_uid": {
+          "400100": {
+            "name": "网络活动 · 未知",
+            "description": "活动类型未知。"
+          },
+          "400199": {
+            "name": "网络活动 · 其他",
+            "description": "采用 activity_name 中的来源标签。"
+          },
+          "400101": {
+            "name": "网络活动 · 建立",
+            "description": "建立了新的网络连接。"
+          },
+          "400102": {
+            "name": "网络活动 · 关闭连接",
+            "description": "网络连接已经关闭。"
+          },
+          "400103": {
+            "name": "网络活动 · 重置",
+            "description": "连接异常终止，或被防火墙等中间设备关闭。"
+          },
+          "400104": {
+            "name": "网络活动 · 失败",
+            "description": "连接失败，例如超时或无路由。"
+          },
+          "400105": {
+            "name": "网络活动 · 拒绝",
+            "description": "连接被拒绝，例如目的端口未开放。"
+          },
+          "400106": {
+            "name": "网络活动 · 流量",
+            "description": "报告网络流量。"
+          },
+          "400107": {
+            "name": "网络活动 · 监听",
+            "description": "端点开始监听新的连接。"
+          }
+        }
+      },
+      "class": "network_activity",
+      "constraints": [
+        {
+          "paths": [
+            "src_endpoint",
+            "dst_endpoint"
+          ],
+          "mode": "at_least_one"
+        }
+      ]
+    },
+    {
+      "name": "HTTP 活动",
+      "description": "记录 HTTP 请求和响应",
+      "recommended_mapping_paths": ["http_request.url.path", "http_response.code", "http_request.url.hostname", "src_endpoint.ip", "http_request.user_agent"],
+      "fields": {
+        "http_request.url.url_string": {},
+        "http_request.user_agent": {},
+        "http_request.version": {},
+        "activity_id": {
+          "name": "HTTP 方法",
+          "description": "事件中发生的 HTTP 操作",
+          "preferred_enum_values": [3, 6, 7, 9, 2, 4, 5, 1, 8]
+        },
+        "src_endpoint.ip": {},
+        "dst_endpoint.ip": {},
+        "http_request.url.path": {},
+        "http_request.url.hostname": {},
+        "http_response.code": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "http_request",
+            "http_response"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "http_response.code"
+          ],
+          "mode": "at_least_one",
+          "when": "http_response"
+        },
+        {
+          "paths": ["http_request.url.path", "http_request.url.url_string"],
+          "mode": "at_least_one",
+          "when": "http_request.url"
+        }
+      ],
+      "enum_labels": {
+        "activity_id": {
+          "0": {
+            "name": "未知"
+          },
+          "99": {
+            "name": "其他"
+          },
+          "1": {
+            "name": "CONNECT"
+          },
+          "2": {
+            "name": "DELETE"
+          },
+          "3": {
+            "name": "GET"
+          },
+          "4": {
+            "name": "HEAD"
+          },
+          "5": {
+            "name": "OPTIONS"
+          },
+          "6": {
+            "name": "POST"
+          },
+          "7": {
+            "name": "PUT"
+          },
+          "8": {
+            "name": "TRACE"
+          },
+          "9": {
+            "name": "PATCH"
+          },
+          "10": {
+            "name": "ACL"
+          },
+          "11": {
+            "name": "BASELINE-CONTROL"
+          },
+          "12": {
+            "name": "BIND"
+          },
+          "13": {
+            "name": "CHECKIN"
+          },
+          "14": {
+            "name": "CHECKOUT"
+          },
+          "15": {
+            "name": "COPY"
+          },
+          "16": {
+            "name": "LABEL"
+          },
+          "17": {
+            "name": "LINK"
+          },
+          "18": {
+            "name": "LOCK"
+          },
+          "19": {
+            "name": "MERGE"
+          },
+          "20": {
+            "name": "MKACTIVITY"
+          },
+          "21": {
+            "name": "MKCALENDAR"
+          },
+          "22": {
+            "name": "MKCOL"
+          },
+          "23": {
+            "name": "MKREDIRECTREF"
+          },
+          "24": {
+            "name": "MKWORKSPACE"
+          },
+          "25": {
+            "name": "MOVE"
+          },
+          "26": {
+            "name": "ORDERPATCH"
+          },
+          "27": {
+            "name": "PRI"
+          },
+          "28": {
+            "name": "PROPFIND"
+          },
+          "29": {
+            "name": "PROPPATCH"
+          },
+          "30": {
+            "name": "QUERY"
+          },
+          "31": {
+            "name": "REBIND"
+          },
+          "32": {
+            "name": "REPORT"
+          },
+          "33": {
+            "name": "SEARCH"
+          },
+          "34": {
+            "name": "UNBIND"
+          },
+          "35": {
+            "name": "UNCHECKOUT"
+          },
+          "36": {
+            "name": "UNLINK"
+          },
+          "37": {
+            "name": "UNLOCK"
+          },
+          "38": {
+            "name": "UPDATE"
+          },
+          "39": {
+            "name": "UPDATEREDIRECTREF"
+          },
+          "40": {
+            "name": "VERSION-CONTROL"
+          }
+        },
+        "type_uid": {
+          "400200": {
+            "name": "HTTP 活动 · 未知"
+          },
+          "400299": {
+            "name": "HTTP 活动 · 其他"
+          },
+          "400201": {
+            "name": "HTTP 活动 · CONNECT"
+          },
+          "400202": {
+            "name": "HTTP 活动 · DELETE"
+          },
+          "400203": {
+            "name": "HTTP 活动 · GET"
+          },
+          "400204": {
+            "name": "HTTP 活动 · HEAD"
+          },
+          "400205": {
+            "name": "HTTP 活动 · OPTIONS"
+          },
+          "400206": {
+            "name": "HTTP 活动 · POST"
+          },
+          "400207": {
+            "name": "HTTP 活动 · PUT"
+          },
+          "400208": {
+            "name": "HTTP 活动 · TRACE"
+          },
+          "400209": {
+            "name": "HTTP 活动 · PATCH"
+          },
+          "400210": {
+            "name": "HTTP 活动 · ACL"
+          },
+          "400211": {
+            "name": "HTTP 活动 · BASELINE-CONTROL"
+          },
+          "400212": {
+            "name": "HTTP 活动 · BIND"
+          },
+          "400213": {
+            "name": "HTTP 活动 · CHECKIN"
+          },
+          "400214": {
+            "name": "HTTP 活动 · CHECKOUT"
+          },
+          "400215": {
+            "name": "HTTP 活动 · COPY"
+          },
+          "400216": {
+            "name": "HTTP 活动 · LABEL"
+          },
+          "400217": {
+            "name": "HTTP 活动 · LINK"
+          },
+          "400218": {
+            "name": "HTTP 活动 · LOCK"
+          },
+          "400219": {
+            "name": "HTTP 活动 · MERGE"
+          },
+          "400220": {
+            "name": "HTTP 活动 · MKACTIVITY"
+          },
+          "400221": {
+            "name": "HTTP 活动 · MKCALENDAR"
+          },
+          "400222": {
+            "name": "HTTP 活动 · MKCOL"
+          },
+          "400223": {
+            "name": "HTTP 活动 · MKREDIRECTREF"
+          },
+          "400224": {
+            "name": "HTTP 活动 · MKWORKSPACE"
+          },
+          "400225": {
+            "name": "HTTP 活动 · MOVE"
+          },
+          "400226": {
+            "name": "HTTP 活动 · ORDERPATCH"
+          },
+          "400227": {
+            "name": "HTTP 活动 · PRI"
+          },
+          "400228": {
+            "name": "HTTP 活动 · PROPFIND"
+          },
+          "400229": {
+            "name": "HTTP 活动 · PROPPATCH"
+          },
+          "400230": {
+            "name": "HTTP 活动 · QUERY"
+          },
+          "400231": {
+            "name": "HTTP 活动 · REBIND"
+          },
+          "400232": {
+            "name": "HTTP 活动 · REPORT"
+          },
+          "400233": {
+            "name": "HTTP 活动 · SEARCH"
+          },
+          "400234": {
+            "name": "HTTP 活动 · UNBIND"
+          },
+          "400235": {
+            "name": "HTTP 活动 · UNCHECKOUT"
+          },
+          "400236": {
+            "name": "HTTP 活动 · UNLINK"
+          },
+          "400237": {
+            "name": "HTTP 活动 · UNLOCK"
+          },
+          "400238": {
+            "name": "HTTP 活动 · UPDATE"
+          },
+          "400239": {
+            "name": "HTTP 活动 · UPDATEREDIRECTREF"
+          },
+          "400240": {
+            "name": "HTTP 活动 · VERSION-CONTROL"
+          }
+        }
+      },
+      "class": "http_activity"
+    },
+    {
+      "name": "DNS 活动",
+      "description": "记录 DNS 查询和响应",
+      "recommended_mapping_paths": ["src_endpoint.ip", "dst_endpoint.ip", "query.hostname", "query.type", "rcode_id"],
+      "fields": {
+        "rcode_id": {},
+        "opcode_id": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "src_endpoint.ip": {},
+        "dst_endpoint.ip": {},
+        "query.hostname": {},
+        "query.type": {},
+        "rcode": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "src_endpoint",
+            "dst_endpoint"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "query.hostname"
+          ],
+          "mode": "at_least_one",
+          "when": "query"
+        }
+      ],
+      "enum_labels": {},
+      "class": "dns_activity"
+    },
+    {
+      "name": "进程活动",
+      "description": "记录进程启动、结束和其他操作",
+      "recommended_mapping_paths": ["process.name", "process.cmd_line"],
+      "fields": {
+        "process.cpid": {},
+        "process.cmd_line": {},
+        "process.parent_process.pid": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "device.hostname": {},
+        "device.uid": {},
+        "device.type_id": {},
+        "actor.user.name": {},
+        "actor.user.uid": {},
+        "process.pid": {},
+        "process.uid": {},
+        "process.name": {},
+        "process.file.path": {},
+        "process.file.name": {},
+        "process.file.type_id": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "device.hostname",
+            "device.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "device.type_id"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "actor.user.name",
+            "actor.user.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "process.pid",
+            "process.uid",
+            "process.cpid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": ["process.file.name"],
+          "mode": "at_least_one",
+          "when": "process.file"
+        },
+        {
+          "paths": ["process.file.type_id"],
+          "mode": "at_least_one",
+          "when": "process.file"
+        }
+      ],
+      "enum_labels": {},
+      "class": "process_activity"
+    },
+    {
+      "name": "文件系统活动",
+      "description": "记录文件创建、读取和修改等操作",
+      "recommended_mapping_paths": ["file.path", "file.size"],
+      "fields": {
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "device.hostname": {},
+        "device.uid": {},
+        "device.type_id": {},
+        "actor.user.name": {},
+        "actor.user.uid": {},
+        "file.name": {},
+        "file.path": {},
+        "file.type_id": {},
+        "file.size": {
+          "unit": "B"
+        }
+      },
+      "constraints": [
+        {
+          "paths": [
+            "device.hostname",
+            "device.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "device.type_id"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "actor.user.name",
+            "actor.user.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "file.name"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "file.type_id"
+          ],
+          "mode": "at_least_one"
+        }
+      ],
+      "enum_labels": {},
+      "class": "file_activity"
+    },
+    {
+      "name": "账号变更",
+      "description": "记录账号及策略的变更",
+      "recommended_mapping_paths": ["actor.user.name", "src_endpoint.ip"],
+      "fields": {
+        "src_endpoint.ip": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "user.name": {},
+        "user.uid": {},
+        "actor.user.name": {},
+        "actor.user.uid": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "user.name",
+            "user.uid"
+          ],
+          "mode": "at_least_one"
+        }
+      ],
+      "enum_labels": {},
+      "class": "account_change"
+    },
+    {
+      "name": "用户管理",
+      "description": "记录创建、更新、启用、禁用等用户管理操作",
+      "recommended_mapping_paths": ["actor.user.name", "src_endpoint.ip"],
+      "fields": {
+        "src_endpoint.ip": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "标识创建、更新、启用、禁用等用户管理操作。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "user.name": {},
+        "user.uid": {},
+        "actor.user.name": {},
+        "actor.user.uid": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "user.name",
+            "user.uid"
+          ],
+          "mode": "at_least_one"
+        }
+      ],
+      "enum_labels": {
+        "activity_id": {
+          "7": {
+            "name": "解锁"
+          },
+          "10": {
+            "name": "附加策略"
+          },
+          "11": {
+            "name": "分离策略"
+          },
+          "12": {
+            "name": "启用多因素认证方式"
+          },
+          "13": {
+            "name": "禁用多因素认证方式"
+          },
+          "14": {
+            "name": "授予权限"
+          },
+          "15": {
+            "name": "撤销权限"
+          },
+          "16": {
+            "name": "分配角色"
+          },
+          "17": {
+            "name": "移除角色"
+          },
+          "18": {
+            "name": "添加程序访问凭证"
+          },
+          "19": {
+            "name": "移除程序访问凭证"
+          }
+        }
+      },
+      "class": "user_management"
+    },
+    {
+      "name": "API 活动",
+      "description": "记录 API 操作及调用结果",
+      "recommended_mapping_paths": ["api.service.name", "cloud.provider", "status_code"],
+      "fields": {
+        "src_endpoint.hostname": {},
+        "dst_endpoint.ip": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "api.operation": {},
+        "api.service.name": {},
+        "api.version": {},
+        "actor.user.name": {},
+        "actor.user.uid": {},
+        "src_endpoint.ip": {},
+        "cloud.provider": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "api.operation"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "actor.user.name",
+            "actor.user.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "src_endpoint.ip",
+            "src_endpoint.hostname"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "cloud.provider"
+          ],
+          "mode": "at_least_one",
+          "when": "cloud"
+        }
+      ],
+      "enum_labels": {},
+      "class": "api_activity"
+    },
+    {
+      "name": "检测发现",
+      "description": "记录安全产品的检测结果",
+      "recommended_mapping_paths": ["finding_info.title", "confidence_id", "is_alert"],
+      "fields": {
+        "confidence_id": {},
+        "is_alert": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "status_id": {
+          "name": "发现状态",
+          "description": "来源安全发现的处理状态"
+        },
+        "status": {
+          "name": "状态说明",
+          "description": "源产品提供的状态标签"
+        },
+        "finding_info.uid": {},
+        "finding_info.title": {},
+        "finding_info.desc": {}
+      },
+      "constraints": [
+        {
+          "paths": [
+            "finding_info.uid"
+          ],
+          "mode": "at_least_one"
+        }
+      ],
+      "enum_labels": {},
+      "class": "detection_finding"
+    },
+    {
+      "name": "漏洞发现",
+      "description": "记录来源产品发现的漏洞",
+      "recommended_mapping_paths": ["finding_info.title", "confidence_id"],
+      "fields": {
+        "confidence_id": {},
+        "activity_id": {
+          "name": "活动类型 ID",
+          "description": "表示基础事件的活动类型。使用其他编码时可附上来源活动名称。",
+          "condition": {
+            "en": "Provide activity_name when the code is 99.",
+            "zh-CN": "当编码为 99 时，提供 activity_name。"
+          }
+        },
+        "status_id": {
+          "name": "发现状态",
+          "description": "来源安全发现的处理状态"
+        },
+        "status": {
+          "name": "状态说明",
+          "description": "源产品提供的状态标签"
+        },
+        "finding_info.uid": {},
+        "finding_info.title": {},
+        "finding_info.desc": {},
+        "vulnerabilities": {
+          "object_fields": [
+            "cve.uid",
+            "title",
+            "severity"
+          ],
+          "required_output": [
+            "cve.uid"
+          ]
+        }
+      },
+      "constraints": [
+        {
+          "paths": [
+            "finding_info.uid"
+          ],
+          "mode": "at_least_one"
+        },
+        {
+          "paths": [
+            "vulnerabilities"
+          ],
+          "mode": "at_least_one"
+        }
+      ],
+      "enum_labels": {},
+      "class": "vulnerability_finding"
+    }
+  ],
+  "extensions": {
+    "metadata.spx": {
+      "type": "object",
+      "json_type": "object",
+      "name": {
+        "en": "SecPlexus Metadata",
+        "zh-CN": "平台元数据"
+      },
+      "description": {
+        "en": "Platform ingestion and contract provenance.",
+        "zh-CN": "记录平台接入和契约版本信息。"
+      }
+    },
+    "metadata.spx.contract_version": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Contract Version",
+        "zh-CN": "平台契约版本"
+      },
+      "description": {
+        "en": "SecPlexus event contract used to validate this event.",
+        "zh-CN": "校验本事件时使用的平台契约版本。"
+      },
+      "required": true
+    },
+    "metadata.spx.received_at": {
+      "type": "timestamp_t",
+      "json_type": "integer",
+      "name": {
+        "en": "Received At",
+        "zh-CN": "接收时间"
+      },
+      "description": {
+        "en": "First observation by this processing path, UTC epoch milliseconds.",
+        "zh-CN": "此处理链路首次接收记录的时间，UTC Unix 纪元毫秒。"
+      },
+      "unit": "ms",
+      "required": true
+    },
+    "metadata.spx.input_id": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Input ID",
+        "zh-CN": "接入点 ID"
+      },
+      "description": {
+        "en": "The SecPlexus input that received the event.",
+        "zh-CN": "接收事件的 SecPlexus 接入点。"
+      },
+      "required": true
+    },
+    "metadata.spx.parsing_rule_id": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Parsing Rule ID",
+        "zh-CN": "解析规则 ID"
+      },
+      "description": {
+        "en": "Identifier of the parsing rule used by this input.",
+        "zh-CN": "本次归一化实际使用的解析规则标识。"
+      }
+    },
+    "metadata.spx.parsing_rule_version": {
+      "type": "integer_t",
+      "json_type": "integer",
+      "name": {
+        "en": "Parsing Rule Revision",
+        "zh-CN": "解析规则修订号"
+      },
+      "description": {
+        "en": "Revision of the parsing rule used by this input.",
+        "zh-CN": "本次归一化实际使用的正整数规则修订号。"
+      }
+    },
+    "metadata.spx.vendor": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Source Vendor",
+        "zh-CN": "来源厂商"
+      },
+      "description": {
+        "en": "Vendor recorded on the input.",
+        "zh-CN": "接入点配置记录的来源厂商。"
+      }
+    },
+    "metadata.spx.product": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Source Product",
+        "zh-CN": "来源产品"
+      },
+      "description": {
+        "en": "Product recorded on the input.",
+        "zh-CN": "接入点配置记录的来源产品。"
+      }
+    },
+    "metadata.spx.parse.outcome": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Parse outcome",
+        "zh-CN": "解析结果"
+      },
+      "description": {
+        "en": "Normalization quality for this record.",
+        "zh-CN": "记录的归一化质量。"
+      }
+    },
+    "metadata.spx.branch_id": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Branch identifier",
+        "zh-CN": "解析分支"
+      },
+      "description": {
+        "en": "Matched branch within the rule revision.",
+        "zh-CN": "规则修订中命中的分支。"
+      }
+    },
+    "metadata.spx.time_source": {
+      "type": "string_t",
+      "json_type": "string",
+      "name": {
+        "en": "Event time source",
+        "zh-CN": "事件时间来源"
+      },
+      "description": {
+        "en": "Source timestamp or ingestion time.",
+        "zh-CN": "来源时间戳或接收时间。"
+      }
+    },
+    "metadata.spx.candidate_class_uid": {
+      "type": "integer_t",
+      "json_type": "integer",
+      "name": {
+        "en": "Candidate event class",
+        "zh-CN": "候选事件类"
+      },
+      "description": {
+        "en": "Class matched by a rule but not satisfied by the output.",
+        "zh-CN": "规则匹配但输出未满足其契约的事件类。"
+      }
+    }
+  },
+  "fields": {
+    "activity_name": {
+      "name": "活动名称",
+      "description": "活动无法映射至标准编码时保留来源标签。",
+      "condition": {
+        "en": "Required when activity_id is 99.",
+        "zh-CN": "activity_id 为 99 时必填。"
+      }
+    },
+    "category_uid": {
+      "name": "事件大类 ID",
+      "description": "由事件类别确定的 OCSF 分类组。",
+      "owner": "derived"
+    },
+    "class_uid": {
+      "name": "事件类别 ID",
+      "description": "由解析规则所选的 OCSF 事件类确定。",
+      "owner": "derived"
+    },
+    "message": {
+      "name": "事件消息",
+      "description": "来源事件的可读概述。"
+    },
+    "metadata": {
+      "name": "事件元数据",
+      "description": "描述事件来源产品、规范版本和处理信息。",
+      "owner": "platform"
+    },
+    "metadata.labels": {
+      "name": "元数据标签",
+      "description": "可用于分类和查找事件的标签列表。"
+    },
+    "metadata.product": {
+      "name": "来源产品",
+      "description": "描述产生原始事件的产品。",
+      "owner": "platform"
+    },
+    "metadata.product.name": {
+      "name": "产品名称",
+      "description": "产生原始事件的产品名称。"
+    },
+    "metadata.product.vendor_name": {
+      "name": "产品厂商",
+      "description": "提供该产品的厂商名称。"
+    },
+    "metadata.product.version": {
+      "name": "产品版本",
+      "description": "产生原始事件的产品版本。"
+    },
+    "metadata.uid": {
+      "name": "事件 ID",
+      "description": "平台分配的事件标识，重放已发布记录时沿用。",
+      "owner": "platform"
+    },
+    "metadata.version": {
+      "name": "OCSF 版本",
+      "description": "生产端构造此事件使用的 OCSF 规范版本。",
+      "owner": "platform"
+    },
+    "severity": {
+      "name": "严重度名称",
+      "description": "无法映射至标准严重度时保留来源标签。",
+      "condition": {
+        "en": "Required when severity_id is 99.",
+        "zh-CN": "severity_id 为 99 时必填。"
+      },
+      "owner": "platform"
+    },
+    "severity_id": {
+      "name": "严重程度",
+      "description": "归一化后的严重程度，表示处置事件所需的紧迫性和投入。",
+      "condition": {
+        "en": "Provide severity when the code is 99.",
+        "zh-CN": "当编码为 99 时，提供 severity。"
+      },
+      "owner": "platform"
+    },
+    "status": {
+      "name": "结果原值",
+      "description": "标准结果名称或来源的其他结果名称。",
+      "condition": {
+        "en": "Required when status_id is 99.",
+        "zh-CN": "status_id 为 99 时必填。"
+      }
+    },
+    "status_code": {
+      "name": "结果代码",
+      "description": "来源产品报告的执行结果代码。"
+    },
+    "status_detail": {
+      "name": "结果详情",
+      "description": "来源产品报告的执行结果详情。"
+    },
+    "status_id": {
+      "name": "操作结果",
+      "description": "来源操作的执行结果。"
+    },
+    "time": {
+      "name": "事件发生时间",
+      "description": "UTC Unix 纪元毫秒，表示事件实际发生时间。",
+      "unit": "ms",
+      "owner": "platform"
+    },
+    "type_uid": {
+      "name": "事件类型 ID",
+      "description": "由事件类别编码和活动编码计算。",
+      "owner": "derived"
+    },
+    "unmapped": {
+      "name": "未映射字段",
+      "description": "规则未使用且按平台策略保留的来源字段。",
+      "owner": "platform"
+    }
+  },
+  "field_labels": {
+    "src_endpoint.hostname": {
+      "name": "源主机名",
+      "description": "发起操作的网络端点主机名。"
+    },
+    "logon_type_id": {
+      "name": "登录类型",
+      "description": "区分交互式、网络、服务等登录方式。"
+    },
+    "auth_protocol_id": {
+      "name": "认证协议",
+      "description": "认证过程采用的协议，例如 Kerberos 或 SAML。"
+    },
+    "is_mfa": {
+      "name": "多因素认证",
+      "description": "标记认证过程是否使用了多个认证因素。"
+    },
+    "connection_info.direction_id": {
+      "name": "连接方向",
+      "description": "相对于观测点的网络连接方向。"
+    },
+    "http_request.url.url_string": {
+      "name": "请求 URL",
+      "description": "客户端请求的原始 URL。"
+    },
+    "http_request.user_agent": {
+      "name": "用户代理",
+      "description": "HTTP 请求的 User-Agent 值。"
+    },
+    "http_request.version": {
+      "name": "HTTP 版本",
+      "description": "客户端请求采用的 HTTP 协议版本。"
+    },
+    "rcode_id": {
+      "name": "DNS 响应码",
+      "description": "DNS 服务返回的标准响应码。"
+    },
+    "opcode_id": {
+      "name": "DNS 操作码",
+      "description": "标识查询、状态、更新等 DNS 操作。"
+    },
+    "process.cpid": {
+      "name": "通用进程标识",
+      "description": "用于跨日志关联同一进程的标识。"
+    },
+    "process.cmd_line": {
+      "name": "进程命令行",
+      "description": "包括进程执行的命令及其参数。"
+    },
+    "process.file.name": {
+      "name": "可执行文件名称",
+      "description": "与进程关联的可执行文件名称。"
+    },
+    "process.file.type_id": {
+      "name": "可执行文件类型",
+      "description": "与进程关联的可执行文件类型编码。"
+    },
+    "process.parent_process.pid": {
+      "name": "父进程 PID",
+      "description": "操作系统分配给父进程的编号。"
+    },
+    "confidence_id": {
+      "name": "置信度",
+      "description": "来源产品对发现结果准确性的判断。"
+    },
+    "is_alert": {
+      "name": "告警标记",
+      "description": "标记发现是否为来源产品发出的告警。"
+    },
+    "src_endpoint.ip": {
+      "name": "源 IP",
+      "description": "发起通信的端点 IP"
+    },
+    "dst_endpoint.ip": {
+      "name": "目的 IP",
+      "description": "接收通信的端点 IP"
+    },
+    "http_request.url.path": {
+      "name": "请求路径",
+      "description": "请求 URL 中的路径"
+    },
+    "http_request.url.hostname": {
+      "name": "请求主机名",
+      "description": "请求 URL 中的主机名"
+    },
+    "http_response.code": {
+      "name": "HTTP 状态码",
+      "description": "服务端返回的三位 HTTP 状态码",
+      "integer_range": { "min": 100, "max": 599 },
+      "value_suggestions": [
+        { "value": 200, "label": "OK" },
+        { "value": 201, "label": "Created" },
+        { "value": 204, "label": "No Content" },
+        { "value": 301, "label": "Moved Permanently" },
+        { "value": 302, "label": "Found" },
+        { "value": 304, "label": "Not Modified" },
+        { "value": 400, "label": "Bad Request" },
+        { "value": 401, "label": "Unauthorized" },
+        { "value": 403, "label": "Forbidden" },
+        { "value": 404, "label": "Not Found" },
+        { "value": 429, "label": "Too Many Requests" },
+        { "value": 500, "label": "Internal Server Error" },
+        { "value": 502, "label": "Bad Gateway" },
+        { "value": 503, "label": "Service Unavailable" },
+        { "value": 504, "label": "Gateway Timeout" }
+      ]
+    },
+    "query.hostname": {
+      "name": "查询域名",
+      "description": "DNS 查询中的域名"
+    },
+    "query.type": {
+      "name": "DNS 记录类型",
+      "description": "查询请求的资源记录类型"
+    },
+    "rcode": {
+      "name": "DNS 返回码",
+      "description": "DNS 服务返回的结果码"
+    },
+    "device.hostname": {
+      "name": "主机名",
+      "description": "产生日志的设备主机名"
+    },
+    "device.uid": {
+      "name": "设备 ID",
+      "description": "来源系统分配的设备编号"
+    },
+    "device.type_id": {
+      "name": "设备类型",
+      "description": "设备所属的标准类型"
+    },
+    "actor.user.name": {
+      "name": "操作账号",
+      "description": "发起操作的账号名称"
+    },
+    "actor.user.uid": {
+      "name": "操作账号 ID",
+      "description": "发起操作的账号编号"
+    },
+    "user.name": {
+      "name": "目标账号",
+      "description": "发生变更的账号名称"
+    },
+    "user.uid": {
+      "name": "目标账号 ID",
+      "description": "发生变更的账号编号"
+    },
+    "process.pid": {
+      "name": "进程 PID",
+      "description": "操作系统分配的进程号"
+    },
+    "process.uid": {
+      "name": "进程 ID",
+      "description": "来源系统中的进程唯一编号"
+    },
+    "process.name": {
+      "name": "进程名",
+      "description": "进程的名称"
+    },
+    "process.file.path": {
+      "name": "程序路径",
+      "description": "进程可执行文件的路径"
+    },
+    "file.name": {
+      "name": "文件名",
+      "description": "目标文件的名称"
+    },
+    "file.path": {
+      "name": "文件路径",
+      "description": "目标文件在文件系统中的路径"
+    },
+    "file.type_id": {
+      "name": "文件类型",
+      "description": "标准文件类型编码"
+    },
+    "file.size": {
+      "name": "文件大小",
+      "description": "文件大小，单位字节"
+    },
+    "api.operation": {
+      "name": "API 操作",
+      "description": "调用的 API 操作名称"
+    },
+    "api.service.name": {
+      "name": "API 服务",
+      "description": "提供 API 的服务名称"
+    },
+    "api.version": {
+      "name": "API 版本",
+      "description": "API 的版本"
+    },
+    "cloud.provider": {
+      "name": "云厂商",
+      "description": "提供云环境的厂商"
+    },
+    "finding_info.uid": {
+      "name": "发现 ID",
+      "description": "源产品分配的安全发现编号"
+    },
+    "finding_info.title": {
+      "name": "发现标题",
+      "description": "源产品提供的标题"
+    },
+    "finding_info.desc": {
+      "name": "发现详情",
+      "description": "描述发现涉及的风险和对象"
+    },
+    "vulnerabilities": {
+      "name": "漏洞列表",
+      "description": "发现包含的漏洞及 CVE 编号"
+    }
+  },
+  "enum_terms": {
+    "Unknown": "未知",
+    "Other": "其他",
+    "Query": "查询",
+    "Response": "响应",
+    "Traffic": "流量",
+    "Launch": "启动",
+    "Terminate": "结束",
+    "Open": "打开",
+    "Inject": "注入",
+    "Set User ID": "设置用户 ID",
+    "Create": "创建",
+    "Read": "读取",
+    "Update": "更新",
+    "Delete": "删除",
+    "Rename": "重命名",
+    "Set Attributes": "设置属性",
+    "Set Security": "设置安全属性",
+    "Get Attributes": "读取属性",
+    "Get Security": "读取安全属性",
+    "Encrypt": "加密",
+    "Decrypt": "解密",
+    "Mount": "挂载",
+    "Unmount": "卸载",
+    "Enable": "启用",
+    "Password Change": "修改密码",
+    "Password Reset": "重置密码",
+    "Disable": "禁用",
+    "Attach Policy": "绑定策略",
+    "Detach Policy": "解绑策略",
+    "Lock": "锁定",
+    "MFA Factor Enable": "启用 MFA 因子",
+    "MFA Factor Disable": "禁用 MFA 因子",
+    "Unlock": "解锁",
+    "List": "列出",
+    "Close": "关闭",
+    "Success": "成功",
+    "Failure": "失败",
+    "New": "新建",
+    "In Progress": "处理中",
+    "Suppressed": "已抑制",
+    "Resolved": "已解决",
+    "Archived": "已归档",
+    "Deleted": "已删除",
+    "Workstation": "工作站",
+    "Server": "服务器",
+    "Desktop": "台式机",
+    "Laptop": "笔记本电脑",
+    "Mobile": "移动设备",
+    "Tablet": "平板电脑",
+    "Virtual": "虚拟设备",
+    "IOT": "物联网设备",
+    "Router": "路由器",
+    "Switch": "交换机",
+    "Hub": "集线器",
+    "Firewall": "防火墙",
+    "IDS": "入侵检测系统",
+    "IPS": "入侵防御系统",
+    "Load Balancer": "负载均衡器",
+    "VPN": "VPN 设备",
+    "Multilayer Switch": "多层交换机",
+    "Regular File": "普通文件",
+    "Folder": "目录",
+    "Directory": "目录",
+    "Character Device": "字符设备",
+    "Block Device": "块设备",
+    "Local Socket": "本地套接字",
+    "Socket": "套接字",
+    "Named Pipe": "命名管道",
+    "Symbolic Link": "符号链接",
+    "Informational": "信息",
+    "Low": "低",
+    "Medium": "中",
+    "High": "高",
+    "Critical": "严重",
+    "Fatal": "致命",
+    "Browser": "浏览器",
+    "Executable File": "可执行文件"
+  },
+  "shared_enum_labels": {
+    "severity_id": {
+      "0": {
+        "name": "未知",
+        "description": "来源没有可用的严重度。"
+      },
+      "1": {
+        "name": "信息",
+        "description": "记录信息，无需处置。"
+      },
+      "2": {
+        "name": "低",
+        "description": "由使用者判断是否处理。"
+      },
+      "3": {
+        "name": "中",
+        "description": "需要处置，当前影响有限。"
+      },
+      "4": {
+        "name": "高",
+        "description": "需要立即处置。"
+      },
+      "5": {
+        "name": "严重",
+        "description": "影响范围较广，需要立即处置。"
+      },
+      "6": {
+        "name": "致命",
+        "description": "错误已经发生且无法补救。"
+      },
+      "99": {
+        "name": "其他",
+        "description": "采用 severity 中的来源标签。"
+      }
+    },
+    "status_id": {
+      "0": {
+        "name": "未知"
+      },
+      "99": {
+        "name": "其他"
+      },
+      "1": {
+        "name": "成功"
+      },
+      "2": {
+        "name": "失败"
+      }
+    }
+  }
+}

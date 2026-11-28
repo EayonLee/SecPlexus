@@ -1,7 +1,4 @@
 // Package repository 负责 Ingest 自身的数据库连接与迁移。
-//
-// 只放接入点与解析规则两张表：接收路径不写业务库（spec 明确），
-// 事件一律走 Kafka，ClickHouse 与关联分析属于下游模块。
 package repository
 
 import (
@@ -13,8 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/database"
+	"github.com/pressly/goose/v3/lock"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/migrations"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/migrations/postgresql"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -36,6 +35,32 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// VerifySchema 在常驻进程启动时只读核验当前迁移，避免不同版本同时解释配置。
+func VerifySchema(ctx context.Context, pool *pgxpool.Pool) error {
+	db := stdlib.OpenDBFromPool(pool)
+	defer func() { _ = db.Close() }()
+	ledger, err := database.NewStore(database.DialectPostgres, "ingest.goose_db_version")
+	if err != nil {
+		return err
+	}
+	if _, err := ledger.GetMigration(ctx, db, 0); err != nil {
+		return errors.New("run the matching migration to initialize the Ingest schema before serving")
+	}
+	provider, err := goose.NewProvider("", db, postgresql.Files, goose.WithStore(ledger), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		return err
+	}
+	current, target, err := provider.GetVersions(ctx)
+	if err != nil || current != target {
+		return errors.New("run the matching migration to update the incompatible Ingest schema before serving")
+	}
+	pending, err := provider.HasPending(ctx)
+	if err != nil || pending {
+		return errors.New("missing migrations for the Ingest schema")
+	}
+	return nil
 }
 
 // Migrate 执行未应用的迁移，并把结果记录成一条迁移事件。
@@ -65,12 +90,30 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() { err = errors.Join(err, db.Close()) }()
 
-	goose.SetBaseFS(migrations.Files)
-	if err = goose.SetDialect("postgres"); err != nil {
-		return errors.New("unsupported migration dialect")
+	if _, err = db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS ingest"); err != nil {
+		return err
 	}
-
-	if err = goose.UpContext(ctx, db, "."); err != nil {
+	store, err := database.NewStore(database.DialectPostgres, "ingest.goose_db_version")
+	if err != nil {
+		return err
+	}
+	locker, err := lock.NewPostgresSessionLocker()
+	if err != nil {
+		return err
+	}
+	provider, err := goose.NewProvider("", db, postgresql.Files, goose.WithStore(store),
+		goose.WithSessionLocker(locker), goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		return err
+	}
+	current, target, err := provider.GetVersions(ctx)
+	if err != nil {
+		return err
+	}
+	if current > target {
+		return errors.New("initialize a new database because the Ingest schema is newer than this source baseline")
+	}
+	if _, err = provider.Up(ctx); err != nil {
 		// 保留底层 SQL 原因：只说"无法应用迁移"会让排障从错误信息重新开始。
 		return fmt.Errorf("could not apply migrations: %w", err)
 	}

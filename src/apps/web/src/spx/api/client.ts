@@ -5,13 +5,24 @@ import { resultCodes, resultStatuses } from "@/auth/result.gen";
 
 import { assertRequestScope, requestScope } from "../iam/request-scope";
 
-/** APIError 只向页面传递稳定结果码、HTTP 状态和排障标识。 */
+const fieldErrorsSchema = z
+  .array(
+    z.object({
+      field: z.string().min(1).max(128),
+      code: z.string().min(1).max(64),
+      limit: z.int().positive().optional(),
+    }),
+  )
+  .max(32);
+
+/** APIError 向页面传递结果码、字段错误、HTTP 状态和排障标识。 */
 export class APIError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     readonly requestID = "",
     readonly path = "",
+    readonly fieldErrors: z.infer<typeof fieldErrorsSchema> = [],
   ) {
     super(code);
   }
@@ -28,6 +39,7 @@ const errorSchema = z.object({
   message: z.string(),
   data: z.null(),
   request_id: z.string().min(1),
+  field_errors: fieldErrorsSchema.optional().catch(undefined),
 });
 
 /** http 的传输、JSON 解码、超时和取消由 Axios 实现。 */
@@ -98,7 +110,8 @@ http.interceptors.response.use(
     const requestID = parsed.success
       ? parsed.data.request_id
       : (z.uuid().safeParse(response?.headers["x-request-id"]).data ?? "");
-    throw new APIError(status, code, requestID, error.config?.url);
+    const fieldErrors = parsed.success && parsed.data.code === code ? parsed.data.field_errors : undefined;
+    throw new APIError(status, code, requestID, error.config?.url, fieldErrors);
   },
 );
 

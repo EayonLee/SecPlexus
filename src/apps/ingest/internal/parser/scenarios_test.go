@@ -99,7 +99,7 @@ func TestKVUnbalancedQuoteKeepsFollowingPairs(t *testing.T) {
 func TestDelimiterSupportsTab(t *testing.T) {
 	fields := parse(t, parser.Spec{
 		Mode:      parser.ModeDelimiter,
-		Delimiter: parser.DelimiterSpec{Separator: "\t", Columns: []string{"time", "level", "msg"}},
+		Delimiter: parser.DelimiterSpec{Separator: "\t", FieldNames: []string{"time", "level", "msg"}},
 	}, "2026-11-14T10:00:00Z\tWARN\tdisk almost full")
 
 	if fields["level"] != "WARN" || fields["msg"] != "disk almost full" {
@@ -199,7 +199,7 @@ func TestValidModeMatchesRegistry(t *testing.T) {
 		parser.ModeCEF:       {Mode: parser.ModeCEF},
 		parser.ModeKV:        {Mode: parser.ModeKV},
 		parser.ModeRegex:     {Mode: parser.ModeRegex, Pattern: `(?P<a>.+)`},
-		parser.ModeDelimiter: {Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", Columns: []string{"a"}}},
+		parser.ModeDelimiter: {Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", FieldNames: []string{"a"}}},
 	}
 
 	for _, mode := range parser.Modes() {
@@ -280,7 +280,7 @@ func TestWhitespaceOnlyMessagesAreRejectedEverywhere(t *testing.T) {
 		parser.ModeCEF:       {Mode: parser.ModeCEF},
 		parser.ModeKV:        {Mode: parser.ModeKV},
 		parser.ModeRegex:     {Mode: parser.ModeRegex, Pattern: `(?P<a>.+)`},
-		parser.ModeDelimiter: {Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", Columns: []string{"a"}}},
+		parser.ModeDelimiter: {Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", FieldNames: []string{"a"}}},
 	}
 
 	for name, spec := range specs {

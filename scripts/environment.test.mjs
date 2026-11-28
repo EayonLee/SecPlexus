@@ -13,6 +13,13 @@ function workspace(t) {
   return root;
 }
 
+test('the root template leaves the standalone Kafka broker to the operator', (t) => {
+  const root = workspace(t);
+  copyFileSync(fileURLToPath(new URL('../.env.example', import.meta.url)), path.join(root, '.env'));
+  const ingest = moduleEnvironment(loadEnvironment(root, {}), 'ingest');
+  assert.equal(ingest.SPX_KAFKA_BROKERS, '');
+});
+
 for (const [script, args] of [['start.mjs', ['dev']], ['start.mjs', ['preview']], ['compose.mjs', []]]) {
   test(`${script} ${args.join(' ')} prepares missing configuration before launching services`, (t) => {
     const root = workspace(t);
@@ -41,6 +48,27 @@ test('environment overrides user configuration without rewriting the file', (t) 
   assert.equal(readFileSync(path.join(root, '.env'), 'utf8'), content);
 });
 
+test('the root loader preserves explicit empty passwords from both sources', (t) => {
+  const root = workspace(t);
+  writeFileSync(path.join(root, '.env'), 'SPX_REDIS_PASSWORD=\nSPX_IAM_BOOTSTRAP_PASSWORD=local-only\n');
+  const env = loadEnvironment(root, { SPX_IAM_BOOTSTRAP_PASSWORD: '' });
+  assert.equal(env.SPX_REDIS_PASSWORD, '');
+  assert.equal(env.SPX_IAM_BOOTSTRAP_PASSWORD, '');
+});
+
+test('Kafka credentials are limited to Ingest', () => {
+  const env = {
+    SPX_INGEST_SOURCE_SITE_A_PASSWORD: 'input-credential',
+    SPX_INGEST_KAFKA_PUBLISH_SASL_PASSWORD: 'publisher-credential',
+    SPX_INGEST_KAFKA_STORE_SASL_PASSWORD: 'consumer-credential',
+    SPX_KAFKA_RETENTION_DAYS: '7',
+  };
+  for (const received of [webEnvironment(env), moduleEnvironment(env, 'iam'), moduleEnvironment(env, 'console')]) {
+    assert.deepEqual(received, {});
+  }
+  assert.deepEqual(moduleEnvironment(env, 'ingest'), env);
+});
+
 test('first startup creates private configuration and asks for review before proceeding', (t) => {
   const root = workspace(t);
   writeFileSync(path.join(root, '.env.example'), 'SPX_WEB_BIND_HOST=127.0.0.1\n');
@@ -59,14 +87,14 @@ test('startup reports a missing template instead of creating empty configuration
 test('web receives public settings without backend credentials', () => {
   assert.deepEqual(webEnvironment({
     PATH: '/usr/bin', SPX_WEB_BIND_HOST: '127.0.0.1', NEXT_PUBLIC_DEMO: 'false',
-    SPX_POSTGRES_URL: 'backend-only', SPX_POSTGRES_PASSWORD: 'test-only',
+    SPX_POSTGRESQL_URL: 'backend-only', SPX_POSTGRESQL_PASSWORD: 'test-only',
     SPX_REDIS_URL: 'backend-only',
   }), { PATH: '/usr/bin', SPX_WEB_BIND_HOST: '127.0.0.1', NEXT_PUBLIC_DEMO: 'false' });
 });
 
 test('only IAM receives authoritative administrator credentials and modules remain isolated', () => {
-  const environment = { PATH: '/tools', SPX_POSTGRES_PASSWORD: 'database', SPX_REDIS_PASSWORD: 'redis', SPX_IAM_BOOTSTRAP_PASSWORD: 'initial', SPX_CONSOLE_IAM_TOKEN: 'console', NEXT_PUBLIC_DEMO: 'false' };
-  assert.deepEqual(moduleEnvironment(environment, 'iam'), { PATH: '/tools', SPX_POSTGRES_PASSWORD: 'database', SPX_REDIS_PASSWORD: 'redis', SPX_IAM_BOOTSTRAP_PASSWORD: 'initial', SPX_CONSOLE_IAM_TOKEN: 'console' });
+  const environment = { PATH: '/tools', SPX_POSTGRESQL_PASSWORD: 'database', SPX_REDIS_PASSWORD: 'redis', SPX_IAM_BOOTSTRAP_PASSWORD: 'initial', SPX_CONSOLE_IAM_TOKEN: 'console', NEXT_PUBLIC_DEMO: 'false' };
+  assert.deepEqual(moduleEnvironment(environment, 'iam'), { PATH: '/tools', SPX_POSTGRESQL_PASSWORD: 'database', SPX_REDIS_PASSWORD: 'redis', SPX_IAM_BOOTSTRAP_PASSWORD: 'initial', SPX_CONSOLE_IAM_TOKEN: 'console' });
   assert.deepEqual(moduleEnvironment(environment, 'console'), { PATH: '/tools', SPX_CONSOLE_IAM_TOKEN: 'console' });
 });
 for (const command of ['dev', 'preview']) {
@@ -94,8 +122,8 @@ test('Web does not receive the IAM trusted-origin configuration', () => {
 });
 
 test('module-scoped variables reach only their own module and stay outside Web and Console', () => {
-  const environment = {SPX_POSTGRES_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only',SPX_CONSOLE_LOG_LEVEL:'debug',SPX_WEB_BIND_HOST:'127.0.0.1'};
-  assert.deepEqual(moduleEnvironment(environment,'iam'),{SPX_POSTGRES_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only'});
+  const environment = {SPX_POSTGRESQL_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only',SPX_CONSOLE_LOG_LEVEL:'debug',SPX_WEB_BIND_HOST:'127.0.0.1'};
+  assert.deepEqual(moduleEnvironment(environment,'iam'),{SPX_POSTGRESQL_HOST:'shared-db',SPX_IAM_BOOTSTRAP_PASSWORD:'iam-only'});
   // Console 没有数据库/缓存配置，因此共享连接变量只到 IAM。
   assert.deepEqual(moduleEnvironment(environment,'console'),{SPX_CONSOLE_LOG_LEVEL:'debug'});
   assert.deepEqual(webEnvironment(environment),{SPX_WEB_BIND_HOST:'127.0.0.1'});
@@ -117,4 +145,15 @@ test('quoted hash and comment-only lines load unchanged', (t) => {
   const env = loadEnvironment(root, {});
   assert.equal(env.SPX_IAM_BOOTSTRAP_PASSWORD, 'SecPlexus#2026');
   assert.equal(env.SPX_WEB_PORT, '5173');
+});
+
+test('ingest receives both shared data connections without unrelated IAM credentials', () => {
+  const environment = {
+    SPX_POSTGRESQL_URL: 'test-db', SPX_REDIS_URL: 'test-cache', SPX_KAFKA_BROKERS: 'broker:9092',
+    SPX_IAM_BOOTSTRAP_PASSWORD: 'iam-only', SPX_INGEST_IAM_TOKEN: 'ingest-only',
+  };
+  assert.deepEqual(moduleEnvironment(environment, 'ingest'), {
+    SPX_POSTGRESQL_URL: 'test-db', SPX_REDIS_URL: 'test-cache', SPX_KAFKA_BROKERS: 'broker:9092',
+    SPX_INGEST_IAM_TOKEN: 'ingest-only',
+  });
 });

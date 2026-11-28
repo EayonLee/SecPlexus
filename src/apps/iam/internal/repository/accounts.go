@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/aarondl/opt/omit"
 	"github.com/google/uuid"
@@ -87,23 +87,26 @@ func ResetPassword(ctx context.Context, db DB, id uuid.UUID, hash string) error 
 	return queries(db).ResetPassword(ctx, sqlcgen.ResetPasswordParams{UserID: id, PasswordHash: hash})
 }
 
-// UserTimeZone 读取本人展示时区偏好；未设置时返回空串。
-// 账号在会话读取之后被删除时同样按未设置处理，让该项偏好不影响本人资料读取。
-func UserTimeZone(ctx context.Context, db DB, id uuid.UUID) (string, error) {
-	value, err := queries(db).ReadUserTimeZone(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
+// SelfProfile 保存本人资料的可见字段。
+type SelfProfile struct {
+	TimeZone  string
+	Email     *string
+	CreatedAt time.Time
+}
 
+// ReadUserProfile 读取本人资料与展示时区。
+func ReadUserProfile(ctx context.Context, db DB, id uuid.UUID) (SelfProfile, error) {
+	row, err := queries(db).ReadUserProfile(ctx, id)
 	if err != nil {
-		return "", err
+		return SelfProfile{}, err
 	}
 
-	if !value.Valid {
-		return "", nil
+	profile := SelfProfile{TimeZone: row.Timezone.String, CreatedAt: row.CreatedAt.UTC()}
+	if row.Email.Valid {
+		profile.Email = &row.Email.String
 	}
 
-	return value.String, nil
+	return profile, nil
 }
 
 // DeleteUser 删除账号。凭据、会话与角色绑定由 users 的级联删除清理，

@@ -2,25 +2,63 @@ x-logging: &logging
   driver: local
   options: { max-size: '10m', max-file: '3' }
 
-# 所有数据库使用方共用这一组连接；容器通过服务名访问同一个PG。
-x-database: &database
-  SPX_POSTGRES_HOST: postgres
-  SPX_POSTGRES_PORT: '5432'
-  SPX_POSTGRES_DATABASE: ${SPX_POSTGRES_DATABASE:-secplexus}
-  SPX_POSTGRES_USER: ${SPX_POSTGRES_USER:-secplexus}
-  SPX_POSTGRES_PASSWORD: ${SPX_POSTGRES_PASSWORD-secplexus}
-  SPX_POSTGRES_SSLMODE: ${SPX_POSTGRES_SSLMODE:-disable}
+# 容器通过服务名访问同一个 PostgreSQL 实例。
+x-postgresql: &postgresql
+  SPX_POSTGRESQL_HOST: postgresql
+  SPX_POSTGRESQL_PORT: '5432'
+  SPX_POSTGRESQL_DATABASE: ${SPX_POSTGRESQL_DATABASE:-secplexus}
+  SPX_POSTGRESQL_USER: ${SPX_POSTGRESQL_USER:-secplexus}
+  SPX_POSTGRESQL_PASSWORD: ${SPX_POSTGRESQL_PASSWORD-secplexus}
+
+x-redis: &redis
+  SPX_REDIS_HOST: redis
+  SPX_REDIS_PORT: '6379'
+  SPX_REDIS_USER: ${SPX_REDIS_USER:-default}
+  SPX_REDIS_PASSWORD: ${SPX_REDIS_PASSWORD-secplexus}
+  SPX_REDIS_DB: ${SPX_REDIS_DB:-0}
+
+x-events: &events
+  SPX_KAFKA_BROKERS: kafka:9092
+  SPX_KAFKA_RETENTION_DAYS:
+  SPX_KAFKA_NAMESPACE:
+  SPX_INGEST_LOG_LEVEL:
+  SPX_INGEST_LOG_FILE: ''
+
+x-clickhouse: &clickhouse
+  SPX_CLICKHOUSE_URL: http://clickhouse:8123
+  SPX_INGEST_CLICKHOUSE_DATABASE: ${SPX_INGEST_CLICKHOUSE_DATABASE:-spx}
+
+x-iam: &iam
+  <<: [*postgresql, *redis]
+  SPX_WEB_ORIGIN: ${SPX_WEB_ORIGIN:-http://127.0.0.1:${SPX_WEB_PORT:-5173}}
+  SPX_IAM_BIND_HOST: 0.0.0.0
+  SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
+  SPX_IAM_CSRF_KEY: ${SPX_IAM_CSRF_KEY-}
+  SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN-}
+  SPX_INGEST_IAM_TOKEN: ${SPX_INGEST_IAM_TOKEN-}
+  SPX_IAM_LOGIN_IP_RATE:
+  SPX_IAM_LOGIN_ACCOUNT_RATE:
+  SPX_IAM_LOGIN_MAX_FAILURES:
+  SPX_IAM_LOGIN_LOCK_DURATION:
+  SPX_IAM_SESSION_IDLE_TIMEOUT:
+  SPX_IAM_SESSION_ABSOLUTE_TIMEOUT:
+  SPX_IAM_REAUTH_WINDOW:
+  SPX_IAM_AUDIT_RETENTION_DAYS:
+  SPX_IAM_SESSION_RETENTION_DAYS:
+  SPX_IAM_TRUSTED_PROXY_CIDRS:
+  SPX_IAM_LOG_LEVEL:
+  SPX_IAM_LOG_FILE: ''
 
 services:
-  postgres:
+  postgresql:
     restart: unless-stopped
     image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
-      POSTGRES_DB: ${SPX_POSTGRES_DATABASE:-secplexus}
-      POSTGRES_USER: ${SPX_POSTGRES_USER:-secplexus}
-      POSTGRES_PASSWORD: ${SPX_POSTGRES_PASSWORD-secplexus}
-    ports: ["127.0.0.1:${SPX_POSTGRES_PORT:-5432}:5432"]
-    volumes: [postgres_data:/var/lib/postgresql/data]
+      POSTGRES_DB: ${SPX_POSTGRESQL_DATABASE:-secplexus}
+      POSTGRES_USER: ${SPX_POSTGRESQL_USER:-secplexus}
+      POSTGRES_PASSWORD: ${SPX_POSTGRESQL_PASSWORD-secplexus}
+    ports: ["127.0.0.1:${SPX_POSTGRESQL_PORT:-5432}:5432"]
+    volumes: [postgresql_data:/var/lib/postgresql/data]
     command: [postgres, -c, shared_buffers=64MB, -c, max_connections=40]
     mem_limit: 384m
     cpus: 1
@@ -61,34 +99,114 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  kafka:
+    image: apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69
+    environment:
+      KAFKA_NODE_ID: '1'
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: '-Xms256m -Xmx512m'
+    volumes: [kafka_data:/var/lib/kafka/data]
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.47.5@sha256:13f4949b03320e04fe1d2f75ed38734530e78b55469168cc6d5062f198563269
+    environment:
+      CLICKHOUSE_DB: ${SPX_INGEST_CLICKHOUSE_DATABASE:-spx}
+      CLICKHOUSE_USER: ${SPX_INGEST_CLICKHOUSE_MIGRATION_USERNAME:-spx_migration}
+      CLICKHOUSE_PASSWORD: ${SPX_INGEST_CLICKHOUSE_MIGRATION_PASSWORD:-spx-development-migration}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+      SPX_INGEST_CLICKHOUSE_USERNAME: ${SPX_INGEST_CLICKHOUSE_USERNAME:-spx_events}
+      SPX_INGEST_CLICKHOUSE_PASSWORD: ${SPX_INGEST_CLICKHOUSE_PASSWORD:-spx-development-writer}
+      SPX_INGEST_CLICKHOUSE_READER_USERNAME: ${SPX_INGEST_CLICKHOUSE_READER_USERNAME:-spx_event_reader}
+      SPX_INGEST_CLICKHOUSE_READER_PASSWORD: ${SPX_INGEST_CLICKHOUSE_READER_PASSWORD:-spx-development-reader}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./deploy/compose/clickhouse-user.sh:/docker-entrypoint-initdb.d/01-event-user.sh:ro
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O- http://clickhouse:8123/ping']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  event-topics:
+    image: &ingest-image ${COMPOSE_PROJECT_NAME:-secplexus}-ingest:local
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: ingest } }
+    command: [init-event-topics]
+    environment: *events
+    depends_on: { kafka: { condition: service_healthy } }
+    logging: *logging
+  ingest-migrate:
+    image: *ingest-image
+    pull_policy: never
+    command: [migrate]
+    environment: *postgresql
+    depends_on: { postgresql: { condition: service_healthy } }
+    logging: *logging
+  clickhouse-migrate:
+    image: *ingest-image
+    pull_policy: never
+    command: [migrate-event-store]
+    environment:
+      <<: *clickhouse
+      SPX_INGEST_CLICKHOUSE_MIGRATION_USERNAME: ${SPX_INGEST_CLICKHOUSE_MIGRATION_USERNAME:-spx_migration}
+      SPX_INGEST_CLICKHOUSE_MIGRATION_PASSWORD: ${SPX_INGEST_CLICKHOUSE_MIGRATION_PASSWORD:-spx-development-migration}
+    depends_on: { clickhouse: { condition: service_healthy } }
+    logging: *logging
+  store-events:
+    image: *ingest-image
+    pull_policy: never
+    entrypoint: [/bin/sh, -ec, '/usr/local/bin/spx-entrypoint check-kafka --store && /usr/local/bin/spx-entrypoint check-event-store && exec /usr/local/bin/spx-entrypoint store-events']
+    environment:
+      <<: [*clickhouse, *events]
+      SPX_INGEST_CLICKHOUSE_USERNAME: ${SPX_INGEST_CLICKHOUSE_USERNAME:-spx_events}
+      SPX_INGEST_CLICKHOUSE_PASSWORD: ${SPX_INGEST_CLICKHOUSE_PASSWORD:-spx-development-writer}
+    depends_on:
+      event-topics: { condition: service_completed_successfully }
+      clickhouse-migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    logging: *logging
   iam-migrate:
+    image: &iam-image ${COMPOSE_PROJECT_NAME:-secplexus}-iam:local
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: iam } }
     command: [migrate]
     environment:
-      <<: *database
-      SPX_IAM_BOOTSTRAP_USERNAME: ${SPX_IAM_BOOTSTRAP_USERNAME:-admin}
-      SPX_IAM_BOOTSTRAP_PASSWORD: ${SPX_IAM_BOOTSTRAP_PASSWORD-secplexus}
+      <<: *postgresql
       SPX_IAM_LOG_FILE: ''
     logging: *logging
-    depends_on: { postgres: { condition: service_healthy } }
-  iam:
-    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: iam } }
-    command: [serve]
+    depends_on: { postgresql: { condition: service_healthy } }
+  iam-initialize:
+    image: *iam-image
+    pull_policy: never
+    entrypoint: [/bin/sh, -ec, '/usr/local/bin/spx-entrypoint check-config && exec /usr/local/bin/spx-entrypoint initialize-administrator']
+    command: []
     environment:
-      <<: *database
-      SPX_WEB_ORIGIN: ${SPX_WEB_ORIGIN:-http://127.0.0.1:5173}
-      SPX_IAM_BIND_HOST: 0.0.0.0
-      SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
-      SPX_REDIS_HOST: redis
-      SPX_REDIS_PORT: '6379'
-      SPX_REDIS_USER: ${SPX_REDIS_USER:-default}
-      SPX_REDIS_PASSWORD: ${SPX_REDIS_PASSWORD-secplexus}
-      SPX_REDIS_DB: ${SPX_REDIS_DB:-0}
-      SPX_IAM_CSRF_KEY: ${SPX_IAM_CSRF_KEY:?Set a 32-byte SPX_IAM_CSRF_KEY}
-      SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
-      SPX_IAM_LOG_LEVEL: ${SPX_IAM_LOG_LEVEL:-info}
-      SPX_IAM_LOG_FILE: ''
-    depends_on: { iam-migrate: { condition: service_completed_successfully }, redis: { condition: service_healthy } }
+      <<: *iam
+      SPX_IAM_BOOTSTRAP_USERNAME: ${SPX_IAM_BOOTSTRAP_USERNAME-admin}
+      SPX_IAM_BOOTSTRAP_PASSWORD: ${SPX_IAM_BOOTSTRAP_PASSWORD-}
+    logging: *logging
+    depends_on: { iam-migrate: { condition: service_completed_successfully } }
+  iam:
+    image: *iam-image
+    pull_policy: never
+    command: [serve]
+    environment: *iam
+    depends_on: { iam-initialize: { condition: service_completed_successfully }, redis: { condition: service_healthy } }
     mem_limit: 512m
     logging: *logging
     healthcheck:
@@ -103,12 +221,53 @@ services:
       SPX_CONSOLE_PORT: ${SPX_CONSOLE_PORT:-8080}
       SPX_IAM_HOST: iam
       SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
-      SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN:?Set SPX_CONSOLE_IAM_TOKEN}
+      SPX_CONSOLE_IAM_TOKEN: ${SPX_CONSOLE_IAM_TOKEN-}
       SPX_CONSOLE_LOG_LEVEL: ${SPX_CONSOLE_LOG_LEVEL:-info}
       SPX_CONSOLE_LOG_FILE: ''
     depends_on: { iam: { condition: service_healthy } }
     mem_limit: 96m
     logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O- http://127.0.0.1:$$SPX_CONSOLE_PORT/health/ready']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  ingest:
+    image: *ingest-image
+    pull_policy: never
+    entrypoint: [/bin/sh, -ec, '/usr/local/bin/spx-entrypoint check-kafka && exec /usr/local/bin/spx-entrypoint serve']
+    environment:
+      <<: [*postgresql, *redis, *events, *clickhouse]
+      SPX_INGEST_CLICKHOUSE_READER_USERNAME: ${SPX_INGEST_CLICKHOUSE_READER_USERNAME:-spx_event_reader}
+      SPX_INGEST_CLICKHOUSE_READER_PASSWORD: ${SPX_INGEST_CLICKHOUSE_READER_PASSWORD:-spx-development-reader}
+      # 未设置时使用 Ingest config.yaml 的默认值。显式的 0 由 Ingest 解释。
+      SPX_INGEST_HTTP_MAX_BODY_BYTES:
+      SPX_INGEST_HTTP_MAX_CONCURRENT_REQUESTS:
+      SPX_INGEST_HTTP_RATE_PER_SEC:
+      SPX_INGEST_HTTP_RATE_BURST:
+      SPX_INGEST_INPUT_KAFKA_RELOAD_INTERVAL:
+      SPX_INGEST_SYSLOG_RELOAD_INTERVAL:
+      SPX_INGEST_WORKERS:
+      SPX_INGEST_QUEUE_DEPTH:
+      SPX_INGEST_MAX_IN_FLIGHT_BYTES:
+      SPX_INGEST_BATCH_SIZE:
+      SPX_INGEST_FLUSH_INTERVAL:
+      SPX_INGEST_BIND_HOST: 0.0.0.0
+      SPX_INGEST_PORT: ${SPX_INGEST_PORT:-8082}
+      SPX_INGEST_IAM_TOKEN: ${SPX_INGEST_IAM_TOKEN-}
+      SPX_IAM_HOST: iam
+      SPX_IAM_PORT: ${SPX_IAM_PORT:-8081}
+    depends_on:
+      iam: { condition: service_healthy }
+      ingest-migrate: { condition: service_completed_successfully }
+      event-topics: { condition: service_completed_successfully }
+      store-events: { condition: service_started }
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O- http://127.0.0.1:$$SPX_INGEST_PORT/health/ready']
+      interval: 3s
+      timeout: 3s
+      retries: 30
   web:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
     environment:
@@ -117,11 +276,20 @@ services:
       SPX_CONSOLE_HOST: console
       SPX_CONSOLE_PORT: ${SPX_CONSOLE_PORT:-8080}
       SPX_WEB_PORT: 8080
-      SPX_WEB_ORIGIN: ${SPX_WEB_ORIGIN:-http://localhost:5173}
-    ports: ["127.0.0.1:${SPX_COMPOSE_WEB_PORT:?Start through pnpm compose:up}:8080"]
-    depends_on: { iam: { condition: service_healthy }, console: { condition: service_started } }
+      SPX_INGEST_HOST: ingest
+      SPX_INGEST_PORT: ${SPX_INGEST_PORT:-8082}
+      SPX_WEB_EDGE_TOKEN:
+    ports: ["127.0.0.1:${SPX_WEB_PORT:-5173}:8080"]
+    depends_on: { iam: { condition: service_healthy }, console: { condition: service_healthy }, ingest: { condition: service_healthy } }
     mem_limit: 768m
     logging: *logging
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/login').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 volumes:
-  postgres_data:
+  postgresql_data:
   redis_data:
+  kafka_data:
+  clickhouse_data:

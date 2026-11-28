@@ -1,0 +1,21 @@
+[
+  { "field": "name", "value": "", "code": "required" },
+  { "field": "name", "value": "  　", "code": "required" },
+  { "field": "name", "value": "  边界 / Edge（备用） ", "normalized": "边界 / Edge（备用）" },
+  { "field": "name", "value": "𠮷", "repeat": 100 },
+  { "field": "name", "value": "𠮷", "repeat": 101, "code": "too_long" },
+  { "field": "name", "value": "A\u2028B", "code": "invalid_characters" },
+  { "field": "vendor", "value": " ", "code": "required" },
+  { "field": "vendor", "value": "𠮷", "repeat": 120 },
+  { "field": "vendor", "value": "厂", "repeat": 121, "code": "too_long" },
+  { "field": "vendor", "value": "A\tB", "code": "invalid_characters" },
+  { "field": "product", "value": "", "code": "required" },
+  { "field": "product", "value": "　FortiGate-100F　", "normalized": "FortiGate-100F" },
+  { "field": "product", "value": "X", "repeat": 121, "code": "too_long" },
+  { "field": "product", "value": "A\nB", "code": "invalid_characters" },
+  { "field": "description", "value": "", "code": "required" },
+  { "field": "description", "value": " 华东\r\n\t备用\r设备 ", "normalized": "华东\n\t备用\n设备" },
+  { "field": "description", "value": "𠮷", "repeat": 1000 },
+  { "field": "description", "value": "𠮷", "repeat": 1001, "code": "too_long" },
+  { "field": "description", "value": "A\u0000B", "code": "invalid_characters" }
+]

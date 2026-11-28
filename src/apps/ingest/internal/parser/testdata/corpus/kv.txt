@@ -1,0 +1,2 @@
+event=connection endpoint=192.0.2.12 action="drop and log" latency=10
+version=1 src=198.51.100.5 bytes=9007199254740993 message="策略匹配"

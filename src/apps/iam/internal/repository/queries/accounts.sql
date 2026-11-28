@@ -40,8 +40,8 @@ SET timezone = NULLIF(sqlc.arg('timezone')::text, ''),
     updated_at = now()
 WHERE id = sqlc.arg('id')::uuid;
 
--- name: ReadUserTimeZone :one
-SELECT timezone FROM iam.users WHERE id = sqlc.arg('id')::uuid;
+-- name: ReadUserProfile :one
+SELECT timezone, email, created_at FROM iam.users WHERE id = sqlc.arg('id')::uuid;
 
 -- name: BumpUserAuthEpoch :exec
 UPDATE iam.users

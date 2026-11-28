@@ -1,0 +1,2 @@
+{"src":"192.0.2.12","event":{"kind":"connection","labels":["outbound","test"]}}
+[{"event_id":9007199254740993,"status":"允许"},{"event_id":9007199254740994,"status":"拒绝"}]

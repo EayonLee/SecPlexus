@@ -22,8 +22,8 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if value, err := repository.UserTimeZone(ctx, store.DB, userID); err != nil || value != "" {
-		t.Fatalf("initial timezone = %q, err = %v; want empty", value, err)
+	if profile, err := repository.ReadUserProfile(ctx, store.DB, userID); err != nil || profile.TimeZone != "" {
+		t.Fatalf("initial timezone = %q, err = %v; want empty", profile.TimeZone, err)
 	}
 
 	var before int64
@@ -35,8 +35,8 @@ func TestTimeZoneRoundTripDoesNotTouchIdentityVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if value, err := repository.UserTimeZone(ctx, store.DB, userID); err != nil || value != "Asia/Shanghai" {
-		t.Fatalf("timezone = %q, err = %v; want Asia/Shanghai", value, err)
+	if profile, err := repository.ReadUserProfile(ctx, store.DB, userID); err != nil || profile.TimeZone != "Asia/Shanghai" {
+		t.Fatalf("timezone = %q, err = %v; want Asia/Shanghai", profile.TimeZone, err)
 	}
 
 	var after int64

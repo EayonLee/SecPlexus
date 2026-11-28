@@ -20,12 +20,13 @@ func TestProvidedIAMConfigurationIsValidatedDuringLoad(t *testing.T) {
 func TestSharedIAMLocation(t *testing.T) {
 	t.Setenv("SPX_IAM_HOST", "iam.corp")
 	t.Setenv("SPX_IAM_PORT", "9443")
-	t.Setenv("SPX_CONSOLE_BIND_HOST", "127.0.0.1")
+	t.Setenv("SPX_CONSOLE_HOST", "console.corp")
+	t.Setenv("SPX_CONSOLE_BIND_HOST", "0.0.0.0")
 	cfg, err := Load("../../config.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.IAM.BaseURL != "http://iam.corp:9443" || cfg.App.Host != "127.0.0.1" {
+	if cfg.IAM.BaseURL != "http://iam.corp:9443" || cfg.App.Host != "0.0.0.0" {
 		t.Fatal("shared target and listener were mixed")
 	}
 }

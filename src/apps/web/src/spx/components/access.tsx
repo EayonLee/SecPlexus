@@ -3,16 +3,15 @@ import { type ReactNode, useEffect } from "react";
 
 import { useRouter } from "next/navigation";
 
+import { CloudOff, ShieldX } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { CloudOff } from "lucide-react";
 
 import type { PermissionKey } from "@/auth/permissions.gen";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 
 import { initializeSession, refreshMe, useIdentity } from "../iam/session";
+import { StatePanel } from "./collection-state";
 import { ErrorState } from "./error-state";
 import { LanguageSwitcher } from "./language-switcher";
 
@@ -27,12 +26,13 @@ export function AccessDenied() {
   const t = useTranslations("Common");
 
   return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyTitle>{t("accessDenied")}</EmptyTitle>
-        <EmptyDescription>{t("accessDeniedDescription")}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <StatePanel
+      pageHeading
+      kind="error"
+      icon={ShieldX}
+      title={t("accessDenied")}
+      description={t("accessDeniedDescription")}
+    />
   );
 }
 export function RequireAccess({ action, children }: { action: PermissionKey; children: ReactNode }) {
@@ -47,7 +47,14 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
     void initializeSession();
   }, []);
   useEffect(() => {
-    if (auth.status === "anonymous") router.replace("/login");
+    if (auth.status === "anonymous") {
+      const path = window.location.pathname;
+      router.replace(
+        path === "/ingest" || path.startsWith("/ingest/")
+          ? `/login?next=${encodeURIComponent(path + window.location.search)}`
+          : "/login",
+      );
+    }
   }, [auth.status, router]);
   if (auth.status === "unknown" || auth.status === "anonymous")
     return (
@@ -62,6 +69,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
           <LanguageSwitcher />
         </div>
         <ErrorState
+          viewport
           icon={CloudOff}
           title={t("unavailable")}
           description={t("paused")}

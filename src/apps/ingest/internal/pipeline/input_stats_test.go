@@ -31,6 +31,9 @@ func TestStatsCountPerInput(t *testing.T) {
 	if first.Accepted != 1 || first.Parsed != 1 {
 		t.Fatalf("input-a = %+v，期望 1/1", first)
 	}
+	if first.LastReceived.IsZero() || first.LastReceived.Location() != time.UTC {
+		t.Fatalf("input-a 最近接收时间 = %v，期望 UTC", first.LastReceived)
+	}
 
 	second := stats.ByInput["input-b"]
 	if second.Accepted != 1 || second.Parsed != 0 {

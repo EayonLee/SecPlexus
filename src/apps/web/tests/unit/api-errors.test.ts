@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vite
 
 import { http } from "../../src/spx/api/client";
 import { me } from "../../src/spx/api/iam/auth";
+import { listInputPage } from "../../src/spx/api/ingest/inputs";
 import { useIdentity } from "../../src/spx/iam/session";
 import { createServer } from "node:http";
 
@@ -37,4 +38,10 @@ it("marks a malformed 503 unavailable without logging its body", async () => {
   await expect(me()).rejects.toMatchObject({ status: 503, code: "service_unavailable" });
   expect(useIdentity.getState().status).toBe("unavailable");
   expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-");
+});
+
+it("preserves the authenticated shell when a business collection is unavailable", async () => {
+  status = 503;
+  await expect(listInputPage({ limit: 20 })).rejects.toMatchObject({ status: 503, code: "service_unavailable" });
+  expect(useIdentity.getState().status).toBe("authenticated");
 });

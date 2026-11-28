@@ -1,37 +1,16 @@
 package publish
 
 import (
+	"context"
+	"strings"
 	"testing"
-
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
 
 // 分流规则必须被钉住：失败事件去哪，是部署后无法回滚的行为。
-func TestTopicForRoutesDeadLetters(t *testing.T) {
-	producer := &Kafka{eventTopic: "spx.ingest.events", parseFailureTopic: "spx.ingest.deadletter"}
-
-	tests := map[string]struct {
-		event *pipeline.Event
-		want  string
-	}{
-		"success to main":    {event: &pipeline.Event{}, want: "spx.ingest.events"},
-		"dead letter routed": {event: &pipeline.Event{DeadLetter: true}, want: "spx.ingest.deadletter"},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			if got := producer.topicFor(test.event); got != test.want {
-				t.Fatalf("topic = %q, want %q", got, test.want)
-			}
-		})
-	}
-}
-
-// 未配置死信 topic 时，失败事件仍走主 topic（保持旧语义）。
-func TestTopicForKeepsMainTopicWhenDeadLetterUnset(t *testing.T) {
-	producer := &Kafka{eventTopic: "spx.ingest.events"}
-
-	if got := producer.topicFor(&pipeline.Event{DeadLetter: true}); got != "spx.ingest.events" {
-		t.Fatalf("topic = %q, want event topic", got)
+// 诊断流缺失时应在连接 broker 前拒绝配置。
+func TestNewKafkaRequiresEventTopic(t *testing.T) {
+	_, err := NewKafka(context.Background(), Options{Brokers: []string{"127.0.0.1:9092"}})
+	if err == nil || !strings.Contains(err.Error(), "kafka event topic") {
+		t.Fatalf("expected required topic error, got %v", err)
 	}
 }

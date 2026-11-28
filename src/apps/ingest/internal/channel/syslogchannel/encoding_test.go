@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,20 +16,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
-
-type gbkCollector struct {
-	mu     sync.Mutex
-	events []pipeline.Event
-}
-
-func (c *gbkCollector) Publish(_ context.Context, events []pipeline.Event) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.events = append(c.events, events...)
-
-	return nil
-}
 
 // 回归：GBK 的 syslog 报文必须在剥信封之前转码，否则主机名与消息都是乱码。
 func TestGBKSyslogMessageIsDecoded(t *testing.T) {
@@ -52,7 +37,7 @@ func TestGBKSyslogMessageIsDecoded(t *testing.T) {
 		ID: "gbk-1", Protocol: input.ProtocolSyslog, Port: port, Mapping: engine,
 	}})
 
-	publisher := &gbkCollector{}
+	publisher := &collector{}
 	line := pipeline.New(pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 10 * time.Millisecond}, publisher)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -98,15 +83,13 @@ func TestGBKSyslogMessageIsDecoded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for time.Now().Before(deadline) && len(publisher.events) == 0 {
+	for time.Now().Before(deadline) && publisher.count() == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	_ = line.Flush(context.Background())
 
-	publisher.mu.Lock()
-	events := append([]pipeline.Event(nil), publisher.events...)
-	publisher.mu.Unlock()
+	events := publisher.all()
 
 	if len(events) == 0 {
 		t.Fatal("没有收到事件")

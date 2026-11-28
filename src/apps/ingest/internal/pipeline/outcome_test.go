@@ -8,7 +8,6 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
 
@@ -31,7 +30,7 @@ func metadataOf(t *testing.T, body []byte) map[string]any {
 
 // 解析结果必须把"哪一层失败、为什么、具体是什么"分开表达。
 // 只给一个字符串时，聚合告警与人工排查只能二选一。
-func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
+func TestOutcomeSeparatesStageAndReason(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
@@ -47,9 +46,6 @@ func TestOutcomeSeparatesStageReasonAndDetail(t *testing.T) {
 	}
 	if event.Outcome.Reason != pipeline.ReasonFormatMismatch {
 		t.Fatalf("reason = %q", event.Outcome.Reason)
-	}
-	if event.Outcome.Detail == "" {
-		t.Fatal("detail 为空：排查时不知道具体错在哪")
 	}
 
 	bookkeeping, ok := metadataOf(t, event.Body)["spx"].(map[string]any)
@@ -83,21 +79,15 @@ func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 	if event.Outcome.Reason != pipeline.ReasonNoRule {
 		t.Fatalf("reason = %q, want no_rule", event.Outcome.Reason)
 	}
-	if event.Outcome.Stage != pipeline.StageMap {
-		t.Fatalf("stage = %q, want map", event.Outcome.Stage)
+	if event.Outcome.Stage != pipeline.StageClassify {
+		t.Fatalf("stage = %q, want classify", event.Outcome.Stage)
 	}
 }
 
 // 回归：截断不能覆盖规则产出的 class_uid 与 severity_id。
-// 头部完整的 CEF 仍属于 2004，覆盖成通用类会让它落进错误分类。
+// 头部完整的 CEF 仍属于 4001，覆盖成通用类会让它落进错误分类。
 func TestTruncationKeepsRuleClassUID(t *testing.T) {
-	engine, err := normalizer.Compile(normalizer.Mapping{
-		ID:        "cef-rule",
-		Parse:     parser.Spec{Mode: parser.ModeCEF},
-		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
-		Severity:  normalizer.SeveritySpec{Field: "Severity", Values: map[string]int{"5": normalizer.SeverityMedium}},
-		Constants: map[string]any{"class_uid": 2004, "kind": "detection"},
-	})
+	engine, err := normalizer.CompileDefinition([]byte(`{"contract_version":"v1","parse":{"mode":"cef"},"branches":[{"id":"net","name":"Network","class_uid":4001,"field_map":{"src":"src_endpoint.ip"},"severity":{"field":"Severity","values":{"5":3}}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +95,7 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	entry := input.Entry{ID: "conn-cef", Protocol: input.ProtocolSyslog, Mapping: engine}
 
-	meta := pipeline.Meta{Truncated: true, OriginalBytes: 90000, DroppedBytes: 20000}
+	meta := pipeline.Meta{Truncated: true, OriginalBytes: 90000}
 	if err = line.Submit(context.Background(), entry,
 		[]byte("CEF:0|F|P|1|1|n|5|src=1.2.3.4"), time.Now(), meta); err != nil {
 		t.Fatal(err)
@@ -114,11 +104,8 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	_ = line.Flush(context.Background())
 
 	event := publisher.events()[0]
-	if event.Outcome.Reason != pipeline.ReasonTruncated {
-		t.Fatalf("reason = %q, want truncated", event.Outcome.Reason)
-	}
-	if event.Outcome.Stage != pipeline.StageLimit {
-		t.Fatalf("stage = %q, want limit", event.Outcome.Stage)
+	if event.Outcome.Status != pipeline.StatusPartial || len(event.Issues) != 1 || event.Issues[0].Code != string(pipeline.ReasonTruncated) {
+		t.Fatalf("truncation should be marked partial: %+v, %+v", event.Outcome, event.Issues)
 	}
 
 	var envelope map[string]any
@@ -127,15 +114,15 @@ func TestTruncationKeepsRuleClassUID(t *testing.T) {
 	}
 
 	// 规则给出的类与级别必须保留。
-	if envelope["class_uid"] != float64(2004) {
+	if envelope["class_uid"] != float64(4001) {
 		t.Fatalf("class_uid 被覆盖: %#v", envelope["class_uid"])
 	}
 	if envelope["severity_id"] != float64(normalizer.SeverityMedium) {
 		t.Fatalf("severity_id 被覆盖: %#v", envelope["severity_id"])
 	}
-	// 已解析出的字段也要保留。
-	if envelope["src_endpoint"] == nil {
-		t.Fatal("解析出的字段丢失")
+	endpoint, _ := envelope["src_endpoint"].(map[string]any)
+	if endpoint["ip"] != "1.2.3.4" {
+		t.Fatalf("truncation discarded the validated endpoint: %v", endpoint)
 	}
 
 	bookkeeping, ok := metadataOf(t, event.Body)["spx"].(map[string]any)
@@ -155,18 +142,17 @@ func TestTruncationDetailReportsBytes(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
-	meta := pipeline.Meta{Truncated: true, OriginalBytes: 100000, DroppedBytes: 34464}
+	meta := pipeline.Meta{Truncated: true, OriginalBytes: 100000}
 	if err := line.Submit(context.Background(), entry, []byte(`{"src":"1.1.1.1"}`), time.Now(), meta); err != nil {
 		t.Fatal(err)
 	}
 
 	_ = line.Flush(context.Background())
 
-	detail := publisher.events()[0].Outcome.Detail
-	if detail == "" {
-		t.Fatal("detail 为空")
+	bookkeeping, _ := metadataOf(t, publisher.events()[0].Body)["spx"].(map[string]any)
+	if bookkeeping["original_bytes"] != float64(100000) || bookkeeping["truncated"] != true {
+		t.Fatalf("missing truncation metadata: %+v", bookkeeping)
 	}
-	t.Logf("截断说明: %s", detail)
 }
 
 // 回归（P0）：OCSF base_event 的 required 属性必须齐全。
@@ -186,12 +172,12 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// class_uid 2004 → category_uid = 2004/1000 = 2。
-	if envelope["category_uid"] != float64(2) {
-		t.Fatalf("category_uid = %#v，期望 2", envelope["category_uid"])
+	// class_uid 4001 → category_uid = 4001/1000 = 4。
+	if envelope["category_uid"] != float64(4) {
+		t.Fatalf("category_uid = %#v，期望 4", envelope["category_uid"])
 	}
 	// type_uid = class_uid*100 + activity_id；未声明活动时为 0。
-	if envelope["type_uid"] != float64(200400) {
+	if envelope["type_uid"] != float64(400100) {
 		t.Fatalf("type_uid = %#v，期望 200400", envelope["type_uid"])
 	}
 	if envelope["activity_id"] != float64(0) {
@@ -228,7 +214,7 @@ func TestEmittedEventCarriesOcsfRequiredAttributes(t *testing.T) {
 // 回归（P1）：规则未映射的源字段曾被整体丢弃，
 // 导致"未映射字段一条不丢"（spec）不成立、脱敏代码也是死代码。
 // 它们现在进 OCSF 的 unmapped 属性，且敏感键已脱敏。
-func TestUnmappedFieldsReachTheEvent(t *testing.T) {
+func TestUnverifiedSourceFieldsAreExcluded(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	entry := input.Entry{ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: jsonRule(t)}
 
@@ -243,14 +229,7 @@ func TestUnmappedFieldsReachTheEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unmapped, ok := envelope["unmapped"].(map[string]any)
-	if !ok {
-		t.Fatalf("缺少 unmapped: %#v", envelope)
-	}
-	if unmapped["vendor_note"] != "keep me" {
-		t.Fatalf("未映射字段丢失: %#v", unmapped)
-	}
-	if unmapped["password"] == "hunter2" {
-		t.Fatalf("敏感值未脱敏: %#v", unmapped["password"])
+	if _, ok := envelope["unmapped"]; ok {
+		t.Fatalf("unverified source values entered Event: %#v", envelope["unmapped"])
 	}
 }

@@ -17,7 +17,7 @@ func TestBaselineRoleIsDataAndNotBuiltin(t *testing.T) {
 	ctx := context.Background()
 
 	// 基线角色由启动同步写入（不在迁移里），因此测试必须先执行一次 Seed。
-	if err := store.Seed(ctx, "baseline-admin", "baseline-role-test-password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "baseline-admin", "baseline-role-test-password"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,7 +40,7 @@ func TestBaselineRoleIsDataAndNotBuiltin(t *testing.T) {
 			found = true
 		}
 		// 基线只授予读取类；写权限绝不能出现在这里。
-		if key == "ingest.input.write" || key == "ingest.mapping.write" {
+		if key == "ingest.input.write" || key == "ingest.parsing_rule.write" {
 			t.Fatalf("基线角色不应授予写权限: %s", key)
 		}
 	}

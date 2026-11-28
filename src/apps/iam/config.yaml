@@ -1,49 +1,54 @@
-# IAM 模块配置。
-#
-# 读取顺序：进程环境 > 根 .env > 本文件默认值。改完需重启进程生效。
-# 每项写作 ${环境变量名-默认值}：环境变量未设置时用默认值；写 ${X:-默认} 表示空值也算未设置。
-# 密钥类（密码、token、CSRF key）只通过环境变量或私有 .env 注入，不写进本文件的默认值。
+# IAM 模块配置。部署选项集中在根 .env.example。
+# 根启动入口按进程环境、根 .env、模块默认值的顺序取值。
+# 二进制直接运行时读取进程环境和本文件。修改后重启进程或重新创建容器。
 
-# ---- 进程监听 -
-# 对外 HTTPS 由反向代理终止，本进程只监听明文 HTTP。
+# 进程监听
+# 应用监听 HTTP。对外 HTTPS 由反向代理终止。
 app:
-  # 本服务地址：既是本进程绑定的地址，也是调用方连接它的地址。
-  #   127.0.0.1 默认值，本机部署或前面有反向代理时使用。
-  #   0.0.0.0   容器内需要接受其他容器的连接时使用（由编排层限制暴露面）。
-  host: "${SPX_IAM_HOST-127.0.0.1}"
-  # 监听端口：本进程实际监听的端口。调用方连接的也是这个端口，因此只在这里定义一次。
-  # 其他服务用 SPX_IAM_HOST + 本端口找到 IAM；SPX_IAM_HOST 是调用方视角的地址，
-  # 与这里的监听地址是两件事，容器/多网卡部署下可以不同。
+  # 本机监听地址。Compose 在容器内监听 0.0.0.0。
+  host: "${SPX_IAM_BIND_HOST-127.0.0.1}"
+  # 同一端口同时用于监听和服务间连接。
   port: "${SPX_IAM_PORT-8081}"
-  # 可信反向代理网段（逗号分隔）。留空表示直连部署，完全不解析 X-Forwarded-For。
-  # 反向代理之后必须填真实代理网段：留空会让来源都变成代理地址，登录限流全站共用一个桶；
-  # 填 0.0.0.0/0 或 ::/0 会被拒绝启动——那等于信任任意客户端伪造的来源。
+  # 可信反向代理网段，逗号分隔。留空时按直连地址识别请求来源。
   trusted_proxy_cidrs: "${SPX_IAM_TRUSTED_PROXY_CIDRS-}"
 
-# ---- PostgreSQL ----
-# 全平台共用一个 PG 实例、一个库、一个账号。运行、迁移、维护都用这同一组连接。
-# 区分数据靠 schema（iam.）和表名，不靠第二套连接。
-# 该账号需要有建表和迁移权限（迁移由独立的 migrate 命令执行，不给 HTTP 进程 DDL 权限之外的东西）。
-db:
-  # 数据库地址。连本机就留默认；连其他机器填 IP 或域名。
-  host: "${SPX_POSTGRES_HOST-127.0.0.1}"
-  # 数据库端口，PG 默认 5432。
-  port: "${SPX_POSTGRES_PORT-5432}"
-  # 数据库名。默认 secplexus，全平台所有模块共用一个库。
-  name: "${SPX_POSTGRES_DATABASE-secplexus}"
-  # 数据库账号。需要能建表、建索引、执行迁移。
-  user: "${SPX_POSTGRES_USER-secplexus}"
-  # 数据库密码。生产环境必须通过环境变量或 .env 覆盖。
-  password: "${SPX_POSTGRES_PASSWORD-secplexus}"
-  # TLS 模式。本机直连用 disable；跨机器/云数据库按对方要求设 require 或 verify-full。
-  sslmode: "${SPX_POSTGRES_SSLMODE-disable}"
-  # 完整连接串。只在需要上面这些字段表达不了的额外驱动参数时才填；填了它就替代上面的分项字段。
-  url: "${SPX_POSTGRES_URL-}"
+# 服务间调用凭证
+# 每个调用方（console 等）有独立 token，且只能请求这里列出的 action。
+# token 同时充当两件事：证明"我是某个内部服务"，以及限定"我能问哪些权限问题"。
+# 它不能替代登录用户——IAM 校验完服务凭证后，还要再校验调用方带来的用户 Cookie。
+service_clients:
+  console:
+    # console 调用 IAM 用的独立服务凭据，长度 32–512 字节。
+    token: "${SPX_CONSOLE_IAM_TOKEN-}"
+    # console 被允许请求的 action 白名单。不在这个列表里的 action 一律拒绝。
+    actions: [console.context.read, iam.permissions.read]
 
-# ---- Redis ----
+  ingest:
+    # ingest 调用 IAM 的独立服务凭据，长度 32–512 字节。
+    token: "${SPX_INGEST_IAM_TOKEN-}"
+    # 启动时读取权限键以校验契约；具体管理操作仍校验原用户会话。
+    actions: [ingest.events.read, ingest.input.read, ingest.input.write, ingest.parsing_rule.read, ingest.parsing_rule.write, iam.audit.write, iam.permissions.read]
+
+# PostgreSQL
+# 自带实例共用一组连接参数，并按模块 schema 管理数据。外接实例使用完整连接 URL。
+postgresql:
+  # 自带实例地址。Compose 通过服务名注入。
+  host: "${SPX_POSTGRESQL_HOST-127.0.0.1}"
+  # 数据库端口，PG 默认 5432。
+  port: "${SPX_POSTGRESQL_PORT-5432}"
+  # 数据库名。默认 secplexus，全平台所有模块共用一个库。
+  database: "${SPX_POSTGRESQL_DATABASE-secplexus}"
+  # 数据库账号。需要能建表、建索引、执行迁移。
+  user: "${SPX_POSTGRESQL_USER-secplexus}"
+  # 数据库密码。生产环境必须通过环境变量或 .env 覆盖。
+  password: "${SPX_POSTGRESQL_PASSWORD-secplexus}"
+  # 独立运行连接外部实例时填写。TLS 模式使用 URL 的 sslmode 参数。
+  url: "${SPX_POSTGRESQL_URL-}"
+
+# Redis
 # 全平台共用一个 Redis，用 key 前缀（spx:iam:...）区分模块，不靠第二个实例。
 # IAM 主要用它做登录限流；限流计数丢了会让暴力破解防护短暂失效，所以 Redis 挂了登录写操作要拒绝（不是放行）。
-cache:
+redis:
   # Redis 地址。
   host: "${SPX_REDIS_HOST-127.0.0.1}"
   # Redis 端口，默认 6379。
@@ -57,88 +62,49 @@ cache:
   # 完整 Redis 连接串（redis://用户:密码@主机:端口/库号）。填了就替代上面的分项字段。
   url: "${SPX_REDIS_URL-}"
 
-# ---- 服务间调用凭证 ----
-# 每个调用方（console 等）有独立 token，且只能请求这里列出的 action。
-# token 同时充当两件事：证明"我是某个内部服务"，以及限定"我能问哪些权限问题"。
-# 它不能替代登录用户——IAM 校验完服务凭证后，还要再校验调用方带来的用户 Cookie。
-service_clients:
-  console:
-    # console 调用 IAM 用的凭证，至少要 32 字节。两边必须配成同一个值。
-    token: "${SPX_CONSOLE_IAM_TOKEN-}"
-    # console 被允许请求的 action 白名单。不在这个列表里的 action 一律拒绝。
-    actions: [iam.users.read, console.events.read, iam.audit.write]
-
-  ingest:
-    # ingest 调用 IAM 的凭证：校验管理面会话、写入审计事实。两边必须配成同一个值。
-    token: "${SPX_INGEST_IAM_TOKEN-}"
-    # 允许的动作白名单；不在列表里的一律拒绝。
-    actions: [ingest.input.read, ingest.input.write, ingest.mapping.read, ingest.mapping.write, iam.audit.write]
-
-# ---- 账号与登录策略 ----
-auth:
-  # 浏览器访问本平台的公开地址，用于校验 CSRF/Origin 和决定 Cookie 的 Secure 属性。
-  # 用 https 开头 → Cookie 加 Secure 和 __Host- 前缀。通过域名或 IP 访问时必须改成实际地址。
-  web_origin: "${SPX_WEB_ORIGIN:-http://localhost:${SPX_WEB_PORT-5173}}"
-  # CSRF 签名密钥，必须正好 32 字节（例如 openssl rand -hex 16）。必填，换值会让所有已签发的 CSRF token 失效。
-  csrf_key: "${SPX_IAM_CSRF_KEY-}"
-  # 会话空闲超时：多久没操作就失效。默认 30 分钟。
-  # 调大 = 用户少登录，但电脑忘锁时风险窗口更长。
-  session_idle_timeout: "${SPX_IAM_SESSION_IDLE_TIMEOUT-30m}"
-  # 会话绝对超时：从登录那一刻算，无论怎么操作到点就失效。默认 8 小时（一个工作日）。
-  # 必须 >= 空闲超时，且不超过 168h（7 天）。
-  session_absolute_timeout: "${SPX_IAM_SESSION_ABSOLUTE_TIMEOUT-8h}"
-  # 近期认证窗口：标记为"高风险"的操作（改角色权限、重置密码等）要求在这个时间内重新输过密码。
-  # 默认 30 分钟。调大 = 少打扰，但他人借用已登录的浏览器时风险更高。
-  reauth_window: "${SPX_IAM_REAUTH_WINDOW-30m}"
-  # 同一账号连续登录失败多少次后锁定。默认 5 次。
-  login_max_failures: "${SPX_IAM_LOGIN_MAX_FAILURES-5}"
-  # 锁定时长。默认 15 分钟。到期自动解锁，不需要人工干预。
-  login_lock_duration: "${SPX_IAM_LOGIN_LOCK_DURATION-15m}"
-  # 同一来源地址每分钟允许的认证请求数（含密码确认）。默认 60。
-  # 调小可以更快压制自动化撞库，但共享出口 IP 的办公网会先被限。
-  login_ip_rate: "${SPX_IAM_LOGIN_IP_RATE-60}"
-  # 同一账号每 15 分钟允许的认证请求数。默认 20。
-  # 与「连续失败锁定」分工：限流压制高频尝试，锁定压制针对单账号的持续猜测。
-  login_account_rate: "${SPX_IAM_LOGIN_ACCOUNT_RATE-20}"
-
-# ---- 配置托管的内置管理员 ----
-# 每次启动都幂等写入数据库：这里是 username/password 的权威来源，页面不能删除、停用、改密或摘除其内置角色。
-# 改这里要重启所有副本，且所有副本必须一致。
+# 托管管理员
+# 首次部署由 initialize-administrator 创建。已有实例改名或改密时执行 sync-administrator。
 bootstrap:
-  # 管理员用户名。首次启动时创建；改名会创建或接管目标账号，并收回旧账号的内置标记。
+  # 首次部署须填写 12–128 个字符的密码。
   username: "${SPX_IAM_BOOTSTRAP_USERNAME-admin}"
-  # 管理员密码，12–128 个字符。
-  # 改这个值并重启 → 密码被更新、旧会话全部撤销。明文不会出现在响应或日志里。
-  password: "${SPX_IAM_BOOTSTRAP_PASSWORD-SecPlexus#2026}"
+  password: "${SPX_IAM_BOOTSTRAP_PASSWORD-}"
 
-# ---- 数据保留期 ----
-# 过期数据由 `iam maintain` 命令分批清理（每次每表最多 1000 条），需要由部署侧定时调度。
-# 调这些值只影响"多久之后可以清理"，不改变已有数据。
+# 账号与登录策略
+auth:
+  # IAM 使用实际浏览器来源校验请求并决定 Cookie 的 Secure 属性。
+  web_origin: "${SPX_WEB_ORIGIN:-http://127.0.0.1:${SPX_WEB_PORT-5173}}"
+  # CSRF 签名密钥必填，恰好 32 字节。
+  csrf_key: "${SPX_IAM_CSRF_KEY-}"
+
+  # 登录限流分别按来源 IP（每分钟）和账号（每 15 分钟）计数。
+  login_ip_rate: "${SPX_IAM_LOGIN_IP_RATE-60}"
+  login_account_rate: "${SPX_IAM_LOGIN_ACCOUNT_RATE-20}"
+  # 账号连续登录失败达到阈值后的锁定时长。
+  login_max_failures: "${SPX_IAM_LOGIN_MAX_FAILURES-5}"
+  login_lock_duration: "${SPX_IAM_LOGIN_LOCK_DURATION-15m}"
+
+  # 会话空闲时限、最长时限及二次认证窗口。
+  # 最长时限必须大于或等于空闲时限，且不超过 7 天。
+  session_idle_timeout: "${SPX_IAM_SESSION_IDLE_TIMEOUT-30m}"
+  session_absolute_timeout: "${SPX_IAM_SESSION_ABSOLUTE_TIMEOUT-8h}"
+  reauth_window: "${SPX_IAM_REAUTH_WINDOW-30m}"
+
+# 保留期
+# 单位为天。由 IAM maintain 按批清理，部署侧负责调度。
 retention:
-  # 审计记录保留天数。默认 365 天。
-  # 为什么不能太短：《网络安全法》第二十一条要求网络日志留存不少于六个月，180 天正好是法定下限、没有余量；
-  # 审计类数据业界建议保留一年以上，便于跨年度事件回溯和年度对比。
-  # 注意：清理是物理删除，删掉之后无法追溯"谁在什么时候改了什么"。
   audit_days: "${SPX_IAM_AUDIT_RETENTION_DAYS-365}"
-  # 已失效会话记录的保留天数。默认 30 天。
-  # 只影响审计排查用的会话历史；会话是否有效由 absolute_expires_at 判定，不依赖这行数据存在。
-  # 调小可以省空间，但排障时看不到更早的登录记录。
   session_days: "${SPX_IAM_SESSION_RETENTION_DAYS-30}"
 
-# ---- 日志 -
-# 结构化 JSON 输出；审计事实不在这里，走 iam.audit_events。
+# 日志
+# 输出结构化 JSON。Compose 由 Docker 管理标准输出及轮转。
 logging:
-  # 最低级别：debug / info / warn / error。生产用 info；排查时临时调 debug，记得改回。
+  # 日志级别，支持 debug、info、warn、error。
   level: "${SPX_IAM_LOG_LEVEL-info}"
-  # 是否输出到标准输出。容器部署保持 true，由运行时收集。
+  # 以下选项用于独立运行。文件路径留空时关闭文件日志。
   stdout: "${SPX_IAM_LOG_STDOUT-true}"
-  # 日志文件路径。留空 = 不写文件（容器里通常这样，只走 stdout）。
   file: "${SPX_IAM_LOG_FILE-logs/iam.log}"
-  # 单个日志文件的最大体积（MB）。写满后按 max_backups 轮转。
+  # MAX_SIZE_MB 按 MiB 计，MAX_AGE_DAYS 按天计。
   max_size_mb: "${SPX_IAM_LOG_MAX_SIZE_MB-50}"
-  # 保留的历史文件个数。磁盘紧张时先调小这里。
   max_backups: "${SPX_IAM_LOG_MAX_BACKUPS-5}"
-  # 历史文件最长保留天数，超过即删除。
   max_age_days: "${SPX_IAM_LOG_MAX_AGE_DAYS-14}"
-  # 轮转后的历史文件是否压缩；压缩省磁盘、查询时需先解压。
   compress: "${SPX_IAM_LOG_COMPRESS-true}"

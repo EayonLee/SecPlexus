@@ -128,5 +128,54 @@
       "indentScriptAndStyle": false,
       "selfCloseVoidElements": "always"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/spx/**", "src/app/(secplexus)/**", "!src/spx/components/page-header.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noRestrictedElements": {
+              "level": "error",
+              "options": {
+                "elements": {
+                  "h1": "Use PageHeader or PageTitle so page headings follow the workbench typography.",
+                  "select": "Use the shared shadcn Select or ListSelect for a list filter.",
+                  "button": "Use the shadcn Button primitive.",
+                  "table": "Use the shadcn Table primitive.",
+                  "th": "Use the shared TableHead with left-aligned column headers.",
+                  "td": "Use the shared TableCell with left-aligned column content.",
+                  "input": "Use the shadcn Input, SearchField or ListDateFilter.",
+                  "textarea": "Use shadcn Textarea."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/spx/pages/**", "src/app/(secplexus)/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/components/ui/sheet": "Use SheetPanel or FormDialog variant=\"sheet\" for business drawers.",
+                  "@/components/ui/dialog": "Use FormDialog for business forms and SheetPanel for detail views.",
+                  "@/components/ui/alert-dialog": "Use the shared business confirmation components.",
+                  "@/components/ui/empty": "Use CollectionBoundary and CollectionState for list feedback.",
+                  "@/components/ui/native-select": "Use ListSelect for list filters and shadcn Select for form choices.",
+                  "@/components/ui/input-group": "Use SearchField for list search; compose grouped inputs in a shared control.",
+                  "@/components/ui/pagination": "Use ListPagination with the endpoint paging contract."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

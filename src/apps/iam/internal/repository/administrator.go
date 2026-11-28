@@ -23,7 +23,7 @@ type administrator struct {
 }
 
 // syncAdministrator 在管理锁内同步配置的托管账号。
-// 用户名为配置权威来源：改名会收回旧账号的内置标记并创建或接管目标账号，
+// 用户名为配置权威来源：改名会收回旧账号的内置标记并创建新的托管账号，
 // 配置不变时不轮换哈希或会话版本。
 func syncAdministrator(ctx context.Context, tx *sql.Tx, username, password string, builtinRoleID uuid.UUID) (uuid.UUID, error) {
 	username = strings.TrimSpace(username)
@@ -53,6 +53,10 @@ func syncAdministrator(ctx context.Context, tx *sql.Tx, username, password strin
 		exists = false
 	} else if err != nil {
 		return uuid.Nil, err
+	}
+
+	if exists && (!hasCurrent || current.ID != target.ID) {
+		return uuid.Nil, errors.New("configured administrator name belongs to an existing account")
 	}
 
 	// 配置改名时先收回旧账号的内置标记，保证任何时刻只有一个配置托管账号。

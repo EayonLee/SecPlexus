@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/handler"
+	"github.com/EayonLee/SecPlexus/src/apps/console/internal/model"
 	"github.com/EayonLee/SecPlexus/src/apps/console/internal/router"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
@@ -73,7 +74,7 @@ func TestContextReturnsVerifiedPrincipal(t *testing.T) {
 	}
 
 	var body struct {
-		Data handler.APIConsoleContext `json:"data"`
+		Data model.Context `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -143,14 +144,16 @@ func TestContextUnavailableIAMReturnsServiceUnavailable(t *testing.T) {
 	}
 }
 
-// 健康检查不经过 IAM，必须独立可用。
-func TestReadyDoesNotDependOnIAM(t *testing.T) {
+func TestHealthSeparatesProcessAndIAMReadiness(t *testing.T) {
 	client := fakeIAM(t, func(w http.ResponseWriter) {
-		t.Error("readiness must not call IAM")
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 	})
+	server := &handler.Server{IAM: client}
 
-	if code := get(t, &handler.Server{IAM: client}, "/health/ready").Code; code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", code)
+	if code := get(t, server, "/health/live").Code; code != http.StatusOK {
+		t.Fatalf("liveness = %d, want 200", code)
+	}
+	if code := get(t, server, "/health/ready").Code; code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness = %d, want 503", code)
 	}
 }

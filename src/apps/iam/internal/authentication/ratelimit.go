@@ -12,7 +12,7 @@ import (
 	"github.com/ulule/limiter/v3"
 	redisstore "github.com/ulule/limiter/v3/drivers/store/redis"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	rediskey "github.com/EayonLee/SecPlexus/src/packages/go/redis/key"
 )
 
 var ErrUnavailable = errors.New("authentication dependency unavailable")
@@ -26,7 +26,7 @@ const accountRatePeriod = 15 * time.Minute
 
 // NewLimiter 在启动时加载组件脚本；存储不可用时启动失败。
 func NewLimiter(client *redis.Client, ipRate, accountRate int) (*Limiter, error) {
-	store, err := redisstore.NewStoreWithOptions(client, limiter.StoreOptions{Prefix: cachekey.Prefix})
+	store, err := redisstore.NewStoreWithOptions(client, limiter.StoreOptions{Prefix: rediskey.Prefix})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -39,13 +39,13 @@ func NewLimiter(client *redis.Client, ipRate, accountRate int) (*Limiter, error)
 
 // CheckIP 在读取凭据前限制来源，包括无效请求。
 func (l *Limiter) CheckIP(ctx context.Context, ip string) error {
-	return check(ctx, l.ip, cachekey.IAMLoginIP, ip)
+	return check(ctx, l.ip, rediskey.IAMLoginIP, ip)
 }
 
 // CheckAccount 限制已经规范化的账号，不把账号明文写入 Redis。
 // 未配置计数器的 Limiter（单元测试）不做限制。
 func (l *Limiter) CheckAccount(ctx context.Context, account string) error {
-	return check(ctx, l.account, cachekey.IAMLoginAccount, account)
+	return check(ctx, l.account, rediskey.IAMLoginAccount, account)
 }
 
 // Check 用于同时需要来源与账号桶的密码变更请求。
@@ -56,7 +56,7 @@ func (l *Limiter) Check(ctx context.Context, ip, account string) error {
 	return l.CheckAccount(ctx, account)
 }
 
-func check(ctx context.Context, counter *limiter.Limiter, template cachekey.Template, value string) error {
+func check(ctx context.Context, counter *limiter.Limiter, template rediskey.Template, value string) error {
 	if counter == nil {
 		return nil
 	}

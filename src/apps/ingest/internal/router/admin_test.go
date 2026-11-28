@@ -17,6 +17,7 @@ import (
 
 // fakeStore 记录调用并返回固定结果。
 type fakeStore struct {
+	handler.InputStore
 	created   repository.Input
 	token     string
 	createErr error
@@ -25,10 +26,6 @@ type fakeStore struct {
 
 func (f *fakeStore) CreateInput(context.Context, repository.CreateInputParams) (repository.Input, string, error) {
 	return f.created, f.token, f.createErr
-}
-
-func (f *fakeStore) ListInputs(context.Context) ([]repository.Input, error) {
-	return []repository.Input{f.created}, nil
 }
 
 func (f *fakeStore) UpdateInput(context.Context, string, repository.UpdateInputParams) (repository.Input, string, error) {
@@ -45,8 +42,6 @@ func (f *fakeStore) CreateMapping(context.Context, repository.CreateMappingParam
 	return repository.Mapping{}, nil
 }
 
-func (f *fakeStore) ListMappings(context.Context) ([]repository.Mapping, error) { return nil, nil }
-
 func (f *fakeStore) UpdateMapping(context.Context, string, repository.CreateMappingParams) (repository.Mapping, error) {
 	return repository.Mapping{}, nil
 }
@@ -57,7 +52,7 @@ func (f *fakeStore) DeleteMapping(context.Context, string) error { return nil }
 // 宁可管理面不可用，也不能暴露一个任何人都能建接入点、拿令牌的写接口。
 func TestAdminRoutesAbsentWithoutGuard(t *testing.T) {
 	store := &fakeStore{}
-	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store}))
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: &handler.Admin{Store: store}}))
 	defer server.Close()
 
 	response, err := server.Client().Get(server.URL + "/api/v1/ingest/inputs")
@@ -79,7 +74,7 @@ func TestAdminCreateReturnsTokenOnce(t *testing.T) {
 	}
 
 	client := fakeIAM(t, http.StatusOK)
-	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, IAM: client}))
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: &handler.Admin{Store: store}, IAM: client}))
 	defer server.Close()
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ingest/inputs", strings.NewReader(`{"name":"fw","protocol":"http"}`))
@@ -115,7 +110,7 @@ func TestAdminGuardBlocksRequest(t *testing.T) {
 	store := &fakeStore{}
 	client := fakeIAM(t, http.StatusForbidden)
 
-	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: store, IAM: client}))
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{Admin: &handler.Admin{Store: store}, IAM: client}))
 	defer server.Close()
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ingest/inputs", strings.NewReader(`{"name":"fw","protocol":"http"}`))

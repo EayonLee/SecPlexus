@@ -1,0 +1,9 @@
+CREATE TABLE spx.events
+(
+{{.}},
+    parse_outcome LowCardinality(String) DEFAULT 'ok' COMMENT '解析结果：ok、partial 或 error',
+    CONSTRAINT event_parse_outcome CHECK parse_outcome IN ('ok', 'partial', 'error')
+)
+ENGINE = ReplacingMergeTree
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (class_uid, event_time, event_id);

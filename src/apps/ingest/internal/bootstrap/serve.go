@@ -3,13 +3,14 @@ package bootstrap
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
@@ -18,21 +19,28 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/config"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/handler"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/observation"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/publish"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository/event"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/router"
-	"github.com/EayonLee/SecPlexus/src/packages/go/cache"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/schema/events"
 	"github.com/EayonLee/SecPlexus/src/packages/go/httpx"
 	"github.com/EayonLee/SecPlexus/src/packages/go/iamclient"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
+	redisconn "github.com/EayonLee/SecPlexus/src/packages/go/redis"
 )
 
 // Serve 初始化解析流水线、事件发布与 HTTP 通道，并管理它们的生命周期。
 func Serve(ctx context.Context, cfg config.Config) (outcome error) {
-	if err := cfg.ValidateServe(); err != nil {
+	tlsConfig, err := cfg.ValidateServe()
+	if err != nil {
 		return err
+	}
+	catalog, err := events.Load()
+	if err != nil {
+		return fmt.Errorf("load event schema: %w", err)
 	}
 	logger, closeLog, err := logging.Open(cfg.Logging, "ingest")
 	if err != nil {
@@ -48,16 +56,10 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	// 先建发布器：它连通性失败必须在启动期暴露，好过第一条事件才发现丢数据。
 	producer, err := publish.NewKafka(startup, publish.Options{
-		Brokers:           cfg.Output.Kafka.Brokers,
-		EventTopic:        cfg.Output.Kafka.EventTopic,
-		ParseFailureTopic: cfg.Output.Kafka.ParseFailureTopic,
-		Security: kafka.Security{
-			Protocol:    cfg.Output.Kafka.SecurityProtocol,
-			Mechanism:   cfg.Output.Kafka.SASLMechanism,
-			Username:    cfg.Output.Kafka.SASLUsername,
-			PasswordEnv: cfg.Output.Kafka.SASLPasswordEnv,
-			CAFile:      cfg.Output.Kafka.TLSCAFile,
-		},
+		Brokers:    cfg.Kafka.Brokers,
+		EventTopic: cfg.Events.Topic,
+
+		Security: cfg.Kafka.Security(cfg.Events.Publisher),
 	})
 	if err != nil {
 		return err
@@ -67,14 +69,17 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 
 	// 数据库是接入点与解析规则的来源；首次加载失败就启动失败——
 	// 与 nginx 遇到坏配置拒绝启动同理：不知道自己收什么的服务不该对外报就绪。
-	pool, err := repository.Open(startup, cfg.DB.DSN())
+	pool, err := repository.Open(startup, cfg.PostgreSQL.DSN())
 	if err != nil {
 		return err
 	}
 
 	defer pool.Close()
+	if err := repository.VerifySchema(startup, pool); err != nil {
+		return err
+	}
 
-	client, err := openCache(startup, cfg.Cache)
+	client, err := openRedis(startup, cfg.Redis)
 	if err != nil {
 		return err
 	}
@@ -86,11 +91,24 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		return err
 	}
 
+	observations := observation.New(client)
+	observationCtx, cancelObservations := context.WithCancel(context.Background())
+	observationDone := make(chan struct{})
+	go func() {
+		defer close(observationDone)
+		observations.Run(observationCtx)
+	}()
+	defer func() {
+		cancelObservations()
+		<-observationDone
+	}()
 	line := pipeline.New(pipeline.Options{
-		Workers:       cfg.Pipeline.Workers,
-		QueueDepth:    cfg.Pipeline.QueueDepth,
-		BatchSize:     cfg.Pipeline.BatchSize,
-		FlushInterval: cfg.Pipeline.FlushInterval,
+		Observations:     observations,
+		Workers:          cfg.Pipeline.Workers,
+		QueueDepth:       cfg.Pipeline.QueueDepth,
+		MaxInFlightBytes: cfg.Pipeline.MaxInFlightBytes,
+		BatchSize:        cfg.Pipeline.BatchSize,
+		FlushInterval:    cfg.Pipeline.FlushInterval,
 	}, producer)
 
 	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
@@ -109,7 +127,29 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	// 这比接受未知设备的推送安全。
 	registry := input.NewMemory()
 
-	refresher := newSourceRefresher(pool, registry, cfg.Input.Kafka.ReloadInterval)
+	syslogChannel := syslogchannel.New(registry, line, cfg.Input.Syslog.ReloadInterval, cfg.Input.Syslog.Host)
+
+	kafkaConsumer := kafkachannel.New(registry, line, producer, kafkachannel.Options{
+		Execution:      repository.NewKafkaExecutionStore(pool),
+		ReloadInterval: cfg.Input.Kafka.ReloadInterval,
+		Credentials:    cfg.Input.Kafka.Credentials,
+	})
+
+	var httpOnline atomic.Bool
+	channelActivation := func(entry input.Entry) input.ChannelActivation {
+		switch entry.Protocol {
+		case input.ProtocolHTTP:
+			return input.ChannelActivation{Online: httpOnline.Load() && entry.HasToken()}
+		case input.ProtocolSyslog:
+			return input.ChannelActivation{Online: syslogChannel.Ready(entry)}
+		case input.ProtocolKafka:
+			return kafkaConsumer.Activation(entry)
+		default:
+			return input.ChannelActivation{}
+		}
+	}
+	refresher := newSourceRefresher(pool, registry, observations, channelActivation, repository.ReloadInterval)
+
 	if err = refresher.Load(startup); err != nil {
 		return err
 	}
@@ -120,7 +160,9 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	go refresher.Watch(watchCtx)
 
 	server := &handler.Server{
-		Stats: line.Stats,
+		Stats:                line.Stats,
+		SourceSnapshotAge:    refresher.SnapshotAge,
+		KafkaOffsetsRejected: kafkaConsumer.OffsetsRejected,
 		Ready: func(ctx context.Context) error {
 			if err := client.Ping(ctx).Err(); err != nil {
 				return errors.New("cache is not ready")
@@ -132,8 +174,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 				return errors.New("source registry is not loaded")
 			}
 
-			// 曾经加载成功、之后刷新失败时旧配置仍在服务：
-			// 这种情况靠日志暴露，不再把实例摘掉，否则会中断正常工作的接入点。
+			// 权威数据源故障时只在快照租期内继续受理，过期由 Loaded 拒绝就绪。
 			if degraded := refresher.Degraded(); degraded != "" {
 				logging.From(ctx).Warn("Source refresh degraded", "event", "input.degraded", "reason", degraded)
 			}
@@ -162,51 +203,88 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 			"event", "iam.catalog_unverified", "error", logging.Error(err))
 	}
 
-	channels := router.Deps{
-		Registry: registry,
-		Limiter:  limiter,
-		Pipeline: line,
-		MaxBody:  maxBodyBytes(cfg.Input.HTTP.MaxBodyBytes),
-		Admin:    repository.NewAdminStore(pool),
-		IAM:      iam,
+	adminStore := repository.NewAdminStore(pool)
+	server.AuditOutboxHealth = adminStore.AuditOutboxHealth
+	auditCtx, stopAudit := context.WithCancel(ctx)
+	auditDone := make(chan struct{})
+	go func() {
+		defer close(auditDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-auditCtx.Done():
+				return
+			case <-ticker.C:
+				delivery, cancel := context.WithTimeout(auditCtx, 5*time.Second)
+				deliverErr := adminStore.DeliverAudit(delivery, iam.RecordAudit)
+				cancel()
+				if deliverErr != nil && auditCtx.Err() == nil {
+					logging.From(auditCtx).Error("Could not deliver pending audit", "event", "audit.delivery_failed", "error", logging.Error(deliverErr))
+				}
+			}
+		}
+	}()
+	defer func() {
+		stopAudit()
+		<-auditDone
+	}()
+
+	push := httpchannel.New(registry, limiter, line)
+	push.MaxBodyBytes = maxBodyBytes(cfg.Input.HTTP.MaxBodyBytes)
+	push.MaxConcurrentRequests = cfg.Input.HTTP.MaxConcurrentRequests
+	var readEvent gin.HandlerFunc
+	if ch := cfg.ClickHouse; ch.URL != "" {
+		reader, err := event.NewStore(ch.URL, ch.Database, ch.ReaderUsername, ch.ReaderPassword, ch.Timeout)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		readEvent = handler.ReadEvent(reader)
+	}
+	routes := router.Deps{
+		EventRead:   readEvent,
+		Push:        handler.DevicePush(push),
+		EventSchema: &handler.EventSchema{Catalog: catalog},
+		Admin: &handler.Admin{Store: adminStore, Observations: observations, KafkaCredentialAllowed: func(name string, brokers []string) bool {
+			profile, exists := cfg.Input.Kafka.Credentials[name]
+			return exists && profile.Allows(brokers)
+		}},
+		IAM: iam,
 	}
 
 	// syslog 与 Kafka 消费是后台通道：它们不挂在 HTTP 路由上，各自有监听/轮询循环。
-	syslogChannel := syslogchannel.New(registry, line, cfg.Input.Syslog.ReloadInterval, cfg.Input.Syslog.Host)
 	syslogDone := make(chan struct{})
 	go func() { defer close(syslogDone); _ = syslogChannel.Start(channelCtx) }()
 
-	kafkaConsumer := kafkachannel.New(registry, line, producer, kafkachannel.Options{
-		ReloadInterval: cfg.Input.Kafka.ReloadInterval,
-		Security:       producerSecurity(cfg.Output.Kafka),
-	})
 	kafkaDone := make(chan struct{})
 	go func() { defer close(kafkaDone); _ = kafkaConsumer.Start(channelCtx) }()
 
+	routeHandler := router.Handler(server, routes)
 	httpServer := &http.Server{
-		Addr:              cfg.App.Addr(),
-		Handler:           router.RootHandler(server, channels),
+		Addr: cfg.App.Addr(),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			httpOnline.Store(true)
+			routeHandler.ServeHTTP(w, r)
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
+		TLSConfig:         tlsConfig,
 	}
 
 	slog.Info("Starting HTTP listener", "event", "service.starting", "addr", cfg.App.Addr(),
-		"workers", cfg.Pipeline.Workers, "event_topic", cfg.Output.Kafka.EventTopic)
+		"workers", cfg.Pipeline.Workers, "event_topic", cfg.Events.Topic)
 
 	// 配置了证书就启用 TLS；监听与停机路径与明文一致。
-	if cfg.Input.HTTP.TLSCertFile != "" {
-		certificate, err := tls.LoadX509KeyPair(cfg.Input.HTTP.TLSCertFile, cfg.Input.HTTP.TLSKeyFile)
-		if err != nil {
-			return fmt.Errorf("could not load TLS certificate: %w", err)
-		}
-
-		httpServer.TLSConfig = &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
+	if tlsConfig != nil {
 		slog.Info("Starting HTTPS listener", "event", "service.starting_tls", "addr", cfg.App.Addr())
 	}
 
 	serveErr := httpx.Serve(ctx, httpServer)
+	httpOnline.Store(false)
+	stopWatch()
 
 	// 停机顺序必须显式：停接收 → 停后台通道 → 排空流水线。
 	// 之前 cancel 在 defer 里，而这里先阻塞等 pipelineDone，
@@ -228,9 +306,9 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	return nil
 }
 
-// openCache 创建并验证 Redis 连接；失败时不遗留客户端连接。
-func openCache(ctx context.Context, cfg cache.Config) (*redis.Client, error) {
-	client, err := cache.Open(ctx, cfg)
+// openRedis 创建并验证 Redis 连接；失败时不遗留客户端连接。
+func openRedis(ctx context.Context, cfg redisconn.Config) (*redis.Client, error) {
+	client, err := redisconn.Open(ctx, cfg)
 	if err != nil {
 		logging.From(ctx).Error("Redis connection failed", "event", "dependency.failed",
 			"dependency", "redis", "error", logging.Error(err))
@@ -272,22 +350,11 @@ func maxBodyBytes(value int64) int64 {
 	return value
 }
 
-// producerSecurity 把 Kafka 安全配置从配置结构转成客户端输入。
-// 生产与消费共用一份：同一集群不应有两套凭据来源。
-func producerSecurity(kafkaConfig config.Kafka) kafka.Security {
-	return kafka.Security{
-		Protocol:    kafkaConfig.SecurityProtocol,
-		Mechanism:   kafkaConfig.SASLMechanism,
-		Username:    kafkaConfig.SASLUsername,
-		PasswordEnv: kafkaConfig.SASLPasswordEnv,
-		CAFile:      kafkaConfig.TLSCAFile,
-	}
-}
-
 // ingestActions 是 Ingest 依赖的权限键：新增路由时必须同步加入。
 var ingestActions = []string{
+	iamclient.PermissionIngestEventsRead,
 	iamclient.PermissionIngestInputRead,
 	iamclient.PermissionIngestInputWrite,
-	iamclient.PermissionIngestMappingRead,
-	iamclient.PermissionIngestMappingWrite,
+	iamclient.PermissionIngestParsingRuleRead,
+	iamclient.PermissionIngestParsingRuleWrite,
 }

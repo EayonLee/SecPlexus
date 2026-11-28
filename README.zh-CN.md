@@ -92,7 +92,7 @@ flowchart LR
   end
 
   subgraph DATA["数据面"]
-    ING["ingestor<br/>OCSF 归一化"]
+    ING["ingest<br/>OCSF 归一化"]
     K["Kafka"]
     COR["correlator<br/>去重 · 关联 · 攻击链"]
     AG["ai-gateway<br/>agentgateway"]
@@ -141,8 +141,7 @@ flowchart LR
   OS -.-> ING
 ```
 
-这张图是目标架构，不代表每个服务今天都已交付。第一个已实现的切片是控制面；
-数据面、AI 研判、响应与护栏服务正在开发。
+这张图展示目标架构。仓库已实现 IAM、Web、Console 和 Ingest。Ingest 支持 HTTP、Syslog 和 Kafka 接入，归一化后发布到 Kafka。
 
 ## 技术栈
 
@@ -179,21 +178,27 @@ cd SecPlexus
 make config
 
 # 2. 编辑 .env：
-#    - 修改 SPX_IAM_BOOTSTRAP_PASSWORD（至少 12 个字符）
+#    - 设置 SPX_IAM_BOOTSTRAP_PASSWORD（12–128 个字符）
 #    - 设置 SPX_IAM_CSRF_KEY（恰好 32 字节；openssl rand -hex 16）
-#    - 设置 SPX_CONSOLE_IAM_TOKEN（32-512 字节；openssl rand -hex 32）
+#    - 分别设置 SPX_CONSOLE_IAM_TOKEN 和 SPX_INGEST_IAM_TOKEN
+#      （每个 32–512 字节，分别执行 openssl rand -hex 32 生成）
 #    - 将 PostgreSQL/Redis 指向你的实例
+#    - 配置 SPX_KAFKA_BROKERS，并预建标准 Event 主题
 
 # 3. 可选：启动仓库提供的 PostgreSQL 与 Redis
-make compose-up SERVICES="postgres redis"
+make compose-up SERVICES="postgresql redis"
 
-# 4. 执行 IAM 迁移，启动带热更新的 IAM、Console 与 Web
+# 4. 执行 IAM 和 Ingest 迁移，启动 IAM、Console、Ingest 和 Web
 make dev
 ```
 
-打开 <http://127.0.0.1:5173>，使用 `.env` 中配置的管理员登录。示例密码
-`changeme-at-least-12` 只是占位符，首次启动前必须修改。配置托管管理员不能在页面中
-编辑、停用或重置密码；请修改配置并重启 IAM。
+打开 <http://127.0.0.1:5173>，使用 `.env` 中配置的管理员登录。配置托管管理员不能在页面中
+编辑、停用或重置密码。需要变更托管管理员时，修改部署配置并运行 IAM 的专用维护命令。
+
+配置根目录的 `.env` 后，运行 `make compose-up` 构建并启动 Web、IAM、Console、Ingest、
+PostgreSQL、Redis、Kafka 和 ClickHouse。启动顺序包含数据库迁移、管理员初始化和主题初始化。
+ClickHouse 按 UTC 月分区永久保存已写入事件，平台 Kafka 主题默认保留 7 天。
+[开发 Compose](deploy/compose/compose.yaml) · [Ingest 启动与验证](src/apps/ingest/README.md#本地启动与验证)
 
 `make dev` 只连接配置的依赖，不会启动 Docker；`make stop` 在 macOS、Linux 和
 Windows 上精确停止它启动的进程树。全部配置项与反向代理设置见
@@ -204,14 +209,14 @@ Windows 上精确停止它启动的进程树。全部配置项与反向代理设
 | 命令 | 用途 |
 | --- | --- |
 | `make config [MODULES="..."]` | 离线校验配置；首次运行生成 `.env` 后停止。 |
-| `make dev [MODULES="..."]` | 迁移并启动 IAM、Console、Web，支持热更新。 |
-| `make build` | 构建两个 Go 服务和 Web 生产产物。 |
+| `make dev [MODULES="..."]` | 迁移并启动 IAM、Console、Ingest、Web，支持热更新。 |
+| `make build` | 构建 IAM、Console、Ingest 和 Web 生产产物。 |
 | `make preview [MODULES="..."]` | 启动后端并预览已构建的 Web。 |
-| `make compose-up [SERVICES="..."]` | 构建并启动整套 Compose 服务。 |
+| `make compose-up [SERVICES="..."]` | 构建并启动 Compose 清单中的服务。 |
 | `make stop` | 停止当前工作区应用与容器，保留数据。 |
 | `make test` | 运行脚本、Go 与 Web 单元测试。 |
 | `make test-e2e ARGS="--docker"` | 运行 Playwright 浏览器套件。 |
-| `make integration ARGS="--docker --race"` | 运行 Go 集成测试。 |
+| `make integration ARGS="--docker --clickhouse"` | 运行 Go 集成测试。 |
 | `make typecheck` / `make lint` | TypeScript 类型检查 / Biome lint。 |
 | `make vet` / `make lint-go` / `make vuln-go` | Go vet、golangci-lint、govulncheck。 |
 | `make catalogs` / `make catalogs-generate` | 检查 / 生成共享结果码与权限目录。 |
@@ -248,14 +253,11 @@ docs/             架构、开发指南与计划
 | [计划](docs/plans/README.md) | 已批准的规格、实施计划与验证证据。 |
 | [更新日志](CHANGELOG.md) | 重要变更、修复与安全相关更新。 |
 | [支持](SUPPORT.md) | 提问渠道与需要提供的信息。 |
-| [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Web](src/apps/web/README.md) | 模块契约与职责。 |
+| [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Ingest](src/apps/ingest/README.md) · [Web](src/apps/web/README.md) | 模块契约与职责。 |
 
 ## 建设状态
 
-SecPlexus 处于 pre-1.0，公开开发中。仓库当前包含第一个已实现的切片：控制面
-（IAM、Web、Console）。数据面、AI 研判、响应编排、AI 运行时防护、漏洞运营、
-Agent 安全与威胁情报已经在 [docs/plans](docs/plans/README.md) 中定义，正在开发。
-规划中的服务不作为已交付能力。
+SecPlexus 处于 pre-1.0，公开开发中。仓库包含控制面（IAM、Web、Console）和数据接入服务。启动方式与接口见 [Ingest README](src/apps/ingest/README.md)，剩余工作见[计划索引](docs/plans/README.md)。
 
 ## 安全
 

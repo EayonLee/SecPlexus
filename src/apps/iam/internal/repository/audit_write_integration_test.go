@@ -4,11 +4,13 @@ package repository_test
 
 import (
 	"context"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
 )
 
 // 回归：平台服务写入的审计事实记为 system，且 target_type 闭集生效。
@@ -18,6 +20,7 @@ func TestAppendAuditRecordsServiceFacts(t *testing.T) {
 
 	requestID := "it-audit-" + t.Name()
 	audit := repository.Audit{
+		EventID:    uuid.New(),
 		ActorType:  enum.ActorTypeSystem,
 		Action:     "ingest.input.write",
 		TargetType: string(enum.TargetTypeInput),
@@ -28,6 +31,14 @@ func TestAppendAuditRecordsServiceFacts(t *testing.T) {
 
 	if err := repository.AppendAudit(ctx, store.DB, audit); err != nil {
 		t.Fatalf("写入失败: %v", err)
+	}
+
+	if err := repository.AppendAudit(ctx, store.DB, audit); err != nil {
+		t.Fatalf("审计重投失败: %v", err)
+	}
+	var count int
+	if err := store.DB.QueryRowContext(ctx, "SELECT count(*) FROM iam.audit_events WHERE request_id = $1", requestID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("审计重投创建了重复记录: count=%d err=%v", count, err)
 	}
 
 	var actorType, targetType, outcome string

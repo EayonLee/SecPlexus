@@ -11,7 +11,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/kafka"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/connection/kafka"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
@@ -20,11 +20,10 @@ import (
 
 // Options 是 Kafka 生产者参数。
 type Options struct {
-	Brokers           []string       // broker 地址列表。
-	EventTopic        string         // 归一化成功事件的 topic。
-	ParseFailureTopic string         // 解析失败事件的 topic。
-	Security          kafka.Security // 传输与身份安全配置。
-	Timeout           time.Duration  // 单次生产的超时；默认 10 秒。
+	Brokers    []string       // broker 地址列表。
+	EventTopic string         // 标准事件的 topic。
+	Security   kafka.Security // 传输与身份安全配置。
+	Timeout    time.Duration  // 单次生产的超时；默认 10 秒。
 }
 
 // closeFlushTimeout 是关停时等待在途事件的上限，需小于编排层的强制终止宽限期。
@@ -35,10 +34,9 @@ const closeFlushTimeout = 3 * time.Second
 
 // Kafka 是 pipeline.Publisher 的 Kafka 实现。
 type Kafka struct {
-	client            *kgo.Client
-	eventTopic        string
-	parseFailureTopic string
-	timeout           time.Duration
+	client     *kgo.Client
+	eventTopic string
+	timeout    time.Duration
 }
 
 // NewKafka 创建生产者并校验连通性。
@@ -48,7 +46,7 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		return nil, errors.New("kafka brokers are required")
 	}
 	if options.EventTopic == "" {
-		return nil, errors.New("kafka topic is required")
+		return nil, errors.New("kafka event topic is required")
 	}
 
 	timeout := options.Timeout
@@ -70,9 +68,6 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		kgo.ProducerBatchMaxBytes(4 << 20),
 		kgo.RecordRetries(5),
 		kgo.ProduceRequestTimeout(timeout),
-		// 首次部署时 topic 还不存在；不显式允许，连接的集群一旦关闭自动建 topic，
-		// 每条事件都会永远投不出去。
-		kgo.AllowAutoTopicCreation(),
 		// 单条记录的交付上限要有限：默认两分钟的重试会让关停一直等这批记录，
 		// 而关停被拖住时缓冲里的事件反而更可能丢。
 		kgo.RecordDeliveryTimeout(recordDeliveryTimeout),
@@ -92,7 +87,7 @@ func NewKafka(ctx context.Context, options Options) (*Kafka, error) {
 		return nil, fmt.Errorf("kafka is unreachable: %w", err)
 	}
 
-	return &Kafka{client: client, eventTopic: options.EventTopic, parseFailureTopic: options.ParseFailureTopic, timeout: timeout}, nil
+	return &Kafka{client: client, eventTopic: options.EventTopic, timeout: timeout}, nil
 }
 
 // Publish 同步发送一批事件；返回 nil 表示全部已被 Kafka 确认。
@@ -107,7 +102,7 @@ func (k *Kafka) Publish(ctx context.Context, events []pipeline.Event) error {
 	for index := range events {
 		event := &events[index]
 		records = append(records, &kgo.Record{
-			Topic: k.topicFor(event),
+			Topic: k.eventTopic,
 			Key:   []byte(event.PartitionKey),
 			Value: event.Body,
 		})
@@ -118,22 +113,23 @@ func (k *Kafka) Publish(ctx context.Context, events []pipeline.Event) error {
 
 	results := k.client.ProduceSync(produceCtx, records...)
 	if err := results.FirstErr(); err != nil {
-		return fmt.Errorf("kafka publish failed: %w", err)
+		// ProduceSync 按完成顺序返回结果，失败索引按原批次的顺序计算。
+		failedRecords := make(map[*kgo.Record]struct{})
+		for _, result := range results {
+			if result.Err != nil {
+				failedRecords[result.Record] = struct{}{}
+			}
+		}
+		failed := make([]int, 0, len(failedRecords))
+		for i, record := range records {
+			if _, exists := failedRecords[record]; exists {
+				failed = append(failed, i)
+			}
+		}
+		return &pipeline.PartialPublishError{Failed: failed, Cause: fmt.Errorf("kafka publish failed: %w", err)}
 	}
 
 	return nil
-}
-
-// topicFor 选择事件应该发到哪个 topic。
-//
-// 单独成函数是为了能直接测试分流规则：构造真实 Kafka 客户端代价太高，
-// 而"失败事件去哪"是必须被钉住的行为。
-func (k *Kafka) topicFor(event *pipeline.Event) string {
-	if event.DeadLetter && k.parseFailureTopic != "" {
-		return k.parseFailureTopic
-	}
-
-	return k.eventTopic
 }
 
 // Close 冲刷未完成的生产请求并关闭连接。

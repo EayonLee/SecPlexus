@@ -16,7 +16,7 @@ import (
 )
 
 const getRoleSummary = `-- name: GetRoleSummary :one
-SELECT r.id, r.name, r.description, r.builtin,
+SELECT r.id, r.name, r.description, r.builtin, r.updated_at,
        (SELECT count(*) FROM iam.user_roles ur WHERE ur.role_id = r.id) AS user_count
 FROM iam.roles r
 WHERE r.id = $1::uuid
@@ -27,6 +27,7 @@ type GetRoleSummaryRow struct {
 	Name        string
 	Description string
 	Builtin     bool
+	UpdatedAt   time.Time
 	UserCount   int64
 }
 
@@ -38,13 +39,14 @@ func (q *Queries) GetRoleSummary(ctx context.Context, id uuid.UUID) (GetRoleSumm
 		&i.Name,
 		&i.Description,
 		&i.Builtin,
+		&i.UpdatedAt,
 		&i.UserCount,
 	)
 	return i, err
 }
 
 const getUserSummary = `-- name: GetUserSummary :one
-SELECT id, username, display_name, email, status, configured, auth_epoch
+SELECT id, username, display_name, email, status, configured, auth_epoch, created_at
 FROM iam.users
 WHERE id = $1::uuid
 `
@@ -57,6 +59,7 @@ type GetUserSummaryRow struct {
 	Status      enum.UserStatus
 	Configured  bool
 	AuthEpoch   int64
+	CreatedAt   time.Time
 }
 
 func (q *Queries) GetUserSummary(ctx context.Context, id uuid.UUID) (GetUserSummaryRow, error) {
@@ -70,6 +73,7 @@ func (q *Queries) GetUserSummary(ctx context.Context, id uuid.UUID) (GetUserSumm
 		&i.Status,
 		&i.Configured,
 		&i.AuthEpoch,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -80,8 +84,8 @@ SELECT id, occurred_at, actor_type, actor_name, action, target_type, target_id,
 FROM iam.audit_events
 WHERE ($1::text = '' OR actor_name ILIKE $1::text ESCAPE E'\\')
   AND ($2::text = '' OR outcome = $2::text)
-  AND occurred_at >= COALESCE(NULLIF($3::text, '')::date, '-infinity'::date)
-  AND occurred_at < COALESCE(NULLIF($4::text, '')::date + 1, 'infinity'::date)
+  AND occurred_at >= COALESCE($3::timestamptz, '-infinity'::timestamptz)
+  AND occurred_at < COALESCE($4::timestamptz, 'infinity'::timestamptz)
   AND ($5::text = ''
        OR (occurred_at, id) < ($6::timestamptz, $5::text::uuid))
 ORDER BY occurred_at DESC, id DESC
@@ -91,8 +95,8 @@ LIMIT $7::integer
 type ListAuditEventsParams struct {
 	Actor     string
 	Outcome   string
-	FromDate  string
-	ToDate    string
+	FromTime  sql.NullTime
+	ToTime    sql.NullTime
 	CursorID  string
 	CursorAt  time.Time
 	PageLimit int32
@@ -113,13 +117,13 @@ type ListAuditEventsRow struct {
 }
 
 // ListAuditEvents 用 (occurred_at,id) 键集分页：审计行数随时间增长，只提供向前游标。
-// 空串参数表示不筛选；日期先经 NULLIF 转 NULL，避免空串被当作非法日期。
+// 可空的时间参数表示 UTC 半开区间，NULL 表示该方向不筛选。
 func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]ListAuditEventsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAuditEvents,
 		arg.Actor,
 		arg.Outcome,
-		arg.FromDate,
-		arg.ToDate,
+		arg.FromTime,
+		arg.ToTime,
 		arg.CursorID,
 		arg.CursorAt,
 		arg.PageLimit,
@@ -158,15 +162,19 @@ func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams
 }
 
 const listRoles = `-- name: ListRoles :many
-SELECT r.id, r.name, r.description, r.builtin,
+SELECT r.id, r.name, r.description, r.builtin, r.updated_at,
        (SELECT count(*) FROM iam.user_roles ur WHERE ur.role_id = r.id) AS user_count,
        count(*) OVER() AS total
 FROM iam.roles r
+WHERE ($1::text = '' OR r.name ILIKE $1::text ESCAPE E'\\')
+AND ($2::boolean IS NULL OR r.builtin = $2::boolean)
 ORDER BY r.builtin DESC, r.name, r.id
-LIMIT $2::integer OFFSET $1::integer
+LIMIT $4::integer OFFSET $3::integer
 `
 
 type ListRolesParams struct {
+	Query      string
+	Builtin    sql.NullBool
 	PageOffset int32
 	PageLimit  int32
 }
@@ -176,12 +184,18 @@ type ListRolesRow struct {
 	Name        string
 	Description string
 	Builtin     bool
+	UpdatedAt   time.Time
 	UserCount   int64
 	Total       int64
 }
 
 func (q *Queries) ListRoles(ctx context.Context, arg ListRolesParams) ([]ListRolesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listRoles, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.QueryContext(ctx, listRoles,
+		arg.Query,
+		arg.Builtin,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +208,7 @@ func (q *Queries) ListRoles(ctx context.Context, arg ListRolesParams) ([]ListRol
 			&i.Name,
 			&i.Description,
 			&i.Builtin,
+			&i.UpdatedAt,
 			&i.UserCount,
 			&i.Total,
 		); err != nil {
@@ -212,19 +227,25 @@ func (q *Queries) ListRoles(ctx context.Context, arg ListRolesParams) ([]ListRol
 
 const listUsers = `-- name: ListUsers :many
 
-SELECT u.id, u.username, u.display_name, u.email, u.status, u.configured, u.auth_epoch,
+SELECT u.id, u.username, u.display_name, u.email, u.status, u.configured, u.auth_epoch, u.created_at,
        count(*) OVER() AS total
 FROM iam.users u
 WHERE ($1::text = ''
     OR u.username ILIKE $1::text ESCAPE E'\\'
     OR u.display_name ILIKE $1::text ESCAPE E'\\'
     OR COALESCE(u.email, '') ILIKE $1::text ESCAPE E'\\')
+  AND ($2::text = '' OR u.status = $2::text)
+  AND ($3::text = '' OR EXISTS (
+      SELECT 1 FROM iam.user_roles ur WHERE ur.user_id = u.id AND ur.role_id = NULLIF($3::text, '')::uuid
+  ))
 ORDER BY u.username, u.id
-LIMIT $3::integer OFFSET $2::integer
+LIMIT $5::integer OFFSET $4::integer
 `
 
 type ListUsersParams struct {
 	Query      string
+	Status     string
+	RoleID     string
 	PageOffset int32
 	PageLimit  int32
 }
@@ -237,6 +258,7 @@ type ListUsersRow struct {
 	Status      enum.UserStatus
 	Configured  bool
 	AuthEpoch   int64
+	CreatedAt   time.Time
 	Total       int64
 }
 
@@ -244,7 +266,13 @@ type ListUsersRow struct {
 // 页内角色与权限用第二条查询按标识批量读取，避免关联行重复参与分页与计数。
 // 搜索把输入当字面量：% 与 _ 通过 ESCAPE 转义，不会变成通配符。
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listUsers, arg.Query, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.QueryContext(ctx, listUsers,
+		arg.Query,
+		arg.Status,
+		arg.RoleID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +288,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.Status,
 			&i.Configured,
 			&i.AuthEpoch,
+			&i.CreatedAt,
 			&i.Total,
 		); err != nil {
 			return nil, err

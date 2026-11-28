@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { zLoginBody } from "@/spx/api/iam/schemas";
 
 import { LanguageSwitcher } from "../components/language-switcher";
+import { PageTitle } from "../components/page-header";
 import { errorMessageKey, initializeSession, signIn, useIdentity } from "../iam/session";
 
 export function LoginPage() {
@@ -41,7 +42,17 @@ export function LoginPage() {
     void initializeSession();
   }, [form]);
   useEffect(() => {
-    if (auth.status === "authenticated") router.replace("/dashboard");
+    if (auth.status === "authenticated") {
+      const next = new URLSearchParams(window.location.search).get("next");
+      const target =
+        next && URL.canParse(next, window.location.origin) ? new URL(next, window.location.origin) : undefined;
+      router.replace(
+        target?.origin === window.location.origin &&
+          (target.pathname === "/ingest" || target.pathname.startsWith("/ingest/"))
+          ? target.pathname + target.search
+          : "/dashboard",
+      );
+    }
   }, [auth.status, router]);
   return (
     <div className="relative flex h-dvh">
@@ -53,7 +64,7 @@ export function LoginPage() {
           <div className="flex flex-col gap-6">
             <Command className="mx-auto size-12" />
             <div className="flex flex-col gap-2">
-              <h1 className="text-5xl font-light">SecPlexus</h1>
+              <span className="text-5xl font-light">SecPlexus</span>
               <p className="opacity-80 text-xl">{t("continue")}</p>
             </div>
           </div>
@@ -62,7 +73,7 @@ export function LoginPage() {
       <div className="bg-background flex w-full items-center justify-center p-8 lg:w-2/3">
         <div className="flex w-full max-w-md flex-col gap-10 py-24 lg:py-32">
           <div className="flex flex-col gap-4 text-center">
-            <h2 className="font-medium tracking-tight">{t("signIn")}</h2>
+            <PageTitle>{t("signIn")}</PageTitle>
           </div>
           {auth.status === "unavailable" && (
             <Alert variant="destructive">
