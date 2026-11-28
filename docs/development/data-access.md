@@ -1,15 +1,15 @@
 # 数据访问规范
 
-两个存储各司其职，互不复制：**事件只在 ClickHouse，告警只在 PostgreSQL**。任何模块新增数据访问前先读本文。
+当前 PostgreSQL 保存模块业务数据，Ingest 将事件发布到 Kafka。Ingest 的独立 Event 存储进程消费 Kafka 并写入 ClickHouse。告警状态的持久化由未来告警模块决定。[Ingest 字段与存储设计](../../src/apps/ingest/README.md#event-字段与存储设计)
 
 ## 存储职责
 
 | 存储 | 存什么 | 访问方式 | 迁移 |
 |---|---|---|---|
-| PostgreSQL | 控制面（用户、角色、会话、审计）与**告警状态**（可更新、进审计） | `sqlc`：SQL 写在模块的 `queries/*.sql`，生成代码入库，编译期校验列与类型 | `goose`，ledger 按 `<module>.goose_db_version` |
-| ClickHouse（暂缓） | 事件流（OCSF）、检索与聚合，只追加 | `github.com/ClickHouse/clickhouse-go/v2`：写用 `PrepareBatch` 分批，读用 `Select`/`ScanStruct`，显式 SQL，**无 codegen** | `goose`（上游已支持 `DialectClickHouse`） |
+| PostgreSQL | 控制面（用户、角色、会话、审计、接入点和解析规则） | `sqlc`：SQL 写在模块的 `queries/*.sql`，生成代码入库，编译期校验列与类型 | `goose`，ledger 按 `<module>.goose_db_version` |
+| ClickHouse（暂缓） | 事件流（OCSF）、检索与聚合，只追加 | `github.com/ClickHouse/clickhouse-go/v2`：写用 `PrepareBatch` 分批，读用 `Select`/`ScanStruct`，显式 SQL，SQL 由模块维护 | `goose`（上游已支持 `DialectClickHouse`） |
 
-`sqlc` 不支持 ClickHouse（`engine: clickhouse` 会直接报 `unknown engine`），因此 CK 侧不引入生成器；
+`sqlc` 不支持 ClickHouse（`engine: clickhouse` 会直接报 `unknown engine`），因此 CK 查询不使用 sqlc。Event 的写入列清单和预期列结构由模块的字段投影派生；
 `gorm.io/driver/clickhouse` 仍停留在 v0.7.0（2025-05），不作为选型依据。
 
 ## PostgreSQL 规则
@@ -40,12 +40,12 @@
 6. **查询在真实库上 PREPARE 过**：`make sqlc-vet` 跑 `sqlc/db-prepare`——脚本自建临时库、应用全部迁移、
    把每条生成查询 PREPARE 一次再删库。静态分析看不见的类型与转换问题只有这一步能发现，CI 每次 PR 都跑。
 
-## ClickHouse 规则（暂缓实施，先登记）
+## ClickHouse 规则
 
 1. 查询必须带时间范围与 `LIMIT`，禁止无界扫描；聚合优先用物化视图预聚合，不要每次全量。
-2. 写入必须批量（`PrepareBatch`，按千行级分批）+ 幂等去重键；失败可安全重试，不允许逐行插入。
+2. 写入采用有条数、字节和期限上限的批次。Ingest 使用同步 `JSONEachRow` 批量写入，确认后提交消费位移。重放沿用已发布事件的同一排序键，精确查询覆盖后台合并前的重复记录。[ClickHouse 批量写入](https://clickhouse.com/docs/optimize/bulk-inserts)
 3. 只追加不更新；需要「当前状态」的数据放 PostgreSQL。
-4. 建表必须显式 `PARTITION BY`（按月）与 `ORDER BY`（时间 + 高频过滤列），否则检索会退化为全表扫。
+4. 建表按保留期和实际查询明确分区、排序键。Ingest 的 [Event 表](../plans/event-contract/storage.md) 按事件发生日分区，以类别、发生时间及事件 ID 排序。变更字段时核对权威目录、物理投影与实际表结构，目标负载下验证扫描量和合并能力。
 5. 与 PostgreSQL 不 join：跨存储在 service 层组合（PG 取时间窗与实体 → CK 查事件）。
 6. 事件表不返回 API JSON；响应结构仍在 `internal/model` 定义。
 

@@ -1,0 +1,38 @@
+name: Ingest fuzz
+
+on:
+  schedule:
+    - cron: '23 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./src/apps/ingest/internal/parser
+            test: FuzzParseEveryMode
+          - package: ./src/apps/ingest/internal/parser
+            test: FuzzSplitNeverPanics
+          - package: ./src/apps/ingest/internal/channel/syslogchannel
+            test: FuzzSplitFrames
+          - package: ./src/apps/ingest/internal/channel/syslogchannel
+            test: FuzzFlattenNeverPanics
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Exercise the parser with randomized input
+        env:
+          FUZZ_PACKAGE: ${{ matrix.package }}
+          FUZZ_TARGET: ${{ matrix.test }}
+        run: go test "$FUZZ_PACKAGE" -run '^$' -fuzz "^${FUZZ_TARGET}$" -fuzztime 75s -parallel 2

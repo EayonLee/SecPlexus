@@ -1,6 +1,6 @@
 # 解析语料库
 
-这里的每条样本都是一条**真实格式**的报文，用于回归测试与模糊测试种子。
+这里的每条样本都是一条**公开格式**的报文，用于回归测试与模糊测试种子。
 
 ## 为什么单独放语料
 
@@ -19,8 +19,8 @@ Go 工具链把包内名为 `testdata` 的目录**整体忽略**（不参与 bui
 这是 Go 官方的测试夹具约定，编译器与 `go/*/testdata` 规则都依赖它：
 外部测试数据不污染构建产物，也不会被误当成包代码。
 
-仓库根的 `tests/` 放的是**跨模块的集成与端到端脚本**（`tests/integration`、`tests/e2e`），
-与"某个包自己的夹具"是两类东西：前者需要起容器、跑真实服务，后者只是纯数据。
+仓库根的 `tests/integration/` 负责跨模块集成，浏览器用例随 Web 维护在
+`src/apps/web/tests/e2e/`。两者通过根命令运行，包内测试直接读取本目录的语料。
 
 因此本仓库的约定是：
 
@@ -28,7 +28,7 @@ Go 工具链把包内名为 `testdata` 的目录**整体忽略**（不参与 bui
 |---|---|---|
 | `<package>/testdata/` | 该包测试用的纯数据（语料、fuzz 种子、期望输出） | `go test` |
 | `tests/integration/` | 需要 PostgreSQL/Redis/Kafka 的集成脚本 | `make integration` |
-| `tests/e2e/` | 浏览器端到端流程 | `make test-e2e` |
+| `src/apps/web/tests/e2e/` | 浏览器端到端流程 | `make test-e2e` |
 
 `testdata/fuzz/<FuzzName>/` 是 `go test -fuzz` 自动写入的**回归语料**：
 模糊测试一旦发现失败输入就存到这里，之后每次普通 `go test` 都会重跑它。
@@ -36,13 +36,13 @@ Go 工具链把包内名为 `testdata` 的目录**整体忽略**（不参与 bui
 ## 目录约定
 
 ```
-corpus/<mode>/<name>.log     每条样本；<mode> 与解析模式同名（json/cef/kv/regex/delimiter）
+corpus/<variant>.txt     每行一条样本，文件名对应 corpusVariants
 ```
 
 ## 来源与许可
 
 语料只收录**格式规范里公开的写法**与**按公开规范自行构造**的样本，
-不复制任何厂商文档原文。若要从开源数据集导样本（见下），必须在该文件顶部
+不复制任何厂商文档原文。FortiGate 样本依照 [FortiOS CEF 流量日志字段定义](https://docs.fortinet.com/document/fortigate/7.0.8/fortios-log-message-reference/949981/traffic-log-support-for-cef) 自行构造，使用文档保留地址与虚构内容。若要从开源数据集导样本（见下），必须在该文件顶部
 注明来源、许可与获取日期。
 
 可用的公开数据集（按需导入，注意各自许可）：

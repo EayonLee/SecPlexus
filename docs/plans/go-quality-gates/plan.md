@@ -76,6 +76,7 @@ issues:
 | errcheck / ineffassign / unused / govet / staticcheck | 基础正确性，且已有 2 个真实问题 |
 | errorlint | 本项目大量用 `%w` 包装错误（实测 6 个真实问题） |
 | bodyclose / noctx | 有 HTTP 客户端与服务端实现 |
+| depguard | 检查路由包与存储驱动的边界，限制 Gin 在 HTTP 层使用。具体规则由共享配置维护。[后端结构规范](../../development/backend-structure.md#gin-路由与-http-边界) |
 | rowserrcheck / sqlclosecheck | 有大量 `rows.Next()`/`rows.Close()` 手写循环（迁移到 sqlc 后仍保留 sqlclosecheck 作为兜底） |
 | gocritic | 只开默认检查，能发现命名/冗余类缺陷 |
 | misspell | AGENTS 要求日志与事件名为英文，拼写必须能自动拦 |

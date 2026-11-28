@@ -127,7 +127,7 @@
 ```sh
 go run ./src/apps/ingest/cmd check-config --config src/apps/ingest/config.yaml
 go test ./src/apps/ingest/...
-go test -tags=integration ./src/apps/ingest/...   # 需 SPX_TEST_POSTGRES_URL/SPX_TEST_REDIS_URL + Kafka（--docker）
+go test -tags=integration ./src/apps/ingest/...   # 需 SPX_TEST_POSTGRESQL_URL/SPX_TEST_REDIS_URL + Kafka（--docker）
 pnpm catalogs:check
 make build
 gofmt -l src/

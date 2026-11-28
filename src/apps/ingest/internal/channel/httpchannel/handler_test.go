@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/channel/httpchannel"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
 
@@ -60,12 +60,7 @@ func (f *fakePublisher) entry() []pipeline.Event {
 func newRule(t *testing.T) *normalizer.Compiled {
 	t.Helper()
 
-	engine, err := normalizer.Compile(normalizer.Mapping{
-		ID:        "http-test",
-		Parse:     parser.Spec{Mode: parser.ModeJSON},
-		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
-		Constants: map[string]any{"class_uid": 2004},
-	})
+	engine, err := normalizer.CompileDefinition([]byte(`{"contract_version":"v1","parse":{"mode":"json"},"branches":[{"id":"network","name":"Network","class_uid":4001,"field_map":{"src":"src_endpoint.ip"}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,6 +256,66 @@ func TestOversizedBatchReturns413(t *testing.T) {
 	}
 }
 
+func TestOversizedBatchIsRejectedBeforeReadingRemainingJSON(t *testing.T) {
+	server, line, _, _ := harness(t, nil)
+	prefix := strings.Repeat("{\"src\":\"10.0.0.1\"}\n", httpchannel.MaxBatch+1)
+	response := post(t, server, "conn-1", testToken, "application/json", prefix+"{")
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("已知批次超过条数上限，状态 = %d，期望 413", response.StatusCode)
+	}
+	if line.Stats().Accepted != 0 {
+		t.Fatal("超限批次不应部分受理")
+	}
+}
+
+func TestConcurrentBodyLimitRejectsBeforeReading(t *testing.T) {
+	const capacity = 2
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{ID: "conn-1", Token: input.DigestToken(testToken)}})
+	channel := httpchannel.New(registry, &fakeLimiter{}, nil)
+	channel.MaxConcurrentRequests = capacity
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	request := func(body io.Reader) *http.Request {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", body)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		return req
+	}
+	started := make(chan struct{}, capacity)
+	var requests sync.WaitGroup
+	for range capacity {
+		requests.Go(func() {
+			channel.Handle(httptest.NewRecorder(), request(waitingBody{ctx, started}), "conn-1")
+		})
+	}
+	defer requests.Wait()
+	defer cancel()
+	for range capacity {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("并发请求没有进入读取阶段")
+		}
+	}
+	rejected := httptest.NewRecorder()
+	channel.Handle(rejected, request(strings.NewReader("malformed")), "conn-1")
+	if rejected.Code != http.StatusServiceUnavailable || rejected.Header().Get("Retry-After") == "" {
+		t.Fatalf("读入预算耗尽时应返回带重试提示的 503，状态 = %d", rejected.Code)
+	}
+}
+
+type waitingBody struct {
+	ctx     context.Context
+	started chan<- struct{}
+}
+
+func (body waitingBody) Read(_ []byte) (int, error) {
+	body.started <- struct{}{}
+	<-body.ctx.Done()
+	return 0, body.ctx.Err()
+}
+
 // 限流命中返回 429 并带 Retry-After。
 func TestRateLimitedReturns429(t *testing.T) {
 	limiter := &fakeLimiter{err: httpchannel.ErrRateLimited}
@@ -310,8 +365,8 @@ func TestMalformedPayloadStillPublishesErrorEvent(t *testing.T) {
 	}
 }
 
-// 未挂规则的接入点：受理成功，事件以 error 状态透传原文。
-func TestConnectorWithoutRulePublishesPassthrough(t *testing.T) {
+// 未挂规则的接入点：受理成功，以 error 状态发布诊断。
+func TestInputWithoutRulePublishesDiagnostic(t *testing.T) {
 	registry := input.NewMemory()
 	registry.Replace([]input.Entry{{
 		ID:       "conn-generic",
@@ -373,4 +428,75 @@ func TestNoAcceptedReturns503(t *testing.T) {
 	if response.Header.Get("Retry-After") == "" {
 		t.Fatal("缺少 Retry-After，设备不知道要重推")
 	}
+}
+
+func TestHTTPDoesNotAcknowledgeBeforeBrokerConfirmation(t *testing.T) {
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: newRule(t),
+		Token: input.DigestToken(testToken),
+	}})
+	line := pipeline.New(pipeline.Options{Workers: 1, BatchSize: 1}, unavailablePublisher{})
+	run, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = line.Start(run) }()
+
+	ctx, cancel := context.WithTimeout(run, 100*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(`{"src":"192.0.2.1"}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	httpchannel.New(registry, &fakeLimiter{}, line).Handle(w, req, "conn-1")
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("unconfirmed publication received HTTP %d with retry header %q", w.Code, w.Header().Get("Retry-After"))
+	}
+}
+
+type unavailablePublisher struct{}
+
+func (unavailablePublisher) Publish(context.Context, []pipeline.Event) error {
+	return errors.New("broker unavailable")
+}
+
+func TestHTTPReportsOnlyConfirmedPrefix(t *testing.T) {
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "conn-1", Protocol: input.ProtocolHTTP, Mapping: newRule(t),
+		Token: input.DigestToken(testToken),
+	}})
+	line := pipeline.New(pipeline.Options{
+		Workers: 1, BatchSize: 2, FlushInterval: time.Minute, DrainTimeout: 100 * time.Millisecond,
+	}, &confirmFirstOnly{})
+	run, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = line.Start(run) }()
+
+	ctx, cancel := context.WithTimeout(run, 500*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(`[{"src":"192.0.2.1"},{"src":"192.0.2.2"}]`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	httpchannel.New(registry, &fakeLimiter{}, line).Handle(w, req, "conn-1")
+	var body struct {
+		Accepted int
+		Rejected int
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusAccepted || body.Accepted != 1 || body.Rejected != 1 || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("partial response: HTTP %d, %+v, retry %q", w.Code, body, w.Header().Get("Retry-After"))
+	}
+}
+
+type confirmFirstOnly struct{}
+
+func (*confirmFirstOnly) Publish(_ context.Context, events []pipeline.Event) error {
+	err := errors.New("record was not confirmed")
+	if len(events) == 2 {
+		return &pipeline.PartialPublishError{Failed: []int{1}, Cause: err}
+	}
+	return err
 }

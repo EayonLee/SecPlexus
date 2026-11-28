@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +37,25 @@ func (s *Server) Metrics(c *gin.Context) {
 	writeCounter(w, "spx_ingest_panic_total", "解析引擎 panic 次数", stats.Panics)
 	writeCounter(w, "spx_ingest_dropped_total", "排空超时被丢弃的事件数", stats.Dropped)
 	writeGauge(w, "spx_ingest_queue_depth", "当前待解析队列长度", int64(stats.QueueDepth))
+	writeGauge(w, "spx_ingest_in_flight_input_bytes", "待解析及正在解析的输入字节", stats.InFlightBytes)
+	if s.SourceSnapshotAge != nil {
+		writeGauge(w, "spx_ingest_source_snapshot_age_seconds", "距上次确认接入配置的秒数", int64(s.SourceSnapshotAge()/time.Second))
+	}
+	if s.KafkaOffsetsRejected != nil {
+		writeCounter(w, "spx_ingest_kafka_offsets_rejected_total", "Kafka 因位移或主题身份异常暂停分区的次数", s.KafkaOffsetsRejected())
+	}
+	if s.AuditOutboxHealth != nil {
+		check, cancel := context.WithTimeout(c.Request.Context(), 250*time.Millisecond)
+		depth, oldest, err := s.AuditOutboxHealth(check)
+		cancel()
+		if err == nil {
+			writeGauge(w, "spx_ingest_audit_outbox_available", "可读取审计投递队列", 1)
+			writeGauge(w, "spx_ingest_audit_outbox_depth", "待投递审计记录数，最多采样10001条", depth)
+			writeGauge(w, "spx_ingest_audit_outbox_oldest_seconds", "最老待投递审计记录等待时间", oldest)
+		} else {
+			writeGauge(w, "spx_ingest_audit_outbox_available", "可读取审计投递队列", 0)
+		}
+	}
 
 	// 按协议分维度：看板需要"哪个通道出了问题"，全局计数回答不了。
 	// 标签顺序固定，避免抓取端出现同一序列的不同文本形式。
@@ -45,11 +66,8 @@ func (s *Server) Metrics(c *gin.Context) {
 
 	sort.Strings(protocols)
 
-	for _, protocol := range protocols {
-		byProtocol := stats.ByProtocol[protocol]
-		writeCounterLabel(w, "spx_ingest_protocol_accepted_total", "按协议的受理总数", "protocol", protocol, byProtocol.Accepted)
-		writeCounterLabel(w, "spx_ingest_protocol_parsed_total", "按协议的解析成功总数", "protocol", protocol, byProtocol.Parsed)
-	}
+	writeLabeledCounter(w, "spx_ingest_protocol_accepted_total", "按协议的受理总数", "protocol", protocols, func(key string) uint64 { return stats.ByProtocol[key].Accepted })
+	writeLabeledCounter(w, "spx_ingest_protocol_parsed_total", "按协议的解析成功总数", "protocol", protocols, func(key string) uint64 { return stats.ByProtocol[key].Parsed })
 
 	// 按接入点分维度：定位到"是哪台设备在发坏数据"。
 	// 基数由流水线的 maxInputSeries 限制，抓取端不会被拖垮。
@@ -60,11 +78,8 @@ func (s *Server) Metrics(c *gin.Context) {
 
 	sort.Strings(inputs)
 
-	for _, inputID := range inputs {
-		byInput := stats.ByInput[inputID]
-		writeCounterLabel(w, "spx_ingest_input_accepted_total", "按接入点的受理总数", "input_id", inputID, byInput.Accepted)
-		writeCounterLabel(w, "spx_ingest_input_parsed_total", "按接入点的解析成功总数", "input_id", inputID, byInput.Parsed)
-	}
+	writeLabeledCounter(w, "spx_ingest_input_accepted_total", "按数据接入的受理总数", "input_id", inputs, func(key string) uint64 { return stats.ByInput[key].Accepted })
+	writeLabeledCounter(w, "spx_ingest_input_parsed_total", "按数据接入的解析成功总数", "input_id", inputs, func(key string) uint64 { return stats.ByInput[key].Parsed })
 }
 
 // writeCounter 输出一个 counter（单调递增）。
@@ -72,12 +87,18 @@ func writeCounter(w http.ResponseWriter, name, help string, value uint64) {
 	_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, value)
 }
 
-// writeCounterLabel 输出带单个标签的 counter。
+// writeLabeledCounter 一次输出计数器的全部样本，元数据只写一次。
 //
 // 标签名与值都由调用方给定：协议来自受控枚举，接入点标识是 UUID，
 // 二者都不含引号或换行，因此无需转义。
-func writeCounterLabel(w http.ResponseWriter, name, help, label, value string, count uint64) {
-	_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s{%s=%q} %d\n", name, help, name, name, label, value, count)
+func writeLabeledCounter(w http.ResponseWriter, name, help, label string, values []string, count func(string) uint64) {
+	if len(values) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n", name, help, name)
+	for _, value := range values {
+		_, _ = fmt.Fprintf(w, "%s{%s=%q} %d\n", name, label, value, count(value))
+	}
 }
 
 // writeGauge 输出一个 gauge（可增可减）。

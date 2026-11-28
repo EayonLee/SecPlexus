@@ -5,7 +5,6 @@ import { FileQuestion } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-
 import { ErrorState } from "@/spx/components/error-state";
 import { LanguageSwitcher } from "@/spx/components/language-switcher";
 
@@ -18,6 +17,7 @@ export default function NotFound() {
         <LanguageSwitcher />
       </div>
       <ErrorState
+        viewport
         icon={FileQuestion}
         title={t("notFoundTitle")}
         description={t("notFoundDescription")}

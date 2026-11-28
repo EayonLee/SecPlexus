@@ -11,7 +11,7 @@ import (
 )
 
 // BuiltinRoleName 是配置托管管理员自动持有的内置角色名称。
-// 权限目录、内置角色与配置管理员都在启动时幂等写入数据库，前端只读。
+// 权限目录、内置角色与配置管理员由迁移任务写入数据库，前端只读。
 const BuiltinRoleName = "超级管理员"
 
 //go:embed permissions.json

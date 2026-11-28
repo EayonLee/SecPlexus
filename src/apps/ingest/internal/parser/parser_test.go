@@ -109,7 +109,7 @@ func TestKVParsesLogfmt(t *testing.T) {
 func TestKVHonorsCustomSeparators(t *testing.T) {
 	fields := parse(t, parser.Spec{
 		Mode: parser.ModeKV,
-		KV:   parser.KVSpec{Delimiter: ":", Entry: ","},
+		KV:   parser.KVSpec{KeyValueSeparator: ":", FieldSeparator: ","},
 	}, "user:alice,action:login")
 
 	if fields["user"] != "alice" || fields["action"] != "login" {
@@ -153,10 +153,22 @@ func TestRegexSkipsUnmatchedOptionalGroup(t *testing.T) {
 	}
 }
 
+func TestDelimiterNamesFieldsByPosition(t *testing.T) {
+	fields := parse(t, parser.Spec{
+		Mode:      parser.ModeDelimiter,
+		Delimiter: parser.DelimiterSpec{Separator: "|"},
+	}, `192.0.2.1||"alpha|beta"`)
+
+	want := map[string]any{"field_1": "192.0.2.1", "field_2": "", "field_3": "alpha|beta"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("delimiter fields = %#v, want %#v", fields, want)
+	}
+}
+
 func TestDelimiterMapsColumnsByPosition(t *testing.T) {
 	fields := parse(t, parser.Spec{
 		Mode:      parser.ModeDelimiter,
-		Delimiter: parser.DelimiterSpec{Separator: ",", Columns: []string{"time", "level", "src", "msg"}},
+		Delimiter: parser.DelimiterSpec{Separator: ",", FieldNames: []string{"time", "level", "src", "msg"}},
 	}, `2026-11-14,high,1.2.3.4,"sql injection detected"`)
 
 	want := map[string]any{"time": "2026-11-14", "level": "high", "src": "1.2.3.4", "msg": "sql injection detected"}
@@ -169,7 +181,7 @@ func TestDelimiterMapsColumnsByPosition(t *testing.T) {
 func TestDelimiterToleratesShortRecord(t *testing.T) {
 	fields := parse(t, parser.Spec{
 		Mode:      parser.ModeDelimiter,
-		Delimiter: parser.DelimiterSpec{Separator: ",", Columns: []string{"a", "b", "c"}},
+		Delimiter: parser.DelimiterSpec{Separator: ",", FieldNames: []string{"a", "b", "c"}},
 	}, "1,2")
 
 	if len(fields) != 2 || fields["a"] != "1" || fields["b"] != "2" {
@@ -183,12 +195,11 @@ func TestNewRejectsInvalidSpec(t *testing.T) {
 		"empty pattern":      {Mode: parser.ModeRegex},
 		"invalid pattern":    {Mode: parser.ModeRegex, Pattern: "(?P<a>"},
 		"no named group":     {Mode: parser.ModeRegex, Pattern: "(\\d+)"},
-		"multichar kv delim": {Mode: parser.ModeKV, KV: parser.KVSpec{Delimiter: "=="}},
-		"kv equal seps":      {Mode: parser.ModeKV, KV: parser.KVSpec{Delimiter: "=", Entry: "="}},
-		"delimiter no cols":  {Mode: parser.ModeDelimiter},
+		"multichar kv delim": {Mode: parser.ModeKV, KV: parser.KVSpec{KeyValueSeparator: "=="}},
+		"kv equal seps":      {Mode: parser.ModeKV, KV: parser.KVSpec{KeyValueSeparator: "=", FieldSeparator: "="}},
 		"multichar delimiter": {
 			Mode:      parser.ModeDelimiter,
-			Delimiter: parser.DelimiterSpec{Separator: "::", Columns: []string{"a"}},
+			Delimiter: parser.DelimiterSpec{Separator: "::", FieldNames: []string{"a"}},
 		},
 	}
 
@@ -212,7 +223,7 @@ func TestParseReportsMalformedMessages(t *testing.T) {
 		"cef short header": {parser.Spec{Mode: parser.ModeCEF}, "CEF:0|V|P|1.0|7|name"},
 		"kv no pairs":      {parser.Spec{Mode: parser.ModeKV}, "plain text only"},
 		"regex no match":   {parser.Spec{Mode: parser.ModeRegex, Pattern: `(?P<a>\d+)`}, "none"},
-		"delimiter empty":  {parser.Spec{Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", Columns: []string{"a"}}}, ""},
+		"delimiter empty":  {parser.Spec{Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: ",", FieldNames: []string{"a"}}}, ""},
 	}
 
 	for name, test := range tests {

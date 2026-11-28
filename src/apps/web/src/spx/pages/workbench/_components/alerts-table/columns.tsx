@@ -30,7 +30,7 @@ export function useRecentLeadsColumns(): ColumnDef<DataTableFeatures, RecentLead
       {
         id: "select",
         header: ({ table }) => (
-          <div className="flex items-center justify-center">
+          <div className="flex items-center">
             <Subscribe
               source={table.atoms.rowSelection}
               selector={() =>
@@ -49,7 +49,7 @@ export function useRecentLeadsColumns(): ColumnDef<DataTableFeatures, RecentLead
           </div>
         ),
         cell: ({ row }) => (
-          <div className="flex items-center justify-center">
+          <div className="flex items-center">
             <Subscribe source={row.table.atoms.rowSelection} selector={(selection) => Boolean(selection?.[row.id])}>
               {(checked) => (
                 <Checkbox

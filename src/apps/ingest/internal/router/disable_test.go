@@ -32,11 +32,8 @@ func TestDisabledInputRejectsDevicePush(t *testing.T) {
 	t.Cleanup(cancel)
 	go func() { _ = line.Start(ctx) }()
 
-	server := httptest.NewServer(router.RootHandler(&handler.Server{}, router.Deps{
-		Registry: registry,
-		Limiter:  allowAllLimiter{},
-		Pipeline: line,
-		MaxBody:  8 << 20,
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{
+		Push: devicePush(registry, line),
 	}))
 	t.Cleanup(server.Close)
 

@@ -27,6 +27,8 @@ func (s *Server) Me(c *gin.Context) {
 
 	result.Success(w, model.APIMe{
 		Principal:   me.Principal,
+		Email:       me.Email,
+		CreatedAt:   me.CreatedAt,
 		Permissions: me.Permissions,
 		Roles:       roles,
 		TimeZone:    me.TimeZone,

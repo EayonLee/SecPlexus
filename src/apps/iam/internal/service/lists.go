@@ -10,12 +10,12 @@ import (
 )
 
 // ListUsers 校验用户读取权限后读取列表；支持用户名、显示名与邮箱模糊搜索。
-func (s *Service) ListUsers(ctx context.Context, limit, offset int, query string) (repository.UserPage, error) {
+func (s *Service) ListUsers(ctx context.Context, limit, offset int, filter repository.UserListFilter) (repository.UserPage, error) {
 	if _, err := s.Authorize(ctx, iamclient.PermissionIAMUsersRead); err != nil {
 		return repository.UserPage{}, err
 	}
 
-	return repository.ListUsers(ctx, s.Store.DB, limit, offset, query)
+	return repository.ListUsers(ctx, s.Store.DB, limit, offset, filter)
 }
 
 // ListAuditEvents 读取审计日志。可见范围完全由 iam.audit.read 决定，

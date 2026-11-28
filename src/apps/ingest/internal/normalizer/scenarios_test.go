@@ -154,7 +154,7 @@ func TestMissingSeverityFieldWarnsAndDefaultsToUnknown(t *testing.T) {
 	if event.Fields["severity_id"] != normalizer.SeverityUnknown {
 		t.Fatalf("severity_id = %#v, want Unknown", event.Fields["severity_id"])
 	}
-	if len(event.Warnings) == 0 {
+	if len(event.Issues) == 0 {
 		t.Fatal("expected a warning")
 	}
 }

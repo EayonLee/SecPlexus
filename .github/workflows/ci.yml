@@ -53,7 +53,7 @@ jobs:
       - name: Run tests
         run: make test
 
-  # 集成测试要真实 PostgreSQL 与 Redis，且备份恢复用例需要与服务端同主版本的 pg_dump，
+  # 集成测试使用 PostgreSQL、Redis、Kafka 与 ClickHouse，PG 恢复用例还需要同主版本的 pg_dump，
   # 因此单独一个 Linux job：临时容器由 tests/integration/run.mjs 创建并在结束时清理。
   # 固定 24.04 而不是 ubuntu-latest：恢复用例的 pg_dump 必须与 postgres:16 容器同主版本，
   # 24.04 提供 postgresql-client-16，而 26.04 只提供更新的主版本。
@@ -83,9 +83,12 @@ jobs:
           sudo apt-get install -y -qq postgresql-client-16
           echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
 
+      - name: Check Compose configuration
+        run: node --test tests/integration/compose.test.mjs
+
       # --docker 是脚本的显式授权：创建独立临时 PG/Redis 容器、随机端口与临时凭据，结束后清理自有资源。
       - name: Run integration tests
-        run: make integration ARGS="--docker"
+        run: make integration ARGS="--docker --clickhouse"
 
   quality:
     name: Static checks
@@ -154,6 +157,18 @@ jobs:
       - name: Catalogs and migration boundaries
         run: pnpm catalogs:check
 
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.14'
+
+      - name: OCSF field catalog is reproducible
+        run: |
+          python -m pip install ocsf-schema-compiler==1.0.1 jsonschema==4.26.0
+          python src/apps/ingest/schema/events/generate.py --check --write-compiled "$RUNNER_TEMP/ocsf-compiled.json"
+          SPX_TEST_OCSF_CORPUS="$RUNNER_TEMP/ocsf-published.json" \
+            go test ./src/apps/ingest/internal/pipeline -run '^TestPublishedContractCorpus$' -count=1
+          python src/apps/ingest/schema/events/check_published.py "$RUNNER_TEMP/ocsf-compiled.json" "$RUNNER_TEMP/ocsf-published.json"
+
       # 生成代码入库，必须与 queries/*.sql 同步；漂移即失败。
       - name: Generated query code is up to date
         run: make sqlc-check
@@ -162,7 +177,7 @@ jobs:
       - name: Generated queries prepare against PostgreSQL
         run: make sqlc-vet
         env:
-          SPX_TEST_POSTGRES_URL: postgres://vet:vet@127.0.0.1:5432/vet?sslmode=disable
+          SPX_TEST_POSTGRESQL_URL: postgres://vet:vet@127.0.0.1:5432/vet?sslmode=disable
 
   # 端到端：真实 Next 构建 + 双 IAM/双 Console 副本 + 浏览器。只有它能覆盖登录、
   # 改密、撤权与 SSE 取消的产品流程，因此也放进 CI；组件由 --docker 临时创建。

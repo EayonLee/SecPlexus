@@ -1,10 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { testDependencies } from "../../../../../tests/integration/dependencies.mjs";
+import { kafkaContainer } from "../../../../../tests/integration/kafka-container.mjs";
 import { constants, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertStackAvailable } from "../../../../../scripts/runtime.mjs";
 import { terminateProcessTree } from "../../../../../scripts/processes.mjs";
 
 const root = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -17,9 +20,28 @@ const systemEnv = Object.fromEntries(
 );
 let ownsRootEnv = false;
 let ownedDatabase;
-let postgresAdminURL;
+const useDocker = process.argv.includes("--docker");
+const withClickHouse = process.argv.includes("--clickhouse");
+
+let external;
+let migratedDatabaseURL;
+const kafkaNamespace = `spx-e2e-${randomBytes(16).toString("hex")}`;
+const inputTopic = `${kafkaNamespace}.input`;
+const eventTopic = `${kafkaNamespace}.ingest.events`;
+const eventFailureTopic = `${kafkaNamespace}.ingest.event-failures`;
+const eventStoreGroup = `${kafkaNamespace}-ingest-events`;
+let eventStoreStarted = false;
+const ownedTopics = [];
 const directory = mkdtempSync(path.join(tmpdir(), "spx-e2e-"));
 const name = `spx-e2e-${randomBytes(5).toString("hex")}`;
+const kafkaAdmin = path.join(directory, `kafka-admin${executableSuffix}`);
+function kafkaOperation(action, name, brokers = external?.SPX_TEST_KAFKA_BROKERS) {
+  const result = spawnSync(kafkaAdmin, [action, name], {
+    env: { ...systemEnv, SPX_TEST_KAFKA_BROKERS: brokers },
+    stdio: "inherit",
+  });
+  if (result.status !== 0) throw new Error(`Kafka ${action} failed for ${name}`);
+}
 const containers = [];
 const children = [];
 // 收尾失败时保留工作目录，供事后读日志；成功则照常清理。
@@ -31,12 +53,17 @@ function stage(label) {
   console.error(`[e2e +${String(Date.now() - startedAt).padStart(6)}ms] ${label}`);
 }
 let stackReady = false;
+// 启动阶段也要进入 finally；此时可能已经建好外部数据库和 Kafka 主题。
+const startup = new AbortController();
+const interruptStartup = () => startup.abort(new Error("E2E startup interrupted"));
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, interruptStartup);
 function command(binary, args, options = {}) {
   const result = spawnSync(binary, args, { encoding: "utf8", ...(binary === "pnpm" ? pnpmShell : {}), ...options });
   if (result.status !== 0) throw new Error(`${binary} ${args[0]} failed; no credentials are logged.`);
   return result.stdout?.trim();
 }
 async function port() {
+  startup.signal.throwIfAborted();
   const server = net.createServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const number = server.address().port;
@@ -71,9 +98,13 @@ function tailOf(child) {
 async function ready(url, child) {
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
+    startup.signal.throwIfAborted();
     if (child.exitCode !== null) {
       const tail = tailOf(child);
-      throw new Error(`Test process exited before readiness: ${new URL(url).pathname}` + (tail ? `\n--- child output ---\n${tail}` : ""));
+      throw new Error(
+        `Test process exited before readiness: ${new URL(url).pathname}` +
+          (tail ? `\n--- child output ---\n${tail}` : ""),
+      );
     }
     try {
       if ((await fetch(url)).ok) return;
@@ -82,9 +113,16 @@ async function ready(url, child) {
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`Test process readiness timeout: ${new URL(url).pathname}`);
+  const tail = tailOf(child);
+  throw new Error(
+    `Test process readiness timeout: ${new URL(url).pathname}` + (tail ? `\n--- child output ---\n${tail}` : ""),
+  );
 }
 try {
+  assertStackAvailable(root, true);
+  if (!useDocker) external = testDependencies({ withClickHouse });
+  if (withClickHouse && !external?.SPX_TEST_CLICKHOUSE_URL)
+    throw new Error("Browser event storage verification requires a dedicated SPX_TEST_CLICKHOUSE_URL in external mode.");
   if (!existsSync(".env")) {
     try {
       copyFileSync(".env.example", ".env", constants.COPYFILE_EXCL);
@@ -93,8 +131,6 @@ try {
       if (error.code !== "EEXIST") throw error;
     }
   }
-  if (!process.argv.includes("--docker") && (!process.env.SPX_TEST_POSTGRES_URL || !process.env.SPX_TEST_REDIS_URL))
-    throw new Error("Provide SPX_TEST_POSTGRES_URL, SPX_TEST_REDIS_URL and SPX_TEST_KAFKA_BROKERS, or explicitly pass --docker.");
   const pgPassword = randomBytes(24).toString("hex");
   const password = randomBytes(24).toString("hex");
   const adminUsername = `e2e_${randomBytes(8).toString("hex")}`;
@@ -106,10 +142,8 @@ try {
   const redis = `${name}-redis`;
   let databaseURL;
   let redisURL;
-  let kafkaBrokers = process.env.SPX_TEST_KAFKA_BROKERS;
-  // Kafka 的 advertised listener 必须与映射端口一致，因此先定端口再起容器。
-  const kafkaPort = await port();
-  if (process.argv.includes("--docker")) {
+  let kafkaBrokers = external?.SPX_TEST_KAFKA_BROKERS;
+  if (useDocker) {
     const dockerDatabase = `spx_e2e_${randomBytes(16).toString("hex")}`;
     command(
       "docker",
@@ -139,24 +173,12 @@ try {
     containers.push(redis);
     // ingest 必须连得上总线：单节点 KRaft 足够，避免依赖 ZooKeeper。
     const kafka = `${name}-kafka`;
-    command("docker", [
-      "run", "-d", "--name", kafka,
-      "-e", "KAFKA_NODE_ID=1",
-      "-e", "KAFKA_PROCESS_ROLES=broker,controller",
-      "-e", "KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093",
-      "-e", `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:${kafkaPort}`,
-      "-e", "KAFKA_CONTROLLER_QUORUM_VOTERS=1@127.0.0.1:9093",
-      "-e", "KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",
-      "-e", "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
-      "-e", "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1",
-      "-e", "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1",
-      "-e", "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0",
-      "-p", `127.0.0.1:${kafkaPort}:9092`,
-      "apache/kafka:3.9.0",
-    ]);
+    const broker = await kafkaContainer(kafka);
+    command("docker", broker.args);
     containers.push(kafka);
     const deadline = Date.now() + 60000;
     while (command("docker", ["inspect", "--format", "{{.State.Health.Status}}", pg]) !== "healthy") {
+      startup.signal.throwIfAborted();
       if (Date.now() > deadline) throw new Error("Test database readiness timeout");
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -164,17 +186,32 @@ try {
     const redisPort = command("docker", ["port", redis, "6379/tcp"]).split(":").at(-1);
     databaseURL = `postgres://postgres:${pgPassword}@127.0.0.1:${pgPort}/${dockerDatabase}?sslmode=disable`;
     redisURL = `redis://127.0.0.1:${redisPort}/0`;
-    kafkaBrokers = `127.0.0.1:${kafkaPort}`;
+    kafkaBrokers = broker.brokers;
   } else {
-    postgresAdminURL = process.env.SPX_TEST_POSTGRES_URL;
     ownedDatabase = command("go", ["run", "./tests/integration/database", "create"], {
-      env: { ...systemEnv, SPX_TEST_POSTGRES_URL: postgresAdminURL },
+      env: { ...systemEnv, SPX_TEST_POSTGRESQL_URL: external.SPX_TEST_POSTGRESQL_URL },
     });
-    const parsed = new URL(postgresAdminURL);
+    const parsed = new URL(external.SPX_TEST_POSTGRESQL_URL);
     parsed.pathname = `/${ownedDatabase}`;
     databaseURL = parsed.toString();
-    redisURL = process.env.SPX_TEST_REDIS_URL;
+    redisURL = external.SPX_TEST_REDIS_URL;
   }
+  // 测试生产者与正式配置都依赖已创建的主题；Docker broker 也显式准备测试资源。
+  command("go", ["build", "-o", kafkaAdmin, "./tests/integration/kafka-admin"]);
+  if (useDocker) {
+    const env = { ...systemEnv, SPX_TEST_KAFKA_BROKERS: kafkaBrokers };
+    const deadline = Date.now() + 60000;
+    while (spawnSync(kafkaAdmin, ["ready", "broker"], { env, stdio: "ignore" }).status !== 0) {
+      startup.signal.throwIfAborted();
+      if (Date.now() > deadline) throw new Error("Test Kafka readiness timeout");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  for (const topic of [inputTopic, eventTopic, ...(withClickHouse ? [eventFailureTopic] : [])]) {
+    kafkaOperation("create-topic", topic, kafkaBrokers);
+    if (!useDocker) ownedTopics.push(topic);
+  }
+  stage("test dependencies ready");
   const webPort = await port();
   const iamPort = await port();
   const consolePort = await port();
@@ -191,38 +228,46 @@ try {
   const ingestBinary = path.join(directory, `ingest${executableSuffix}`);
   command("go", ["build", "-o", ingestBinary, "./src/apps/ingest/cmd"]);
   command(iamBinary, ["migrate", "--config", "src/apps/iam/config.yaml"], {
+    env: { ...systemEnv, SPX_POSTGRESQL_URL: databaseURL, SPX_IAM_LOG_FILE: "" },
+  });
+  command(iamBinary, ["initialize-administrator", "--config", "src/apps/iam/config.yaml"], {
     env: {
       ...systemEnv,
-      SPX_POSTGRES_URL: databaseURL,
+      SPX_POSTGRESQL_URL: databaseURL,
       SPX_IAM_BOOTSTRAP_PASSWORD: password,
       SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
       SPX_IAM_LOG_FILE: "",
     },
   });
-  const topicSuffix = randomBytes(6).toString("hex");
   const ingestEnv = {
     ...systemEnv,
-    SPX_POSTGRES_URL: databaseURL,
+    SPX_POSTGRESQL_URL: databaseURL,
     SPX_REDIS_URL: redisURL,
     SPX_INGEST_IAM_TOKEN: ingestCredential,
     SPX_INGEST_HOST: "127.0.0.1",
     SPX_INGEST_PORT: String(ingestPort),
-    SPX_INGEST_KAFKA_BROKERS: kafkaBrokers,
-    SPX_INGEST_KAFKA_EVENT_TOPIC: `spx.e2e.${topicSuffix}.events`,
-    SPX_INGEST_KAFKA_PARSE_FAILURE_TOPIC: `spx.e2e.${topicSuffix}.failures`,
+    SPX_KAFKA_BROKERS: kafkaBrokers,
+    SPX_INGEST_INPUT_KAFKA_RELOAD_INTERVAL: "1s",
+    SPX_KAFKA_NAMESPACE: kafkaNamespace,
     SPX_INGEST_LOG_FILE: path.join(directory, "ingest.log"),
   };
   command(ingestBinary, ["migrate", "--config", "src/apps/ingest/config.yaml"], {
     env: { ...ingestEnv, SPX_INGEST_LOG_FILE: "" },
   });
+  migratedDatabaseURL = databaseURL;
+  command("go", ["run", "./tests/integration/database", "seed-ingest"], {
+    env: { ...systemEnv, SPX_TEST_POSTGRESQL_URL: databaseURL },
+  });
   const iamEnv = {
     ...systemEnv,
     SPX_WEB_ORIGIN: publicURL,
-    SPX_POSTGRES_URL: databaseURL,
+    SPX_POSTGRESQL_URL: databaseURL,
     SPX_REDIS_URL: redisURL,
     SPX_IAM_BOOTSTRAP_USERNAME: adminUsername,
     SPX_IAM_BOOTSTRAP_PASSWORD: password,
     SPX_IAM_CSRF_KEY: csrf,
+    SPX_IAM_LOGIN_IP_RATE: "300",
+    SPX_IAM_LOGIN_ACCOUNT_RATE: "200",
     SPX_CONSOLE_IAM_TOKEN: credential,
     // IAM 的 service_clients 含 ingest 条目：缺它的凭证时 IAM 拒绝启动。
     SPX_INGEST_IAM_TOKEN: ingestCredential,
@@ -240,9 +285,10 @@ try {
     SPX_IAM_PORT: String(iamPort),
     SPX_CONSOLE_HOST: "127.0.0.1",
     SPX_CONSOLE_PORT: String(consolePort),
-    SPX_WEB_HOST: "127.0.0.1",
+    SPX_WEB_BIND_HOST: "127.0.0.1",
     SPX_WEB_PORT: String(webPort),
-    SPX_INGEST_ORIGIN: `http://127.0.0.1:${ingestPort}`,
+    SPX_INGEST_HOST: "127.0.0.1",
+    SPX_INGEST_PORT: String(ingestPort),
   };
   // Root startup derives backend URLs from actual module ports. Use one DB
   // connection for initialization, HTTP replicas and maintenance.
@@ -251,6 +297,7 @@ try {
   // 构建环境不带数据库密码及内部调用凭证。
   if (mode === "preview")
     command("pnpm", ["--dir", "src/apps/web", "build"], {
+      stdio: "inherit",
       env: {
         ...systemEnv,
         SPX_WEB_ORIGIN: publicURL,
@@ -259,36 +306,71 @@ try {
         SPX_IAM_PORT: String(iamPort),
         SPX_CONSOLE_HOST: "127.0.0.1",
         SPX_CONSOLE_PORT: String(consolePort),
-        // 页面里的 /api/v1/ingest 请求由 Web 反代到 ingest 副本。
-        SPX_INGEST_ORIGIN: `http://127.0.0.1:${ingestPort}`,
       },
     });
-  const stack = launch(process.execPath, ["scripts/start.mjs", mode], rootEnv, { name: "stack" });
+  const stack = launch(process.execPath, ["scripts/start.mjs", mode, "iam", "console", "web"], rootEnv, {
+    name: "stack",
+  });
   await ready(`${publicURL}/login`, stack);
   await ready(`${publicURL}/api/v1/iam/auth/context`, stack);
-  const iam2 = launch(iamBinary, ["serve", "--config", "src/apps/iam/config.yaml"], {
-    ...iamEnv,
-    SPX_IAM_HOST: "127.0.0.1",
-    SPX_IAM_PORT: String(iamPort2),
-    SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
-  }, { name: "iam-two" });
+  const iam2 = launch(
+    iamBinary,
+    ["serve", "--config", "src/apps/iam/config.yaml"],
+    {
+      ...iamEnv,
+      SPX_IAM_HOST: "127.0.0.1",
+      SPX_IAM_PORT: String(iamPort2),
+      SPX_IAM_LOG_FILE: path.join(directory, "iam-two.log"),
+    },
+    { name: "iam-two" },
+  );
   await ready(`http://127.0.0.1:${iamPort2}/health/ready`, iam2);
-  const console2 = launch(consoleBinary, ["--config", "src/apps/console/config.yaml"], {
-    ...consoleEnv,
-    SPX_CONSOLE_HOST: "127.0.0.1",
-    SPX_CONSOLE_PORT: String(consolePort2),
-    SPX_IAM_HOST: "127.0.0.1",
-    SPX_IAM_PORT: String(iamPort2),
-    SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
-  }, { name: "console-two" });
+  const console2 = launch(
+    consoleBinary,
+    ["--config", "src/apps/console/config.yaml"],
+    {
+      ...consoleEnv,
+      SPX_CONSOLE_HOST: "127.0.0.1",
+      SPX_CONSOLE_PORT: String(consolePort2),
+      SPX_IAM_HOST: "127.0.0.1",
+      SPX_IAM_PORT: String(iamPort2),
+      SPX_CONSOLE_LOG_FILE: path.join(directory, "console-two.log"),
+    },
+    { name: "console-two" },
+  );
   await ready(`http://127.0.0.1:${consolePort2}/health/ready`, console2);
-  // ingest 单独起一份：它需要 Kafka 与 IAM token，默认栈里没有它。
-  const ingest = launch(ingestBinary, ["serve", "--config", "src/apps/ingest/config.yaml"], {
-    ...ingestEnv,
-    SPX_IAM_HOST: "127.0.0.1",
-    SPX_IAM_PORT: String(iamPort),
-  }, { name: "ingest" });
+  // 测试单独管理 Ingest 的 Kafka 主题和端口，因此根启动入口只负责其余三个模块。
+  const ingest = launch(
+    ingestBinary,
+    ["serve", "--config", "src/apps/ingest/config.yaml"],
+    {
+      ...ingestEnv,
+      SPX_IAM_HOST: "127.0.0.1",
+      SPX_IAM_PORT: String(iamPort),
+    },
+    { name: "ingest" },
+  );
   await ready(`http://127.0.0.1:${ingestPort}/health/ready`, ingest);
+  if (withClickHouse) {
+    const eventStoreEnv = {
+      ...ingestEnv,
+      SPX_CLICKHOUSE_URL: external.SPX_TEST_CLICKHOUSE_URL,
+      SPX_INGEST_LOG_FILE: path.join(directory, "event-store.log"),
+    };
+    command(ingestBinary, ["migrate-event-store", "--config", "src/apps/ingest/config.yaml"], { env: eventStoreEnv });
+    launch(ingestBinary, ["store-events", "--config", "src/apps/ingest/config.yaml"], eventStoreEnv, { name: "event-store" });
+    eventStoreStarted = true;
+  }
+  const permissionCatalog = await fetch(`http://127.0.0.1:${iamPort}/api/v1/iam/permission-catalog`, {
+    headers: { Authorization: `Bearer ${ingestCredential}` },
+    signal: startup.signal,
+  });
+  if (!permissionCatalog.ok)
+    throw new Error(`Ingest could not read the IAM permission catalog: ${permissionCatalog.status}.`);
+  const permissionKeys = (await permissionCatalog.json()).data?.keys;
+  if (!permissionKeys?.includes("ingest.parsing_rule.read"))
+    throw new Error("IAM permission catalog does not include ingest.parsing_rule.read.");
+  startup.signal.throwIfAborted();
   stackReady = true;
   if (process.argv.includes("--manual")) {
     const filename = path.join(directory, "browser.json");
@@ -334,7 +416,7 @@ try {
         "exec",
         "playwright",
         "test",
-        ...process.argv.slice(2).filter((arg) => arg !== "--docker" && arg !== "--dev"),
+        ...process.argv.slice(2).filter((arg) => arg !== "--docker" && arg !== "--dev" && arg !== "--clickhouse"),
       ],
       {
         ...pnpmShell,
@@ -342,7 +424,7 @@ try {
           ...systemEnv,
           SPX_E2E_BASE_URL: publicURL,
           SPX_E2E_DATABASE: ownedDatabase ?? new URL(databaseURL).pathname.slice(1),
-          SPX_TEST_POSTGRES_URL: databaseURL,
+          SPX_TEST_POSTGRESQL_URL: databaseURL,
           SPX_E2E_PASSWORD: password,
           SPX_E2E_USERNAME: adminUsername,
           SPX_E2E_IAM_SECOND_URL: `http://127.0.0.1:${iamPort2}`,
@@ -350,7 +432,9 @@ try {
           SPX_E2E_INGEST_URL: `http://127.0.0.1:${ingestPort}`,
           SPX_E2E_ROOT: root,
           SPX_E2E_KAFKA_BROKERS: kafkaBrokers,
-          SPX_E2E_EVENT_TOPIC: ingestEnv.SPX_INGEST_KAFKA_EVENT_TOPIC,
+          SPX_E2E_EVENT_TOPIC: eventTopic,
+          SPX_E2E_INPUT_TOPIC: inputTopic,
+          ...(withClickHouse ? { SPX_E2E_CLICKHOUSE_URL: external.SPX_TEST_CLICKHOUSE_URL } : {}),
         },
         stdio: "inherit",
       },
@@ -365,74 +449,33 @@ try {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code ?? 1));
     });
-      stage(`playwright:exit code=${process.exitCode}`);
+    stage(`playwright:exit code=${process.exitCode}`);
   }
-  stage("sse:start");
-  // Exercise the actual Console SSE handler while shutting down its owned replica.
+  stage("console:authorization");
   const { request } = await import("@playwright/test");
   const api = await request.newContext({ baseURL: publicURL });
   try {
     const context = await api.get("/api/v1/iam/auth/context");
     const token = (await context.json()).data.csrf_token;
     const authenticated = await api.post("/api/v1/iam/auth/login", {
-      data: { username: adminUsername, password: password },
+      data: { username: adminUsername, password },
       headers: { Origin: publicURL, "X-CSRF-Token": token },
     });
-    if (authenticated.status() !== 200) throw new Error("Cannot establish the owned lifecycle test session.");
-    // 扁平授权：Console 事件流只按调用者身份授权，不再携带组织标识。
-    const cookies = (await api.storageState()).cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-    const stream = await fetch(`http://127.0.0.1:${consolePort2}/api/v1/console/events`, {
-      headers: { Cookie: cookies, Origin: publicURL },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (stream.status !== 200 || !stream.body) {
-      const detail = (await stream.text().catch(() => "")).slice(0, 300);
-      console.log("E2E work directory kept for diagnosis:", directory);
-      process.env.SPX_E2E_KEEP_DIR = directory;
-      keepDirectory = true;
-      throw new Error(`Owned Console event stream did not open. status=${stream.status} body=${detail}`);
-    }
-    const reader = stream.body.getReader();
-    // 排空必须有时限：卡住时应报出「流没关闭」，而不是让整个 e2e 等到外部超时被杀。
-    // 关闭所有者副本时必须观察到流结束，并且要区分两种结束方式：
-    //   * 优雅关闭（POSIX 的 SIGTERM）→ 干净的 EOF（done）；
-    //   * 强制终止（Windows 无 SIGTERM 语义）→ 连接中断，客户端读到 TypeError: terminated。
-    // 两者都算「流已结束」；卡住不结束才是缺陷，因此下面用有界等待。
-    const drainWithDeadline = async (budgetMs) => {
-      const deadline = Date.now() + budgetMs;
-      while (true) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) throw new Error("Console stream did not close after shutdown.");
-        const outcome = await Promise.race([
-          reader
-            .read()
-            .then((value) => ({ done: value.done }))
-            .catch((error) => ({ aborted: String(error) })),
-          new Promise((resolve) => setTimeout(() => resolve({ stalled: true }), remaining)),
-        ]);
-        if (outcome.stalled) throw new Error("Console stream did not close after shutdown.");
-        if (outcome.aborted) return { aborted: outcome.aborted };
-        if (outcome.done) return { aborted: "" };
-      }
-    };
+    if (authenticated.status() !== 200) throw new Error("Cannot establish the Console lifecycle test session.");
 
-    const first = await reader.read();
-    if (!new TextDecoder().decode(first.value).includes("authorized"))
-      throw new Error("Console stream did not authorize.");
-    const closed = new Promise((resolve) => console2.once("exit", (code, signal) => resolve({ code, signal })));
-    // 强制终止与优雅终止都算「副本已停」；只有 POSIX 才要求零退出码。
-    if (process.platform === "win32") console2.kill();
-    else console2.kill("SIGTERM");
-    const drained = await drainWithDeadline(15000);
-    if (process.platform !== "win32" && drained.aborted)
-      throw new Error(`Console stream aborted instead of closing cleanly: ${drained.aborted}`);
-    const exit = await closed;
-    if (process.platform !== "win32" && (exit.code !== 0 || exit.signal))
-      throw new Error("Console needed forced shutdown.");
-    stage(`sse:closed${drained.aborted ? " (aborted)" : ""}`);
-    console.log(
-      `Actual Console SSE ended when its owned replica stopped (${drained.aborted ? "connection aborted" : "clean EOF"}).`,
-    );
+    const cookies = (await api.storageState()).cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+    const consoleContext = `http://127.0.0.1:${consolePort2}/api/v1/console/context`;
+    const headers = { Cookie: cookies, Origin: publicURL };
+    if ((await api.get(consoleContext, { headers })).status() !== 200)
+      throw new Error("Console did not authorize the active session.");
+
+    const authenticatedContext = await api.get("/api/v1/iam/auth/context");
+    const logout = await api.post("/api/v1/iam/auth/logout", {
+      headers: { Origin: publicURL, "X-CSRF-Token": (await authenticatedContext.json()).data.csrf_token },
+    });
+    if (!logout.ok()) throw new Error(`Could not revoke the Console test session: ${logout.status()}`);
+    if ((await api.get(consoleContext, { headers })).status() !== 401)
+      throw new Error("Console accepted the revoked session.");
   } finally {
     await api.dispose();
   }
@@ -450,7 +493,7 @@ try {
       throw new Error("Application logs must carry structured service metadata.");
   }
   command(iamBinary, ["maintain", "--config", "src/apps/iam/config.yaml"], {
-    env: { ...systemEnv, SPX_POSTGRES_URL: databaseURL, SPX_IAM_LOG_FILE: "" },
+    env: { ...systemEnv, SPX_POSTGRESQL_URL: databaseURL, SPX_IAM_LOG_FILE: "" },
   });
   console.log("Structured file logs and secret exclusion verified across both replicas.");
 
@@ -473,38 +516,59 @@ try {
       // 日志文件可能还没落盘：诊断信息缺失不应掩盖原始失败。
       logTail = "";
     }
-    throw new Error(`Ingest did not stop within the shutdown budget.\nstdout/stderr tail:\n${tail}\nlog tail:\n${logTail}`);
+    throw new Error(
+      `Ingest did not stop within the shutdown budget.\nstdout/stderr tail:\n${tail}\nlog tail:\n${logTail}`,
+    );
   }
   console.log(`Ingest stopped with its own shutdown path (code=${ingestExit.code}).`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
-  for (const child of children.reverse()) {
-    if (child.exitCode !== null || child.signalCode !== null) continue;
-    await terminateProcessTree(child);
-    if (child.exitCode === null && child.signalCode === null) {
-      console.error(`An owned service required forced shutdown: ${child.spxName ?? "unknown"}.`);
+  async function cleanup(action) {
+    try {
+      await action();
+    } catch (error) {
+      console.error(error.message);
       process.exitCode = 1;
     }
   }
+  for (const child of children.reverse()) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    await cleanup(async () => {
+      await terminateProcessTree(child);
+      if (child.exitCode === null && child.signalCode === null)
+        throw new Error(`An owned service required forced shutdown: ${child.spxName}.`);
+    });
+  }
   if (stackReady)
     for (const number of listenerPorts) {
-      const listener = net.createServer();
-      await new Promise((resolve, reject) => {
-        listener.once("error", reject);
-        listener.listen(number, "127.0.0.1", resolve);
+      await cleanup(async () => {
+        const listener = net.createServer();
+        await new Promise((resolve, reject) => {
+          listener.once("error", reject);
+          listener.listen(number, "127.0.0.1", resolve);
+        });
+        await new Promise((resolve, reject) => listener.close((error) => (error ? reject(error) : resolve())));
       });
-      await new Promise((resolve, reject) => listener.close((error) => (error ? reject(error) : resolve())));
     }
-  if (ownedDatabase) {
-    command("go", ["run", "./tests/integration/database", "drop", ownedDatabase], {
-      env: {
-        ...systemEnv,
-        SPX_TEST_POSTGRES_URL: postgresAdminURL,
-        SPX_TEST_REDIS_URL: process.env.SPX_TEST_REDIS_URL,
-      },
+  if (external && migratedDatabaseURL) {
+    await cleanup(async () => {
+      const groups = command("go", ["run", "./tests/integration/database", "kafka-groups", inputTopic], {
+        env: { ...systemEnv, SPX_TEST_POSTGRESQL_URL: migratedDatabaseURL },
+      });
+      for (const group of groups.split(/\s+/).filter(Boolean))
+        await cleanup(() => kafkaOperation("delete-group", group));
     });
+  }
+  if (eventStoreStarted) await cleanup(() => kafkaOperation("delete-group", eventStoreGroup));
+  for (const topic of ownedTopics) await cleanup(() => kafkaOperation("delete-topic", topic));
+  if (ownedDatabase) {
+    await cleanup(() =>
+      command("go", ["run", "./tests/integration/database", "drop", ownedDatabase], {
+        env: { ...systemEnv, ...external },
+      }),
+    );
   }
   for (const container of containers.reverse()) {
     const result = spawnSync("docker", ["rm", "-f", "-v", container], { stdio: "ignore" });
@@ -515,4 +579,5 @@ try {
   }
   if (!keepDirectory) rmSync(directory, { recursive: true, force: true });
   if (ownsRootEnv) rmSync(".env", { force: true });
+  for (const signal of ["SIGINT", "SIGTERM"]) process.removeListener(signal, interruptStartup);
 }

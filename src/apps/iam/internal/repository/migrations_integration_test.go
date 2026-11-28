@@ -10,12 +10,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/testutil"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/migrations"
 )
 
 func TestFailedMigrationCanBeRetriedAndConcurrentMigrationsConverge(t *testing.T) {
@@ -181,12 +179,7 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 	if versionStore, err = database.NewStore(database.DialectPostgres, "iam.goose_db_version"); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := goose.NewProvider("", db, migrations.Files,
-		goose.WithStore(versionStore), goose.WithDisableGlobalRegistry(true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = provider.Up(ctx); err != nil {
+	if err = repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.VerifySchema(ctx); err != nil {
@@ -209,7 +202,7 @@ func TestMigrationStatusDistinguishesPendingCurrentAndAhead(t *testing.T) {
 		t.Fatal("migration created a configured administrator")
 	}
 
-	if err := store.Seed(ctx, "status-admin", "isolated migration status password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "status-admin", "isolated migration status password"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.users WHERE configured AND status='active'`).Scan(&configured); err != nil {

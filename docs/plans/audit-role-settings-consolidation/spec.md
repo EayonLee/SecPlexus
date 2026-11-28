@@ -1,5 +1,7 @@
 # 审计与角色管理简化、设置区合并 — 需求与方案
 
+后续的[管理页一致性规范](../management-pages-consistency/spec.md)定义现行入口。个人资料使用 `/settings/profile`，旧 `/settings` 与 `/profile` 地址永久重定向。
+
 ## 1. 背景
 
 IAM 管理区存在四处被用户明确指出的过度设计：

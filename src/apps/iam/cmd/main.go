@@ -50,6 +50,9 @@ func newCommand() *cobra.Command {
 			if err := cfg.ValidateServe(); err != nil {
 				return err
 			}
+			if err := cfg.ValidateAdministrator(); err != nil {
+				return err
+			}
 			if !printEndpoints {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "IAM configuration valid")
 				return err
@@ -67,7 +70,7 @@ func newCommand() *cobra.Command {
 	root := &cobra.Command{Use: "iam", Short: "SecPlexus account and authorization service", Args: cobra.NoArgs, RunE: run, SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&filename, "config", "", "IAM YAML configuration file")
 	root.PersistentFlags().BoolVar(&printEndpoints, "print-endpoints", false, "print effective endpoints without connecting dependencies")
-	for _, name := range []string{"check-config", "serve", "migrate", "status", "maintain", "revoke-after-restore", "reset-password"} {
+	for _, name := range []string{"check-config", "serve", "migrate", "initialize-administrator", "sync-administrator", "status", "maintain", "revoke-after-restore", "reset-password"} {
 		command := &cobra.Command{Use: name, Args: cobra.NoArgs, RunE: run}
 		if name == "reset-password" {
 			command.Flags().StringVar(&userID, "user-id", "", "existing account UUID")
@@ -94,7 +97,7 @@ func execute(ctx context.Context, command string, cfg config.Config, userID stri
 			return err
 		}
 	}
-	if command == "migrate" {
+	if command == "initialize-administrator" || command == "sync-administrator" {
 		if err := cfg.ValidateAdministrator(); err != nil {
 			return err
 		}
@@ -106,44 +109,41 @@ func execute(ctx context.Context, command string, cfg config.Config, userID stri
 	defer func() { outcome = errors.Join(outcome, closeLog()) }()
 	slog.SetDefault(logger)
 	if command == "status" {
-		return repository.Status(ctx, cfg.DB.URL, os.Stdout)
+		return repository.Status(ctx, cfg.PostgreSQL.DSN(), os.Stdout)
 	}
-	if command == "migrate" {
+	if command == "migrate" || command == "initialize-administrator" || command == "sync-administrator" {
 		migrationCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 
-		if err = repository.Migrate(migrationCtx, cfg.DB.URL); err != nil {
-			return err
+		if command == "migrate" {
+			return repository.Migrate(migrationCtx, cfg.PostgreSQL.DSN())
 		}
 
-		pool, err := repository.Open(migrationCtx, cfg.DB.URL)
+		pool, err := repository.Open(migrationCtx, cfg.PostgreSQL.DSN())
 		if err != nil {
 			return err
 		}
-
 		defer pool.Close()
 
 		store, err := repository.NewStore(pool)
 		if err != nil {
 			return err
 		}
-
 		defer func() { outcome = errors.Join(outcome, store.Close()) }()
 
-		if err = store.Seed(migrationCtx, cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
-			return err
+		switch command {
+		case "initialize-administrator":
+			return store.InitializeAdministrator(migrationCtx, cfg.Bootstrap.Username, cfg.Bootstrap.Password)
+		case "sync-administrator":
+			return store.SyncAdministrator(migrationCtx, cfg.Bootstrap.Username, cfg.Bootstrap.Password)
 		}
-
-		logging.From(migrationCtx).Info("IAM seed completed", "event", "iam.seed.completed")
-		fmt.Println("IAM migrations and initialization completed.")
-		return nil
 	}
 
 	if command == "maintain" || command == "revoke-after-restore" || command == "reset-password" {
 		maintenance, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 
-		pool, err := repository.Open(maintenance, cfg.DB.URL)
+		pool, err := repository.Open(maintenance, cfg.PostgreSQL.DSN())
 		if err != nil {
 			return err
 		}

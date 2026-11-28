@@ -3,21 +3,18 @@ import { type ReactNode, useCallback, useState } from "react";
 
 import { type QueryKey, useQuery } from "@tanstack/react-query";
 import { type ColumnDef, type PaginationState, useTable } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { cn } from "cn";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DataTableFeatures, dataTableFeatures } from "@/lib/data-table-features";
 
 import { APIError } from "../api/client";
 import { sessionScope } from "../iam/query";
 import { errorMessageKey, useIdentity } from "../iam/session";
+import { CollectionBoundary, CollectionState } from "./collection-state";
+import { ListPagination } from "./list-controls";
 import { requestReauth } from "./reauth";
 
 // 全局约定：所有列（含操作列）一律左对齐，操作按钮不加 justify-end，
@@ -40,27 +37,31 @@ export function usePagedQuery<T>(
       fetchPage({ limit: pagination.pageSize, offset: pagination.pageIndex * pagination.pageSize }, signal),
   });
   return {
+    query,
     items: query.data?.items ?? [],
     total: query.data?.total ?? 0,
     loading: query.isFetching,
-    error: query.error ? errorMessageKey(query.error) : ("" as const),
     pagination,
     setPagination,
-    reload: () => {
-      void query.refetch();
-    },
   };
 }
 export function DataTable<T extends { id: string }>({
   state,
   columns,
+  onClear,
+  groupBy,
+  card,
+  onPageChange,
+  isSelected,
 }: {
+  onPageChange?: () => void;
+  isSelected?: (row: T) => boolean;
+  card?: (row: T) => ReactNode;
+  onClear?: () => void;
+  groupBy?: (row: T) => string;
   state: ReturnType<typeof usePagedQuery<T>>;
-  columns: { title: string; cell: (row: T) => ReactNode }[];
+  columns: { title: string; header?: ReactNode; className?: string; cell: (row: T) => ReactNode }[];
 }) {
-  const t = useTranslations("Common");
-  const errors = useTranslations("Errors");
-
   const tableColumns: ColumnDef<DataTableFeatures, T>[] = columns.map((column) => ({
     id: column.title,
     header: column.title,
@@ -76,117 +77,113 @@ export function DataTable<T extends { id: string }>({
     state: { pagination: state.pagination },
     onPaginationChange: state.setPagination,
   });
+  const rows = table.getRowModel().rows;
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const label = groupBy ? groupBy(row.original) : "";
+    const group = groups.get(label);
+    if (group) group.push(row);
+    else groups.set(label, [row]);
+  }
+
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      {state.error && <p role="alert">{errors(state.error)}</p>}
-      <div className="overflow-hidden rounded-xl border">
-        <Table>
-          <TableHeader className="bg-muted">
-            <TableRow>
-              {columns.map((column) => (
-                <TableHead key={column.title}>{column.title}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {state.loading ? (
-              <TableRow>
-                <TableCell colSpan={columns.length}>
-                  <Spinner />
-                </TableCell>
-              </TableRow>
-            ) : state.items.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+    <CollectionBoundary query={state.query} hasContent={state.items.length > 0}>
+      <div className="flex min-w-0 flex-col">
+        {card && rows.length ? (
+          <div className="grid gap-3 border-y p-4 @sm/list:grid-cols-2 @3xl/list:grid-cols-3">
+            {rows.map((row) => (
+              <div
+                key={row.id}
+                data-state={isSelected?.(row.original) ? "selected" : undefined}
+                className="border-border data-[state=selected]:bg-primary/10 rounded-xl border p-4"
+              >
+                {card(row.original)}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border-y">
+            <Table className={groupBy ? "w-full border-collapse @lg/list:table-fixed" : undefined}>
+              <TableHeader>
+                <TableRow className={groupBy ? "[&>:not(:last-child)]:border-r" : undefined}>
                   {columns.map((column) => (
-                    <TableCell key={column.title}>{column.cell(row.original)}</TableCell>
+                    <TableHead
+                      key={column.title}
+                      className={cn(groupBy ? "px-4 text-sm" : "h-[53px] px-4 font-normal", column.className)}
+                    >
+                      {column.header ?? column.title}
+                    </TableHead>
                   ))}
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={columns.length}>
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyTitle>{t("empty")}</EmptyTitle>
-                      <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      <div className="flex items-center justify-between gap-6">
-        <p className="text-muted-foreground text-sm whitespace-nowrap">
-          {t("pagination", { total: state.total, page: state.pagination.pageIndex + 1 })}
-        </p>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <Label className="whitespace-nowrap">{t("rowsPerPage")}</Label>
-            <Select
-              value={String(state.pagination.pageSize)}
-              onValueChange={(value) => state.setPagination({ pageIndex: 0, pageSize: Number(value) })}
-            >
-              <SelectTrigger size="sm" className="w-20" aria-label={t("rowsPerPage")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent side="top">
-                <SelectGroup>
-                  {[10, 20, 30, 40, 50].map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              </TableHeader>
+              {rows.length ? (
+                [...groups].map(([label, group]) => (
+                  <TableBody key={label} aria-label={label || undefined}>
+                    {label && (
+                      <TableRow className="bg-muted h-10">
+                        <TableHead scope="rowgroup" colSpan={columns.length} className="text-muted-foreground px-4">
+                          {label}
+                          <span className="text-muted-foreground ml-2 rounded-sm border px-2 text-xs tabular-nums">
+                            {group.length}
+                          </span>
+                        </TableHead>
+                      </TableRow>
+                    )}
+                    {group.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        data-state={isSelected?.(row.original) ? "selected" : undefined}
+                        className={
+                          groupBy
+                            ? "h-12 hover:bg-muted/20 [&>:not(:last-child)]:border-r"
+                            : "border-border/60 hover:bg-muted/20"
+                        }
+                      >
+                        {columns.map((column) => (
+                          <TableCell
+                            key={column.title}
+                            className={cn("px-4", groupBy ? "py-2" : "py-4", column.className)}
+                          >
+                            {column.cell(row.original)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                ))
+              ) : (
+                <TableBody>
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="p-0">
+                      {onClear ? (
+                        <CollectionState kind="filtered" onClear={onClear} />
+                      ) : (
+                        <CollectionState kind="empty" />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              )}
+            </Table>
           </div>
-          <p className="text-sm whitespace-nowrap tabular-nums">
-            {t("pageInfo", { page: state.pagination.pageIndex + 1, total: Math.max(1, table.getPageCount()) })}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("firstPage")}
-              disabled={!table.getCanPreviousPage() || state.loading}
-              onClick={() => table.setPageIndex(0)}
-            >
-              <ChevronsLeft />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("previousPage")}
-              disabled={!table.getCanPreviousPage() || state.loading}
-              onClick={() => table.previousPage()}
-            >
-              <ChevronLeft />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("nextPage")}
-              disabled={!table.getCanNextPage() || state.loading}
-              onClick={() => table.nextPage()}
-            >
-              <ChevronRight />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("lastPage")}
-              disabled={!table.getCanNextPage() || state.loading}
-              onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-            >
-              <ChevronsRight />
-            </Button>
-          </div>
-        </div>
+        )}
+        <ListPagination
+          hasNext={table.getCanNextPage()}
+          index={state.pagination.pageIndex}
+          size={state.pagination.pageSize}
+          total={state.total}
+          loading={state.loading}
+          onPage={(index) => {
+            onPageChange?.();
+            table.setPageIndex(index);
+          }}
+          onSize={(pageSize) => {
+            onPageChange?.();
+            state.setPagination({ pageIndex: 0, pageSize });
+          }}
+        />
       </div>
-    </div>
+    </CollectionBoundary>
   );
 }
 export function useAction() {

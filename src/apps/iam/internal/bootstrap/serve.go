@@ -27,7 +27,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 	startup, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
 	defer cancelStartup()
 
-	pool, err := repository.Open(startup, cfg.DB.URL)
+	pool, err := repository.Open(startup, cfg.PostgreSQL.DSN())
 	if err != nil {
 		return err
 	}
@@ -45,12 +45,11 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		return err
 	}
 
-	// 权限目录、内置角色与配置管理员都在启动时幂等写入，前端只读这些内置数据。
-	if err = store.Seed(startup, cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
+	if err = store.VerifyPermissionCatalog(startup); err != nil {
 		return err
 	}
 
-	client, err := openCache(startup, cfg.Cache)
+	client, err := openRedis(startup, cfg.Redis)
 	if err != nil {
 		return err
 	}
@@ -73,7 +72,7 @@ func Serve(ctx context.Context, cfg config.Config) (outcome error) {
 		Config:   cfg,
 	}, security, limiter, func(ctx context.Context) error {
 		if err := pool.Ping(ctx); err != nil {
-			logging.From(ctx).Error("PostgreSQL is not ready", "event", "dependency.unready", "dependency", "postgres", "error", logging.Error(err))
+			logging.From(ctx).Error("PostgreSQL is not ready", "event", "dependency.unready", "dependency", "postgresql", "error", logging.Error(err))
 			return err
 		}
 

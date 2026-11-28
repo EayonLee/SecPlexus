@@ -12,13 +12,13 @@ func TestValidateServeRejectsHalfTLS(t *testing.T) {
 
 	withCert := base
 	withCert.Input.HTTP.TLSCertFile = "/tmp/cert.pem"
-	if err := withCert.ValidateServe(); err == nil {
+	if _, err := withCert.ValidateServe(); err == nil {
 		t.Fatal("只有证书没有私钥时没有报错")
 	}
 
 	withKey := base
 	withKey.Input.HTTP.TLSKeyFile = "/tmp/key.pem"
-	if err := withKey.ValidateServe(); err == nil {
+	if _, err := withKey.ValidateServe(); err == nil {
 		t.Fatal("只有私钥没有证书时没有报错")
 	}
 }

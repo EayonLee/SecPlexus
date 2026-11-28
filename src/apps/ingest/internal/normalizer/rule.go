@@ -42,15 +42,16 @@ var (
 
 // SeveritySpec 描述如何把厂商的级别字段折算成 OCSF severity_id。
 type SeveritySpec struct {
-	Field  string         // 级别字段名；空表示规则不声明级别。
-	Values map[string]int // 归一化后的原值到 severity_id 的映射。
+	Field   string         // 级别字段名；空表示规则不声明级别。
+	Values  map[string]int // 归一化后的原值到 severity_id 的映射。
+	Default *int           `json:"default,omitempty"` // 源字段缺失时使用的标准严重度。
 }
 
 // TimeSpec 描述事件时间字段与可接受的格式。
 // 多个格式按顺序尝试，第一个成功的生效。
 type TimeSpec struct {
 	Field    string   // 时间字段名；空表示事件时间使用接收时间。
-	Formats  []string // Go 时间布局，或 unix、unix_ms 两个关键字。
+	Formats  []string // Go 时间布局，或 unix、unix_ms、unix_auto。
 	Location string   // 设备时区的 IANA 名称（如 Asia/Shanghai）；空值按 UTC。
 	// 无时区的时间串按设备时区解析。国产设备普遍发本地时间，
 	// 按 UTC 解析会让整条时间线偏移数小时，破坏关联分析的时序窗口。
@@ -59,20 +60,16 @@ type TimeSpec struct {
 
 // Rule 是一条解析规则的完整定义。
 type Mapping struct {
-	ID          string            // 规则标识，在同一模块内唯一。
-	Name        string            // 展示名称。
-	Vendor      string            // 厂商。
-	Product     string            // 产品或设备型号。
-	Description string            // 规则说明。
-	Parse       parser.Spec       // 第 1 层：线格式解析参数。
-	FieldMap    map[string]string // 第 1 层字段名到 OCSF dot-path 的映射。
-	Severity    SeveritySpec      // 级别折算规则。
-	Time        TimeSpec          // 事件时间解析规则。
-	Constants   map[string]any    // 最后写入的固定值，覆盖映射结果。
-	Samples     []string          // 真实样本，编译时逐条校验。
-	// Multiline 声明如何在解析前把连续行合成一条消息。
-	// 放在映射而不是通道：换一条规则就应该换掉行合并策略。
-	Multiline parser.Multiline
+	ContractVersion string            // 字段契约版本。
+	ID              string            // 规则标识，在同一模块内唯一。
+	Name            string            // 展示名称。
+	Description     string            // 规则说明。
+	Parse           parser.Spec       // 第 1 层：线格式解析参数。
+	FieldMap        map[string]string // 第 1 层字段名到 OCSF dot-path 的映射。
+	Severity        SeveritySpec      // 级别折算规则。
+	Time            TimeSpec          // 事件时间解析规则。
+	Constants       map[string]any    // 最后写入的固定值，覆盖映射结果。
+	Samples         []string          // 真实样本，编译时逐条校验。
 	// Encoding 声明报文的来源字符集（如 gbk、big5）；空或 utf-8 表示无需解码。
 	// 字符集属于解析配置：同一条链路换个来源设备，编码往往跟着变。
 	Encoding string
@@ -81,6 +78,8 @@ type Mapping struct {
 // maxSeverityID 是 OCSF severity_id 的上界。
 const maxSeverityID = SeverityFatal
 
+const severityOther = 99
+
 // Compile 校验规则并绑定解析器与预编译的投影计划。
 // 返回的引擎不可变，可被多个 worker 并发调用。
 // 校验分三层：规则结构（含路径合法性）、解析器参数、样本实跑。
@@ -88,6 +87,10 @@ func Compile(rule Mapping) (*Compiled, error) {
 	if err := rule.validate(); err != nil {
 		return nil, err
 	}
+	return compile(rule)
+}
+
+func compile(rule Mapping) (*Compiled, error) {
 
 	instance, err := parser.New(rule.Parse)
 	if err != nil {
@@ -111,15 +114,6 @@ func Compile(rule Mapping) (*Compiled, error) {
 		severityValues[normalizeKey(value)] = id
 	}
 
-	// 多行合并是构造期编译的：运行期每条报文都要用，不能现解析正则。
-	var merge func([]byte) ([][]byte, error)
-	if rule.Multiline.StartPattern != "" {
-		merge, err = parser.NewMultiline(rule.Multiline)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// 字符集解码器同样在构造期解析：未知编码加载即拒绝。
 	sourceEncoding, err := resolveEncoding(rule.Encoding)
 	if err != nil {
@@ -129,13 +123,18 @@ func Compile(rule Mapping) (*Compiled, error) {
 	engine := &Compiled{
 		mapping:        rule,
 		encoding:       sourceEncoding,
-		multiline:      merge,
 		parser:         instance,
 		projections:    compileFieldMap(rule.FieldMap),
 		constants:      compileConstants(rule.Constants),
 		consumed:       consumedSources(rule),
 		location:       location,
 		severityValues: severityValues,
+	}
+
+	if rule.ContractVersion != "" {
+		if err := engine.bindContract(); err != nil {
+			return nil, err
+		}
 	}
 
 	for index, sample := range rule.Samples {
@@ -229,9 +228,13 @@ func (m Mapping) validate() error {
 		}
 	}
 
+	if fallback := m.Severity.Default; fallback != nil && (*fallback < SeverityUnknown || *fallback > maxSeverityID) {
+		return fmt.Errorf("%w: severity default outside supported codes", ErrInvalidRule)
+	}
+
 	for _, value := range m.Severity.Values {
-		if value < SeverityUnknown || value > maxSeverityID {
-			return fmt.Errorf("%w: severity maps to %d, outside 0-%d", ErrInvalidRule, value, maxSeverityID)
+		if value < SeverityUnknown || (value > maxSeverityID && (m.ContractVersion == "" || value != severityOther)) {
+			return fmt.Errorf("%w: severity maps to %d, outside the supported codes", ErrInvalidRule, value)
 		}
 	}
 
@@ -292,6 +295,11 @@ func validatePath(path string) ([]string, error) {
 	}
 
 	segments := strings.Split(path, ".")
+	if segments[0] == "metadata" && (len(segments) == 1 || segments[1] == "uid" ||
+		segments[1] == "version" || segments[1] == "spx") {
+		return nil, fmt.Errorf("path %q overlaps platform-owned metadata", path)
+	}
+
 	for _, segment := range segments {
 		if segment == "" {
 			return nil, fmt.Errorf("path %q has an empty segment", path)

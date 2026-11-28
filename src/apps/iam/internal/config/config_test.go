@@ -47,11 +47,11 @@ func TestConfigurationPrecedence(t *testing.T) {
 		t.Fatal("incorrect configuration precedence")
 	}
 
-	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password != testBootstrapPassword || cfg.Cache.Password != "secplexus" || cfg.Cache.User != "default" {
+	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password != testBootstrapPassword || cfg.Redis.Password != "secplexus" || cfg.Redis.User != "default" {
 		t.Fatal("incorrect authentication defaults")
 	}
 
-	if cfg.DB.URL != "postgres://secplexus:secplexus@127.0.0.1:5432/secplexus?sslmode=disable" {
+	if cfg.PostgreSQL.DSN() != "postgresql://secplexus:secplexus@127.0.0.1:5432/secplexus?sslmode=disable" {
 		t.Fatal("incorrect local database defaults")
 	}
 }
@@ -83,34 +83,34 @@ func TestConfigurationRejectsInvalidPort(t *testing.T) {
 
 func TestPasswordsRemainLiteralInConnectionURLs(t *testing.T) {
 	password := "space @:/?#${VALUE}"
-	t.Setenv("SPX_POSTGRES_PASSWORD", password)
+	t.Setenv("SPX_POSTGRESQL_PASSWORD", password)
 	c, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	parsed, err := url.Parse(c.DB.URL)
+	parsed, err := url.Parse(c.PostgreSQL.DSN())
 	if err != nil {
 		t.Fatal("invalid database URL")
 	}
 
 	actual, _ := parsed.User.Password()
-	if actual != password || strings.Contains(c.DB.URL, password) {
+	if actual != password || strings.Contains(c.PostgreSQL.DSN(), password) {
 		t.Fatal("password must round-trip without interpolation or URL corruption")
 	}
 }
 
 func TestSharedDatabaseConnection(t *testing.T) {
-	t.Setenv("SPX_POSTGRES_HOST", "shared-database")
-	t.Setenv("SPX_POSTGRES_DATABASE", "platform")
-	t.Setenv("SPX_POSTGRES_USER", "platform_user")
-	t.Setenv("SPX_POSTGRES_PASSWORD", "platform password")
+	t.Setenv("SPX_POSTGRESQL_HOST", "shared-database")
+	t.Setenv("SPX_POSTGRESQL_DATABASE", "platform")
+	t.Setenv("SPX_POSTGRESQL_USER", "platform_user")
+	t.Setenv("SPX_POSTGRESQL_PASSWORD", "platform password")
 	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cfg.DB.Host != "shared-database" || cfg.DB.Name != "platform" || cfg.DB.User != "platform_user" {
+	if cfg.PostgreSQL.Host != "shared-database" || cfg.PostgreSQL.Database != "platform" || cfg.PostgreSQL.User != "platform_user" {
 		t.Fatal("数据库连接未从全局 PostgreSQL 设置读取")
 	}
 }
@@ -126,7 +126,7 @@ func TestGlobalRedisConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parsed, err := url.Parse(cfg.Cache.URL)
+	parsed, err := url.Parse(cfg.Redis.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,20 +137,20 @@ func TestGlobalRedisConnection(t *testing.T) {
 	}
 }
 
-func TestPostgresSSLModeEnvironment(t *testing.T) {
-	t.Setenv("SPX_POSTGRES_SSLMODE", "require")
+func TestPostgreSQLTLSModeFromExternalURL(t *testing.T) {
+	t.Setenv("SPX_POSTGRESQL_URL", "postgresql://database.example/platform?sslmode=require")
 	cfg, err := Load(configFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	parsed, err := url.Parse(cfg.DB.URL)
+	parsed, err := url.Parse(cfg.PostgreSQL.DSN())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cfg.DB.SSLMode != "require" || parsed.Query().Get("sslmode") != "require" {
-		t.Fatal("数据库 TLS 模式未从 SPX_POSTGRES_SSLMODE 传递到连接地址")
+	if parsed.Query().Get("sslmode") != "require" {
+		t.Fatal("数据库 TLS 模式未从 外部连接 URL 传递")
 	}
 }
 
@@ -164,7 +164,7 @@ func TestRedisURLOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.Cache.URL != "redis://acl-user:encoded%40password@cache.example:6380/3" {
+	if cfg.Redis.URL != "redis://acl-user:encoded%40password@cache.example:6380/3" {
 		t.Fatal("完整 Redis URL 不应被结构化连接字段覆盖")
 	}
 }
@@ -198,7 +198,7 @@ func TestServiceClientActionsMustExistInTheContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data = []byte(strings.Replace(string(data), "iam.users.read", "iam.unknown.action", 1))
+	data = []byte(strings.Replace(string(data), "console.context.read", "iam.unknown.action", 1))
 	if err := os.WriteFile(file, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -221,12 +221,9 @@ func TestDefaultHTTPNeedsNoCertificates(t *testing.T) {
 	}
 }
 
-// TestConnectionHostDoesNotBindListener 连接目标不能改变本地监听；监听地址只来自 BIND_HOST。
-//
-// 环境变量统一后：监听用 SPX_IAM_BIND_HOST + SPX_IAM_PORT；
-// SPX_IAM_HOST 只是别的服务连接 IAM 时用的目标地址，不参与绑定。
-func TestListenHostComesFromSingleAddress(t *testing.T) {
-	t.Setenv("SPX_IAM_HOST", "10.1.2.3")
+func TestConnectionHostDoesNotBindListener(t *testing.T) {
+	t.Setenv("SPX_IAM_HOST", "iam.corp")
+	t.Setenv("SPX_IAM_BIND_HOST", "0.0.0.0")
 	t.Setenv("SPX_IAM_PORT", "18081")
 
 	cfg, err := Load(configFile(t))
@@ -234,13 +231,41 @@ func TestListenHostComesFromSingleAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.App.Host != "10.1.2.3" {
-		t.Fatalf("监听地址 = %q，期望来自 SPX_IAM_HOST", cfg.App.Host)
+	if cfg.App.Host != "0.0.0.0" {
+		t.Fatalf("监听地址 = %q，期望来自 SPX_IAM_BIND_HOST", cfg.App.Host)
 	}
 	if cfg.App.Port != 18081 {
 		t.Fatalf("监听端口 = %d，期望来自 SPX_IAM_PORT", cfg.App.Port)
 	}
 }
+
+func TestMissingAdministratorPasswordDoesNotUseAPublicDefault(t *testing.T) {
+	file := configFile(t)
+	if err := os.Unsetenv("SPX_IAM_BOOTSTRAP_PASSWORD"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateAdministrator(); err == nil {
+		t.Fatal("missing administrator password was accepted")
+	}
+}
+
+func TestMissingIngestCredentialNamesItsConfiguration(t *testing.T) {
+	t.Setenv("SPX_IAM_CSRF_KEY", strings.Repeat("c", 32))
+	t.Setenv("SPX_CONSOLE_IAM_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("SPX_INGEST_IAM_TOKEN", "")
+	cfg, err := Load(configFile(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateServe(); err == nil || !strings.Contains(err.Error(), "SPX_INGEST_IAM_TOKEN") {
+		t.Fatalf("expected a diagnostic for the missing Ingest credential, got %v", err)
+	}
+}
+
 func TestValidateAdministratorReportsPasswordLength(t *testing.T) {
 	t.Parallel()
 

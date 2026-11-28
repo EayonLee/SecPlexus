@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/schema/events"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
@@ -25,8 +25,9 @@ import (
 type Status string
 
 const (
-	StatusOK    Status = "ok"    // 规则解析成功。
-	StatusError Status = "error" // 解析失败；事件仍发布，可查询、可补救。
+	StatusPartial Status = "partial" // 部分字段通过验证，已生成 Event。
+	StatusOK      Status = "ok"      // 规则解析成功。
+	StatusError   Status = "error"   // 解析失败；事件仍发布，可查询、可补救。
 )
 
 // Stage 是失败发生的层次，决定排查方向：
@@ -34,9 +35,9 @@ const (
 type Stage string
 
 const (
-	StageDecode Stage = "decode" // 第 1 层：线格式解析失败。
-	StageMap    Stage = "map"    // 第 2 层：规则映射失败。
-	StageLimit  Stage = "limit"  // 触及上限（截断）。
+	StageClassify Stage = "classify" // 未确定事件类别。
+	StageDecode   Stage = "decode"   // 第 1 层：线格式解析失败。
+	StageMap      Stage = "map"      // 第 2 层：规则映射失败。
 )
 
 // Reason 是稳定的机器可读原因码，用于聚合、告警与看板。
@@ -45,28 +46,25 @@ const (
 type Reason string
 
 const (
-	ReasonNoRule         Reason = "no_rule"         // 接入点未挂解析规则，原文透传。
-	ReasonFormatMismatch Reason = "format_mismatch" // 报文与规则的线格式不符。
-	ReasonTruncated      Reason = "truncated"       // 报文超上限被截断，解析结果不可信。
-	ReasonEnginePanic    Reason = "engine_panic"    // 引擎 panic，正常不应出现。
+	ReasonNoMatchingBranch  Reason = "no_matching_branch" // 没有符合条件的分支。
+	ReasonNoRule            Reason = "no_rule"            // 接入点未挂解析规则，原文透传。
+	ReasonFormatMismatch    Reason = "format_mismatch"    // 报文与规则的线格式不符。
+	ReasonTruncated         Reason = "truncated"          // 报文超上限被截断，解析结果不可信。
+	ReasonContractViolation Reason = "contract_violation" // 映射结果不满足所选事件类的字段约束。
+	ReasonEnginePanic       Reason = "engine_panic"       // 引擎 panic，正常不应出现。
 )
 
 // Outcome 是一次解析的结果。
 // 四个字段回答四个不同的问题：Status 什么结果、Stage 哪一层失败、
-// Reason 为什么（可聚合）、Detail 具体是什么（可排查）。
+// Reason 为什么（可聚合）。
 type Outcome struct {
 	Status Status // ok 或 error。
 	Stage  Stage  // 失败层次；成功时为空。
 	Reason Reason // 稳定原因码；成功时为空。
-	Detail string // 人类可读细节；成功时为空。
 }
 
 // OK 报告解析是否成功。
 func (o Outcome) OK() bool { return o.Status == StatusOK }
-
-// OCSFVersion 是本服务产出事件所遵循的 OCSF schema 版本。
-// 事件一旦发布就不能改语义，消费方靠它解释字段。
-const OCSFVersion = "1.1.0"
 
 // Product 描述产出方，填进 OCSF 必填的 metadata.product。
 var Product = map[string]any{
@@ -74,11 +72,6 @@ var Product = map[string]any{
 	"vendor_name": "SecPlexus",
 	"version":     "0.1.0",
 }
-
-// ClassUIDGeneric 是未解析事件的兜底类。
-// 6003 由 spec 指定为"通用接入（原文透传 message）"的类，
-// 目的是让未挂规则的报文仍然可查询、可统计，而不是被丢弃。
-const ClassUIDGeneric = 6003
 
 // ErrClosed 表示管道已进入关停，不再受理新报文。
 // 调用方应把报文退回上游（HTTP 返回 503 让设备重推），而不是当作已受理。
@@ -89,23 +82,28 @@ var ErrBusy = errors.New("pipeline queue is full")
 
 // Event 是一条待发布的事件。
 type Event struct {
-	SourceID     string  // 来源接入点。
-	EventID      string  // 确定性标识，供下游去重。
-	PartitionKey string  // 分区键，保证同一实体的事件落在同一分区。
-	Body         []byte  // OCSF 事件 JSON。
-	Outcome      Outcome // 解析结果：状态、阶段、原因码与细节。
+	BranchID        string
+	CandidateClass  int
+	TimeSource      string
+	AppliedDefaults []string
+	Issues          []normalizer.Issue
+	SourceID        string  // 来源接入点。
+	EventID         string  // 确定性标识，供下游去重。
+	PartitionKey    string  // 分区键，保证同一实体的事件落在同一分区。
+	Body            []byte  // OCSF 事件 JSON。
+	Outcome         Outcome // 解析结果：状态、阶段、原因码与细节。
 
-	// DeadLetter 表示该事件应发到死信 topic（仅当配置了死信 topic 时置位）。
-	DeadLetter bool
 	// Truncated 与 OriginalBytes 是数据完整性事实，与"解析是否成功"分开：
 	// 一条被截断的报文可能仍然解析成功（字段都在头部），
 	// 下游需要能分别对"不完整"和"解析失败"告警。
 	Truncated     bool
 	OriginalBytes int
+	observer      Observations
+	confirmed     chan struct{} // HTTP 等待 Kafka 确认的单次回执。
 }
 
 // Publisher 是事件出口。管道只依赖这个接口，Kafka 是它的一个实现。
-// Publish 返回错误表示这一批没有送达，管道会重试而不是丢弃。
+// Publish 返回 PartialPublishError 时仅重试指定记录，其他错误重试整批。
 type Publisher interface {
 	Publish(ctx context.Context, events []Event) error
 }
@@ -113,9 +111,11 @@ type Publisher interface {
 // Meta 是通道提供的报文元信息。
 // 截断必须随事件一起落库：分析师看到的是不完整数据，这一点不能只写在日志里。
 type Meta struct {
-	Truncated     bool // 报文是否被截断。
-	OriginalBytes int  // 截断前的原始长度；未截断时为 0。
-	DroppedBytes  int  // 被丢弃的字节数，用于生成人类可读的截断说明。
+	SourceRecordID string // Kafka 来源消息关联标识。
+	Decoded        bool   // 通道已完成字符集转换。
+	DecodeFailed   bool   // 通道的字符集转换失败。
+	Truncated      bool   // 报文是否被截断。
+	OriginalBytes  int    // 截断前的原始长度；未截断时为 0。
 }
 
 // Job 是一条待解析的报文。
@@ -125,8 +125,10 @@ type Job struct {
 	Received time.Time
 	// Fields 非空表示第 1 层已由通道完成（如 syslog 剥信封），
 	// 管道直接进第 2 层映射，不再调用解析器。
-	Fields map[string]any
-	Meta   Meta
+	Fields    map[string]any
+	Meta      Meta
+	confirmed chan struct{}
+	eventID   string
 }
 
 // Stats 是可观测计数，供健康检查与运行指标使用。
@@ -142,20 +144,27 @@ type Stats struct {
 	ByProtocol map[string]ProtocolStats
 	// ByInput 是按接入点分维度的计数，键是接入点标识。
 	// 基数受 maxInputSeries 限制：标签值来自用户创建的资源，必须设上限。
-	ByInput    map[string]ProtocolStats
-	Panics     uint64 // 被 recover 兜住的引擎 panic 次数。
-	QueueDepth int    // 当前待解析队列长度。
+	ByInput       map[string]InputStats
+	Panics        uint64 // 被 recover 兜住的引擎 panic 次数。
+	QueueDepth    int    // 当前待解析队列长度。
+	InFlightBytes int64  // 解析队列及 worker 持有的输入字节预算。
 }
 
 // Options 是管道容量参数。
+// Observations 接收本地流水线阶段，不在受理或确认路径访问网络。
+type Observations interface {
+	Receive(string, time.Time)
+	Normalize(string, time.Time, Status)
+	Confirm(string, time.Time)
+}
+
 type Options struct {
-	Workers       int           // 解析 worker 数；默认等于 CPU 核数。
-	QueueDepth    int           // 待解析队列长度；默认 10000（约 0.2 秒的 5w EPS）。
-	BatchSize     int           // 每批事件数；默认 500。
-	FlushInterval time.Duration // 批量最长等待；默认 2 秒。
-	// ParseFailureTopic 是解析失败事件的独立 topic（必填，配置层已校验）。
-	// 与正常事件共用 topic 会让坏数据占掉保留期与带宽，也让下游过滤成为常态开销。
-	ParseFailureTopic string
+	Observations     Observations
+	Workers          int           // 解析 worker 数；默认等于 CPU 核数。
+	QueueDepth       int           // 待解析队列长度；默认 10000（约 0.2 秒的 5w EPS）。
+	MaxInFlightBytes int64         // 等待及解析中的输入字节上限；独立构造时零表示无上限。
+	BatchSize        int           // 每批事件数；默认 500。
+	FlushInterval    time.Duration // 批量最长等待；默认 2 秒。
 	// OverflowGrace 是队列满时允许等待的上限；默认 250 毫秒。
 	// 与其让设备等到 TCP 超时，不如尽快回 503 + Retry-After，让重试有明确节奏。
 	OverflowGrace time.Duration
@@ -195,16 +204,21 @@ type Pipeline struct {
 	options   Options
 	publisher Publisher
 
-	// jobs 永不关闭：关闭一个生产者可能仍在写的通道会 panic（send on closed channel），
-	// 而该 panic 不可 recover。关停改用 done 信号 + worker 主动排空。
+	// 停机先关闭受理入口，再等待提交者离开后关闭 jobs。
 	jobs   chan Job
 	events chan Event
 	flush  chan chan struct{}
 
-	done      chan struct{} // 关闭表示不再受理新报文
-	closeOnce sync.Once
-	workers   sync.WaitGroup
-	batcher   chan struct{} // batchLoop 退出信号
+	done           chan struct{}
+	closeOnce      sync.Once
+	submitMu       sync.Mutex
+	submitters     sync.WaitGroup
+	inputBytes     atomic.Int64
+	workers        sync.WaitGroup
+	batcher        chan struct{}
+	publishContext context.Context
+	cancelPublish  context.CancelFunc
+	drainTimer     *time.Timer
 
 	sequence atomic.Uint64
 	// epoch 标识本次进程启动；参与 event_id，避免重启后与上一批事件撞 ID。
@@ -238,15 +252,18 @@ type Pipeline struct {
 // New 创建管道；Start 才会启动 worker。
 func New(options Options, publisher Publisher) *Pipeline {
 	options = options.defaults()
+	publishContext, cancelPublish := context.WithCancel(context.Background())
 
 	instance := &Pipeline{
-		options:   options,
-		publisher: publisher,
-		jobs:      make(chan Job, options.QueueDepth),
-		events:    make(chan Event, options.BatchSize*2),
-		flush:     make(chan chan struct{}),
-		done:      make(chan struct{}),
-		batcher:   make(chan struct{}),
+		options:        options,
+		publisher:      publisher,
+		jobs:           make(chan Job, options.QueueDepth),
+		events:         make(chan Event, options.BatchSize*2),
+		flush:          make(chan chan struct{}),
+		done:           make(chan struct{}),
+		batcher:        make(chan struct{}),
+		publishContext: publishContext,
+		cancelPublish:  cancelPublish,
 	}
 
 	// 启动期标识：取不到随机源时退化为时间戳，仍能区分进程。
@@ -260,58 +277,67 @@ func New(options Options, publisher Publisher) *Pipeline {
 // SubmitFields 受理一条已由通道完成线格式解析的报文。
 // syslog 通道用 go-syslog 剥完信封后走这里：字段已就绪，只差规则映射。
 func (p *Pipeline) SubmitFields(ctx context.Context, entry input.Entry, fields map[string]any, received time.Time, meta Meta) error {
-	job := Job{Source: entry, Fields: fields, Received: received, Meta: meta}
+	return p.submit(ctx, Job{Source: entry, Fields: fields, Received: received, Meta: meta})
+}
 
-	p.inflight.Add(1)
+// Submit 受理一条报文。条数及在途字节预算用尽时返回 ErrBusy。
+func (p *Pipeline) Submit(ctx context.Context, entry input.Entry, raw []byte, received time.Time, meta Meta) error {
+	return p.submit(ctx, Job{Source: entry, Raw: raw, Received: received, Meta: meta})
+}
 
-	// 先确定性地判断是否已关停：select 在 jobs 有缓冲空间时会与 done 同时就绪，
-	// 随机选中发送分支，导致"已关停却报告受理成功"（随后被关停排空逻辑丢弃）。
+// SubmitTracked 受理一条需确认的报文。回执只在 Kafka 已确认后关闭。
+func (p *Pipeline) SubmitTracked(ctx context.Context, entry input.Entry, raw []byte, received time.Time) (<-chan struct{}, error) {
+	confirmed := make(chan struct{})
+	err := p.submit(ctx, Job{Source: entry, Raw: raw, Received: received, confirmed: confirmed})
+	return confirmed, err
+}
+
+// Done 在发布排空期限结束或流水线退出时关闭。
+func (p *Pipeline) Done() <-chan struct{} { return p.publishContext.Done() }
+
+func (p *Pipeline) submit(ctx context.Context, job Job) error {
+	p.submitMu.Lock()
+	if err := ctx.Err(); err != nil {
+		p.submitMu.Unlock()
+		return err
+	}
 	select {
 	case <-p.done:
-		p.inflight.Done()
-
+		p.submitMu.Unlock()
 		return ErrClosed
 	default:
 	}
+	p.submitters.Add(1)
+	p.submitMu.Unlock()
+	defer p.submitters.Done()
 
-	if err := p.enqueue(ctx, job); err != nil {
-		p.inflight.Done()
-
-		return err
+	size := job.bytes()
+	for {
+		used := p.inputBytes.Load()
+		if p.options.MaxInFlightBytes > 0 && size > p.options.MaxInFlightBytes-used {
+			return ErrBusy
+		}
+		if p.inputBytes.CompareAndSwap(used, used+size) {
+			break
+		}
 	}
 
+	// Flush 必须能看到正在提交的报文，即使此时仍在等队列空位。
+	p.inflight.Add(1)
+	if err := p.enqueue(ctx, job); err != nil {
+		p.inflight.Done()
+		p.inputBytes.Add(-size)
+		return err
+	}
 	p.accepted.Add(1)
-
+	if p.options.Observations != nil {
+		p.options.Observations.Receive(job.Source.ID, time.Now())
+	}
 	return nil
 }
 
-// Submit 受理一条报文：先快速尝试入队，队列满时最多等 OverflowGrace。
-// 超出宽限即返回 ErrBusy，由通道层回 503 + Retry-After，让设备按明确节奏重试。
-func (p *Pipeline) Submit(ctx context.Context, entry input.Entry, raw []byte, received time.Time, meta Meta) error {
-	job := Job{Source: entry, Raw: raw, Received: received, Meta: meta}
-
-	// 先登记再入队：Flush 看到计数为零才是真的全空。
-	p.inflight.Add(1)
-
-	// 先确定性地判断是否已关停：select 在 jobs 有缓冲空间时会与 done 同时就绪，
-	// 随机选中发送分支，导致"已关停却报告受理成功"（随后被关停排空逻辑丢弃）。
-	select {
-	case <-p.done:
-		p.inflight.Done()
-
-		return ErrClosed
-	default:
-	}
-
-	if err := p.enqueue(ctx, job); err != nil {
-		p.inflight.Done()
-
-		return err
-	}
-
-	p.accepted.Add(1)
-
-	return nil
+func (j Job) bytes() int64 {
+	return int64(max(cap(j.Raw), j.Meta.OriginalBytes))
 }
 
 // Start 启动解析 worker 与批处理器，阻塞到 ctx 取消或 Close 被调用，然后按顺序关停：
@@ -342,32 +368,30 @@ func (p *Pipeline) Start(ctx context.Context) error {
 // Close 让管道进入关停：不再受理新报文，已在途的继续处理。
 // 幂等，可在信号处理器里直接调用。
 func (p *Pipeline) Close() {
-	p.closeOnce.Do(func() { close(p.done) })
+	p.closeOnce.Do(func() {
+		p.submitMu.Lock()
+		p.drainTimer = time.AfterFunc(p.options.DrainTimeout, p.cancelPublish)
+		close(p.done)
+		p.submitMu.Unlock()
+	})
 }
 
 // shutdown 执行有序关停，返回最后一批的发布错误。
 func (p *Pipeline) shutdown() error {
 	p.Close()
+	defer p.drainTimer.Stop()
+	defer p.cancelPublish()
 
-	// worker 见 done 之后会先把队列掏空再退出。
+	p.submitters.Wait()
+	close(p.jobs)
 	p.workers.Wait()
-
-	// 极端竞态兜底：某个 Submit 在 done 关闭的同一瞬间塞进了任务，
-	// 而 worker 已经退出。这些任务不能再处理，记为丢弃并结清在途计数，
-	// 否则 Flush 会永远等下去。
-	for {
-		select {
-		case <-p.jobs:
-			p.inflight.Done()
-			p.dropped.Add(1)
-		default:
-			goto drained
-		}
-	}
-
-drained:
 	close(p.events)
 	<-p.batcher
+
+	if p.publishContext.Err() != nil {
+		logging.From(p.publishContext).Error("Pipeline drain deadline reached",
+			"event", "publish.drain_timeout", "dropped_total", p.dropped.Load())
+	}
 
 	return nil
 }
@@ -401,52 +425,56 @@ func (p *Pipeline) Flush(ctx context.Context) error {
 // Stats 返回当前计数快照。
 func (p *Pipeline) Stats() Stats {
 	return Stats{
-		Accepted:     p.accepted.Load(),
-		Parsed:       p.parsed.Load(),
-		ParseFailed:  p.parseFailed.Load(),
-		Published:    p.published.Load(),
-		PublishRetry: p.publishRetry.Load(),
-		Panics:       p.panics.Load(),
-		Dropped:      p.dropped.Load(),
-		ByProtocol:   p.protocolSnapshot(),
-		ByInput:      p.inputSnapshot(),
-		QueueDepth:   len(p.jobs),
+		Accepted:      p.accepted.Load(),
+		Parsed:        p.parsed.Load(),
+		ParseFailed:   p.parseFailed.Load(),
+		Published:     p.published.Load(),
+		PublishRetry:  p.publishRetry.Load(),
+		Panics:        p.panics.Load(),
+		Dropped:       p.dropped.Load(),
+		ByProtocol:    p.protocolSnapshot(),
+		ByInput:       p.inputSnapshot(),
+		QueueDepth:    len(p.jobs),
+		InFlightBytes: p.inputBytes.Load(),
 	}
 }
 
-// parseLoop 消费队列；关停时先把剩余任务处理完再退出——
-// 提前退出会让已受理的报文凭空消失。
+// parseLoop 消费队列，直到停止接收并结清队列内的报文。
 func (p *Pipeline) parseLoop() {
-	for {
-		select {
-		case job := <-p.jobs:
-			p.handle(job)
-		case <-p.done:
-			// 排空剩余后再退出。
-			for {
-				select {
-				case job := <-p.jobs:
-					p.handle(job)
-				default:
-					return
-				}
-			}
-		}
+	for job := range p.jobs {
+		p.handle(job)
 	}
 }
 
 // handle 解析一条报文并投给批处理器。
 func (p *Pipeline) handle(job Job) {
-	event := p.parse(job)
+	defer p.inflight.Done()
+	defer p.inputBytes.Add(-job.bytes())
+	if p.publishContext.Err() != nil {
+		p.dropped.Add(1)
+		return
+	}
 
-	p.events <- event
-	p.inflight.Done()
+	event := p.parse(job)
+	select {
+	case p.events <- event:
+	case <-p.publishContext.Done():
+		p.dropped.Add(1)
+	}
 }
 
 // Parse 只做解析与信封构造，不发布。
 // Kafka 消费需要"确认发布成功后再提交位移"，因此由它自己掌控发布与提交的顺序。
-func (p *Pipeline) Parse(entry input.Entry, raw []byte, received time.Time) Event {
-	return p.parse(Job{Source: entry, Raw: raw, Received: received})
+func (p *Pipeline) Parse(entry input.Entry, raw []byte, received time.Time, eventID string) Event {
+	return p.parse(Job{Source: entry, Raw: raw, Received: received, eventID: eventID})
+}
+
+// ParseKafka 解析已由分区边界固定配置的记录，并保留独立的来源身份。
+func (p *Pipeline) ParseKafka(entry input.Entry, raw []byte, received time.Time, eventID, sourceRecordID string) Event {
+	if p.options.Observations != nil {
+		p.options.Observations.Receive(entry.ID, time.Now())
+	}
+	return p.parse(Job{Source: entry, Raw: raw, Received: received, eventID: eventID, Meta: Meta{SourceRecordID: sourceRecordID}})
 }
 
 // parse 把一条报文解析成事件。
@@ -454,116 +482,37 @@ func (p *Pipeline) Parse(entry input.Entry, raw []byte, received time.Time) Even
 // 单条坏消息不能拖垮 worker，也不能让整批消失。
 func (p *Pipeline) parse(job Job) Event {
 	event := Event{
-		SourceID: job.Source.ID,
-		EventID:  normalizer.EventID(job.Source.ID, p.epoch, p.sequence.Add(1), job.Raw),
+		SourceID:  job.Source.ID,
+		EventID:   job.eventID,
+		confirmed: job.confirmed,
+		observer:  p.options.Observations,
+	}
+	if event.EventID == "" {
+		event.EventID = normalizer.EventID(job.Source.ID, p.epoch, p.sequence.Add(1), job.Raw)
 	}
 
-	fields, unmapped, outcome := p.apply(job)
-
-	// 截断是一件独立的完整性事实，但它使解析结果不可信：
-	// 结构化格式在中间被切断后，剩下的字段逐个看都合法，
-	// 实际缺了尾部字段（CEF 的 src/dst 就在扩展区末尾）。
-	if job.Meta.Truncated {
-		event.Truncated = true
-		event.OriginalBytes = job.Meta.OriginalBytes
-
-		// 已因解析失败报错的保留更具体的原因：解析失败的证据更直接。
-		if outcome.OK() {
-			outcome = Outcome{
-				Status: StatusError,
-				Stage:  StageLimit,
-				Reason: ReasonTruncated,
-				Detail: truncationDetail(job.Meta),
-			}
-		}
+	event, _, _ = job.mixedEvent(event)
+	if event.Outcome.Reason == ReasonEnginePanic {
+		p.panics.Add(1)
+		logging.From(context.Background()).Error("Parse engine panicked",
+			"event", "parse.engine_panic", "input_id", job.Source.ID)
 	}
+	if p.options.Observations != nil {
+		p.options.Observations.Normalize(job.Source.ID, time.Now(), event.Outcome.Status)
+	}
+	p.countOutcome(job.Source, event.Outcome.Status)
+	return event
+}
 
-	parsed := outcome.OK()
-	p.countProtocol(job.Source.Protocol, parsed)
-	p.countInput(job.Source.ID, parsed)
-
-	event.Outcome = outcome
-
-	// 分流策略：配置了死信 topic 才把失败事件单独送走；
-	// 没配就保持"同一 topic + parse.outcome"的旧语义，避免部署差异带来行为差异。
-	event.DeadLetter = !outcome.OK() && p.options.ParseFailureTopic != ""
-
-	if outcome.OK() {
+func (p *Pipeline) countOutcome(source input.Entry, status Status) {
+	parsed := status == StatusOK
+	p.countProtocol(source.Protocol, parsed)
+	p.countInput(source.ID, status)
+	if parsed {
 		p.parsed.Add(1)
 	} else {
 		p.parseFailed.Add(1)
 	}
-
-	event.PartitionKey = partitionKey(fields, event.EventID)
-	event.Body = buildBody(job, fields, unmapped, event)
-
-	return event
-}
-
-// truncationDetail 生成人类可读的截断说明：保留多少、原始多少。
-func truncationDetail(meta Meta) string {
-	if meta.OriginalBytes <= 0 {
-		return "message truncated at the configured size limit"
-	}
-
-	return fmt.Sprintf("message truncated: kept %d of %d bytes", meta.OriginalBytes-meta.DroppedBytes, meta.OriginalBytes)
-}
-
-// apply 调用解析规则，返回字段与结构化结果。
-// 调用方需要字段做分区键与事件体，需要结果做状态标注，两样一起返回。
-func (p *Pipeline) apply(job Job) (fields, unmapped map[string]any, outcome Outcome) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			p.panics.Add(1)
-			logging.From(context.Background()).Error("Parse engine panicked",
-				"event", "parse.panic", "input_id", job.Source.ID,
-				"panic_kind", fmt.Sprintf("%T", recovered), "stack", logging.Stack())
-
-			fields = nil
-			unmapped = nil
-			outcome = Outcome{
-				Status: StatusError,
-				Stage:  StageMap,
-				Reason: ReasonEnginePanic,
-				Detail: fmt.Sprintf("engine panicked: %T", recovered),
-			}
-		}
-	}()
-
-	// 未挂规则：原文透传。这不是解析出错，而是"还没有规则"，
-	// 原因码单独区分，运维才能看出该去补规则还是查报文。
-	if job.Source.Mapping == nil {
-		return nil, nil, Outcome{
-			Status: StatusError,
-			Stage:  StageMap,
-			Reason: ReasonNoRule,
-			Detail: "connector has no parse rule; raw message passed through",
-		}
-	}
-
-	// 通道已完成第 1 层：字段直接进第 2 层映射。
-	if job.Fields != nil {
-		mapped := job.Source.Mapping.ApplyFields(job.Fields, job.Received)
-
-		return mapped.Fields, mapped.Unmapped, Outcome{Status: StatusOK}
-	}
-
-	parsed, err := job.Source.Mapping.Apply(job.Raw, job.Received)
-	if err != nil {
-		return nil, nil, Outcome{
-			Status: StatusError,
-			Stage:  StageDecode,
-			Reason: ReasonFormatMismatch,
-			Detail: err.Error(),
-		}
-	}
-
-	for _, warning := range parsed.Warnings {
-		logging.From(context.Background()).Debug("Rule warning", "event", "parse.warning",
-			"input_id", job.Source.ID, "warning", warning)
-	}
-
-	return parsed.Fields, parsed.Unmapped, Outcome{Status: StatusOK}
 }
 
 // partitionKey 按 spec 的实体优先级取分区键：
@@ -605,41 +554,21 @@ func nestedString(fields map[string]any, path string) string {
 	return value
 }
 
-// buildBody 生成要发布的事件 JSON：OCSF 字段 + metadata。
-//
-// 解析失败时才补兜底类与原文字段；已经解析出的字段一律保留——
-// 一条被截断但头部完整的 CEF 仍然属于 2004（Detection Finding），
-// 覆盖成通用类会让它落进错误的分类，下游按 class_uid 路由时就找不到了。
-func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
+// buildBody 组装发布正文。无分类的诊断记录保留接收时间和来源。
+func buildBody(job Job, fields, unmapped map[string]any, event Event) ([]byte, error) {
 	envelope := make(map[string]any, len(fields)+2)
 	for key, value := range fields {
 		envelope[key] = value
 	}
 
-	if !event.Outcome.OK() {
-		// 兜底只在规则没给出对应字段时生效。
-		if _, ok := envelope["class_uid"]; !ok {
-			envelope["class_uid"] = ClassUIDGeneric
-		}
-		if _, ok := envelope["severity_id"]; !ok {
-			envelope["severity_id"] = normalizer.SeverityUnknown
-		}
-		if _, ok := envelope["time"]; !ok {
-			envelope["time"] = job.Received.UTC().UnixMilli()
-		}
-		if _, ok := envelope["message"]; !ok {
-			envelope["message"] = string(job.Raw)
-		}
-	}
-
 	// OCSF base_event 的 required 属性：category_uid、type_uid、activity_id、metadata。
 	// 缺了它们，任何 OCSF 消费者都无法分类或建表，所以在这里补齐而不是留给下游猜。
-	activityID := activityIDOf(envelope)
-	classUID := classUIDOf(envelope)
-
-	envelope["activity_id"] = activityID
-	envelope["category_uid"] = classUID / 1000
-	envelope["type_uid"] = classUID*100 + activityID
+	if classUID, ok := numeric(envelope["class_uid"]); ok {
+		activityID := activityIDOf(envelope)
+		envelope["activity_id"] = activityID
+		envelope["category_uid"] = classUID / 1000
+		envelope["type_uid"] = classUID*100 + activityID
+	}
 
 	// OCSF 的 unmapped 属性就是给"规则未使用的源字段"准备的；
 	// 丢掉它们会让排查时看不到原始上下文，也会让脱敏逻辑变成死代码。
@@ -651,14 +580,35 @@ func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
 	// 直接塞 input_id/parse.outcome 会占用标准语义并挡掉必填的 version/product。
 	bookkeeping := map[string]any{
 		"input_id":      job.Source.ID,
+		"vendor":        job.Source.Vendor,
+		"product":       job.Source.Product,
 		"parse.outcome": string(event.Outcome.Status),
+	}
+
+	if job.Meta.SourceRecordID != "" {
+		bookkeeping["source_record_id"] = job.Meta.SourceRecordID
+		bookkeeping["source_revision"] = job.Source.Revision
+	}
+	if event.BranchID != "" {
+		bookkeeping["branch_id"] = event.BranchID
+	}
+	bookkeeping["time_source"] = event.TimeSource
+	if len(event.Issues) > 0 {
+		bookkeeping["parse.issues"] = event.Issues
+	}
+	if event.CandidateClass > 0 {
+		bookkeeping["candidate_class_uid"] = event.CandidateClass
+	}
+	if job.Source.ParsingRuleID != "" {
+		bookkeeping["parsing_rule_id"] = job.Source.ParsingRuleID
+		bookkeeping["parsing_rule_version"] = job.Source.ParsingRuleVersion
 	}
 
 	if !event.Outcome.OK() {
 		bookkeeping["parse.error"] = map[string]any{
 			"stage":   string(event.Outcome.Stage),
 			"reason":  string(event.Outcome.Reason),
-			"message": event.Outcome.Detail,
+			"message": "Could not parse event",
 		}
 	}
 
@@ -675,25 +625,30 @@ func buildBody(job Job, fields, unmapped map[string]any, event Event) []byte {
 		}
 	}
 
-	if _, exists := metadata["version"]; !exists {
-		metadata["version"] = OCSFVersion
+	metadata["version"] = events.CurrentOCSFVersion
+	bookkeeping["contract_version"] = events.CurrentVersion
+	bookkeeping["received_at"] = job.Received.UTC().UnixMilli()
+	product, _ := metadata["product"].(map[string]any)
+	if product == nil {
+		product = make(map[string]any, 2)
 	}
-	if _, exists := metadata["product"]; !exists {
-		metadata["product"] = Product
+	defaults := Product
+	if job.Source.Product != "" {
+		defaults = map[string]any{"name": job.Source.Product, "vendor_name": job.Source.Vendor}
 	}
-	if _, exists := metadata["uid"]; !exists {
-		metadata["uid"] = event.EventID
+	for _, key := range []string{"name", "vendor_name"} {
+		if _, exists := product[key]; !exists && defaults[key] != "" {
+			product[key] = defaults[key]
+		}
 	}
+	metadata["product"] = product
+
+	metadata["uid"] = event.EventID
 
 	metadata["spx"] = bookkeeping
 	envelope["metadata"] = metadata
 
-	body, err := json.Marshal(envelope)
-	if err != nil {
-		return fallbackBody(job, event)
-	}
-
-	return body
+	return json.Marshal(envelope)
 }
 
 // activityIDOf 取规则声明的活动标识；未声明时用 OCSF 的 0（Unknown）。
@@ -703,15 +658,6 @@ func activityIDOf(envelope map[string]any) int64 {
 	}
 
 	return 0
-}
-
-// classUIDOf 取分类标识；兜底事件一律归到通用类。
-func classUIDOf(envelope map[string]any) int64 {
-	if value, ok := numeric(envelope["class_uid"]); ok {
-		return value
-	}
-
-	return ClassUIDGeneric
 }
 
 // numeric 把 JSON 数字或整型统一成 int64。
@@ -727,40 +673,6 @@ func numeric(value any) (int64, bool) {
 	}
 
 	return 0, false
-}
-
-// fallbackBody 在字段无法序列化时兜底：宁可丢掉字段，也不让事件消失。
-// 它必须与正常路径产出同一份契约（含 metadata.spx），否则排障时
-// 恰好是最需要线索的那批事件没有接入点与解析结论。
-func fallbackBody(job Job, event Event) []byte {
-	classUID := int64(ClassUIDGeneric)
-	activityID := int64(0)
-
-	body, _ := json.Marshal(map[string]any{
-		"class_uid":    classUID,
-		"category_uid": classUID / 1000,
-		"type_uid":     classUID*100 + activityID,
-		"activity_id":  activityID,
-		"severity_id":  normalizer.SeverityUnknown,
-		"time":         job.Received.UTC().UnixMilli(),
-		"message":      string(job.Raw),
-		"metadata": map[string]any{
-			"version": OCSFVersion,
-			"product": Product,
-			"uid":     event.EventID,
-			"spx": map[string]any{
-				"input_id":      job.Source.ID,
-				"parse.outcome": string(StatusError),
-				"parse.error": map[string]any{
-					"stage":   string(StageMap),
-					"reason":  string(ReasonFormatMismatch),
-					"message": "event fields are not serializable",
-				},
-			},
-		},
-	})
-
-	return body
 }
 
 // splitPath 按点号切分路径。
@@ -795,11 +707,13 @@ func (p *Pipeline) batchLoop() {
 			batch = append(batch, event)
 			if len(batch) >= p.options.BatchSize {
 				p.publish(batch)
+				clear(batch)
 				batch = batch[:0]
 			}
 		case <-ticker.C:
 			if len(batch) > 0 {
 				p.publish(batch)
+				clear(batch)
 				batch = batch[:0]
 			}
 		case done := <-p.flush:
@@ -807,6 +721,7 @@ func (p *Pipeline) batchLoop() {
 			// select 可能先选中 flush，所以先非阻塞排空再发布。
 			batch = drain(p.events, batch)
 			p.publish(batch)
+			clear(batch)
 			batch = batch[:0]
 
 			close(done)
@@ -840,52 +755,36 @@ func (p *Pipeline) publish(batch []Event) {
 		return
 	}
 
-	var deadline time.Time
 	backoff := 100 * time.Millisecond
 
-	for {
-		// 发布用独立 ctx：关停信号已由 done 表达，不能把"该退出了"
-		// 和"这批发不出去"混成同一个取消信号——那正是丢批的根因。
-		ctx := context.Background()
-		cancel := context.CancelFunc(func() {})
-		if !deadline.IsZero() {
-			ctx, cancel = context.WithDeadline(ctx, deadline)
-		}
-
-		err := p.publisher.Publish(ctx, batch)
-		cancel()
-
+	ctx := p.publishContext
+	for ctx.Err() == nil {
+		size := len(batch)
+		pending, err := PublishPending(ctx, p.publisher, batch)
+		p.published.Add(uint64(size - len(pending)))
+		batch = pending
 		if err == nil {
-			p.published.Add(uint64(len(batch)))
 			return
 		}
 
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			p.dropped.Add(uint64(len(batch)))
-			logging.From(context.Background()).Error("Dropping batch after drain timeout",
-				"event", "publish.dropped", "events", len(batch), "error", logging.Error(err))
-
-			return
+		if ctx.Err() != nil {
+			break
 		}
 
 		p.publishRetry.Add(1)
 		logging.From(context.Background()).Warn("Publish failed; retrying", "event", "publish.retry",
 			"events", len(batch), "backoff_ms", backoff.Milliseconds(), "error", logging.Error(err))
 
-		// 首次失败时若已进入关停，开始计排空预算。
-		if deadline.IsZero() {
-			select {
-			case <-p.done:
-				deadline = time.Now().Add(p.options.DrainTimeout)
-			default:
-			}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
 		}
-
-		time.Sleep(backoff)
-		if backoff < 5*time.Second {
-			backoff *= 2
-		}
+		timer.Stop()
+		backoff = min(backoff*2, 5*time.Second)
 	}
+
+	p.dropped.Add(uint64(len(batch)))
 }
 
 // ProtocolStats 是单个协议的计数。
@@ -938,15 +837,26 @@ const maxInputSeries = 512
 
 // inputCounters 是单个接入点的计数。
 type inputCounters struct {
-	accepted atomic.Uint64
-	parsed   atomic.Uint64
+	partial      atomic.Uint64
+	unclassified atomic.Uint64
+	accepted     atomic.Uint64
+	parsed       atomic.Uint64
+	lastReceived atomic.Int64
+}
+
+// InputStats 是本进程观察到的接入点累计收包和解析结果。
+type InputStats struct {
+	ProtocolStats
+	Partial      uint64
+	Unclassified uint64
+	LastReceived time.Time
 }
 
 // countInput 累加按接入点的计数。
 //
 // 超过上限后不再新增序列：宁可在指标里"看不到那个接入点"，
 // 也不能让内存与抓取端基数无限增长。
-func (p *Pipeline) countInput(inputID string, parsed bool) {
+func (p *Pipeline) countInput(inputID string, status Status) {
 	if inputID == "" {
 		return
 	}
@@ -972,19 +882,32 @@ func (p *Pipeline) countInput(inputID string, parsed bool) {
 	}
 
 	counters.accepted.Add(1)
-	if parsed {
+	counters.lastReceived.Store(time.Now().UnixMilli())
+	switch status {
+	case StatusOK:
 		counters.parsed.Add(1)
+	case StatusPartial:
+		counters.partial.Add(1)
+	default:
+		counters.unclassified.Add(1)
 	}
 }
 
 // inputSnapshot 读取按接入点的计数。
-func (p *Pipeline) inputSnapshot() map[string]ProtocolStats {
-	snapshot := make(map[string]ProtocolStats, 8)
+func (p *Pipeline) inputSnapshot() map[string]InputStats {
+	snapshot := make(map[string]InputStats, 8)
 	p.byInput.Range(func(key, value any) bool {
 		inputID, keyOK := key.(string)
 		counters, valueOK := value.(*inputCounters)
 		if keyOK && valueOK {
-			snapshot[inputID] = ProtocolStats{Accepted: counters.accepted.Load(), Parsed: counters.parsed.Load()}
+			parsed := counters.parsed.Load()
+			if last := counters.lastReceived.Load(); last > 0 {
+				snapshot[inputID] = InputStats{
+					ProtocolStats: ProtocolStats{Accepted: counters.accepted.Load(), Parsed: parsed},
+					LastReceived:  time.UnixMilli(last).UTC(),
+					Partial:       counters.partial.Load(), Unclassified: counters.unclassified.Load(),
+				}
+			}
 		}
 
 		return true

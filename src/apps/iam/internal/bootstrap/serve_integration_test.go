@@ -24,11 +24,15 @@ func TestUnifiedHTTPListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.DB.URL = store.Pool.Config().ConnConfig.ConnString()
-	cfg.Cache.URL = os.Getenv("SPX_TEST_REDIS_URL")
+	cfg.PostgreSQL.URL = store.Pool.Config().ConnConfig.ConnString()
+	cfg.Redis.URL = os.Getenv("SPX_TEST_REDIS_URL")
 	cfg.Bootstrap.Username = "admin" + uuid.NewString()[:8]
 	cfg.Bootstrap.Password = "isolated administrator password"
-	if err := store.Seed(context.Background(), cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
+	if err := store.SyncAdministrator(context.Background(), cfg.Bootstrap.Username, cfg.Bootstrap.Password); err != nil {
+		t.Fatal(err)
+	}
+	var before time.Time
+	if err := store.DB.QueryRow(`SELECT max(updated_at) FROM iam.permissions`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Auth.CSRFKey = strings.Repeat("k", 32)
@@ -64,6 +68,13 @@ func TestUnifiedHTTPListener(t *testing.T) {
 		if err == nil {
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
+				var after time.Time
+				if err := store.DB.QueryRow(`SELECT max(updated_at) FROM iam.permissions`).Scan(&after); err != nil {
+					t.Fatal(err)
+				}
+				if !after.Equal(before) {
+					t.Fatal("starting IAM rewrote the permission catalog")
+				}
 				return
 			}
 		}

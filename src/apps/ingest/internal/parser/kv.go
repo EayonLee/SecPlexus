@@ -39,20 +39,20 @@ func (p kvParser) Parse(raw []byte) (map[string]any, error) {
 // escapes 只对 CEF 开启：通用键值对里的反斜杠是普通字符（Windows 路径很常见），
 // 把它当转义会把 C:\\temp 变成制表符。
 func (spec KVSpec) options(escapes bool) (pairOptions, error) {
-	delimiter := spec.Delimiter
-	if delimiter == "" {
-		delimiter = "="
+	keyValueSeparator := spec.KeyValueSeparator
+	if keyValueSeparator == "" {
+		keyValueSeparator = "="
 	}
-	entry := spec.Entry
-	if entry == "" {
-		entry = " "
+	fieldSeparator := spec.FieldSeparator
+	if fieldSeparator == "" {
+		fieldSeparator = " "
 	}
 
-	if len(delimiter) != 1 {
-		return pairOptions{}, fmt.Errorf("%w: kv delimiter must be a single character", ErrInvalidSpec)
+	if len(keyValueSeparator) != 1 {
+		return pairOptions{}, fmt.Errorf("%w: key-value separator must be a single character", ErrInvalidSpec)
 	}
-	if len(entry) != 1 {
-		return pairOptions{}, fmt.Errorf("%w: kv entry separator must be a single character", ErrInvalidSpec)
+	if len(fieldSeparator) != 1 {
+		return pairOptions{}, fmt.Errorf("%w: field separator must be a single character", ErrInvalidSpec)
 	}
 	quote := spec.Quote
 	if quote == "" {
@@ -63,15 +63,15 @@ func (spec KVSpec) options(escapes bool) (pairOptions, error) {
 	if len(quote) > 1 {
 		return pairOptions{}, fmt.Errorf("%w: kv quote must be at most one character", ErrInvalidSpec)
 	}
-	if delimiter == entry {
-		return pairOptions{}, fmt.Errorf("%w: kv delimiter and entry separator must differ", ErrInvalidSpec)
+	if keyValueSeparator == fieldSeparator {
+		return pairOptions{}, fmt.Errorf("%w: key-value separator and field separator must differ", ErrInvalidSpec)
 	}
 
 	options := pairOptions{
-		keyDelimiter: delimiter[0],
-		entrySep:     entry[0],
-		quote:        quote[0],
-		escapes:      escapes,
+		keyValueSeparator: keyValueSeparator[0],
+		fieldSeparator:    fieldSeparator[0],
+		quote:             quote[0],
+		escapes:           escapes,
 	}
 
 	return options, nil
@@ -79,16 +79,16 @@ func (spec KVSpec) options(escapes bool) (pairOptions, error) {
 
 // pairOptions 是键值扫描器的运行期参数。
 type pairOptions struct {
-	keyDelimiter byte // 键与值之间的分隔符。
-	entrySep     byte // 条目之间的分隔符。
-	quote        byte // 引号字符；0 表示不支持引号包围。
-	escapes      bool // 是否解析反斜杠转义（CEF 需要，通用键值对不需要）。
-	keyAhead     bool // 条目分隔符后必须紧跟 key= 才切分；CEF 的扩展值含空格时需要。
+	keyValueSeparator byte // 键与值之间的分隔符。
+	fieldSeparator    byte // 字段之间的分隔符。
+	quote             byte // 引号字符；0 表示不支持引号包围。
+	escapes           bool // 是否解析反斜杠转义（CEF 需要，通用键值对不需要）。
+	keyAhead          bool // 字段分隔符后必须紧跟 key= 才切分；CEF 的扩展值含空格时需要。
 }
 
 // parsePairs 把一组键值对切成字段表。
 //
-// 用状态机而不是 strings.Split：值里可能出现引号包围的条目分隔符，
+// 用状态机而不是 strings.Split：值里可能出现引号包围的字段分隔符，
 // 因此不能先按分隔符切再找等号。键取第一个未被转义的等号之前的部分，
 // 值可以包含任意等号（base64、命令行参数都很常见）。
 func parsePairs(raw []byte, options pairOptions) map[string]string {
@@ -124,8 +124,8 @@ func scanPairs(raw []byte, options pairOptions) (map[string]string, bool) {
 			escaped = true
 		case options.quote != 0 && ch == options.quote:
 			inQuote = !inQuote
-		case !inQuote && ch == options.entrySep && (!options.keyAhead || keyFollows(raw[i+1:], options.keyDelimiter)):
-			appendPair(fields, pair, options.keyDelimiter)
+		case !inQuote && ch == options.fieldSeparator && (!options.keyAhead || keyFollows(raw[i+1:], options.keyValueSeparator)):
+			appendPair(fields, pair, options.keyValueSeparator)
 			pair = pair[:0]
 		default:
 			pair = append(pair, ch)
@@ -136,7 +136,7 @@ func scanPairs(raw []byte, options pairOptions) (map[string]string, bool) {
 	if escaped {
 		pair = append(pair, '\\')
 	}
-	appendPair(fields, pair, options.keyDelimiter)
+	appendPair(fields, pair, options.keyValueSeparator)
 
 	return fields, !inQuote
 }
@@ -144,13 +144,13 @@ func scanPairs(raw []byte, options pairOptions) (map[string]string, bool) {
 // keyFollows 判断分隔符之后是否紧跟一个 key= 起始。
 // 用来在 CEF 里区分"值中的空格"与"下一个键的边界"：
 // msg=login failed user=bob 中只有第二个空格才是边界。
-func keyFollows(rest []byte, keyDelimiter byte) bool {
+func keyFollows(rest []byte, keyValueSeparator byte) bool {
 	index := 0
 	for index < len(rest) && isKeyByte(rest[index]) {
 		index++
 	}
 
-	return index > 0 && index < len(rest) && rest[index] == keyDelimiter
+	return index > 0 && index < len(rest) && rest[index] == keyValueSeparator
 }
 
 // isKeyByte 判断字节是否可以用作键的一部分。
@@ -166,8 +166,8 @@ func isKeyByte(ch byte) bool {
 }
 
 // appendPair 在第一个键分隔符处切开一个条目；没有分隔符或键为空时丢弃。
-func appendPair(fields map[string]string, pair []byte, keyDelimiter byte) {
-	key, value, found := strings.Cut(string(pair), string(keyDelimiter))
+func appendPair(fields map[string]string, pair []byte, keyValueSeparator byte) {
+	key, value, found := strings.Cut(string(pair), string(keyValueSeparator))
 	if !found {
 		return
 	}

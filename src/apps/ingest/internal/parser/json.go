@@ -96,21 +96,21 @@ const jsonArray = '['
 // 且无法只按首字节区分：以 { 开头的既可能是单对象，也可能是 NDJSON 的第一行。
 // 因此统一用流式解码器逐个取值，直到输入结束——一个对象得一条，NDJSON 得 N 条。
 // 用流式解码而不是整体 Unmarshal：大报文不会在内存里翻倍。
-func splitJSON(raw []byte) ([][]byte, error) {
+func splitJSON(raw []byte, limit int) ([][]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("%w: empty JSON payload", ErrMalformed)
 	}
 
 	if trimmed[0] == jsonArray {
-		return splitJSONArray(trimmed)
+		return splitJSONArray(trimmed, limit)
 	}
 
-	return splitJSONStream(trimmed)
+	return splitJSONStream(trimmed, limit)
 }
 
 // splitJSONStream 从输入里逐个解码顶层值，供单对象与 NDJSON 共用。
-func splitJSONStream(raw []byte) ([][]byte, error) {
+func splitJSONStream(raw []byte, limit int) ([][]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 
 	messages := make([][]byte, 0, 8)
@@ -124,6 +124,9 @@ func splitJSONStream(raw []byte) ([][]byte, error) {
 			return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 		}
 
+		if limit > 0 && len(messages) == limit {
+			return nil, ErrBatchLimit
+		}
 		messages = append(messages, value)
 	}
 
@@ -135,7 +138,7 @@ func splitJSONStream(raw []byte) ([][]byte, error) {
 }
 
 // splitJSONArray 逐元素解码一个 JSON 数组；闭合括号之后不允许再有内容。
-func splitJSONArray(raw []byte) ([][]byte, error) {
+func splitJSONArray(raw []byte, limit int) ([][]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 
 	token, err := decoder.Token()
@@ -148,6 +151,9 @@ func splitJSONArray(raw []byte) ([][]byte, error) {
 
 	messages := make([][]byte, 0, 8)
 	for decoder.More() {
+		if limit > 0 && len(messages) == limit {
+			return nil, ErrBatchLimit
+		}
 		var element json.RawMessage
 		if err = decoder.Decode(&element); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrMalformed, err)

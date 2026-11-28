@@ -48,6 +48,15 @@ func Fail(w http.ResponseWriter, codes ...Code) {
 // FailWithMessage 仅在确需特定公开提示时覆盖默认消息，状态仍由结果码决定。
 // 禁止传入原始数据库错误、凭据或内部地址。
 func FailWithMessage(w http.ResponseWriter, code Code, message string) {
+	fail(w, code, message, nil)
+}
+
+// FailFields 在请求错误或冲突响应中附加可由表单定位的字段错误。
+func FailFields(w http.ResponseWriter, code Code, fields ...FieldError) {
+	fail(w, code, "", fields)
+}
+
+func fail(w http.ResponseWriter, code Code, message string, fields []FieldError) {
 	definition, ok := Lookup(code)
 	if !ok || code == CodeOK {
 		code = CodeInternalError
@@ -60,10 +69,11 @@ func FailWithMessage(w http.ResponseWriter, code Code, message string) {
 	}
 
 	write(w, definition.Status, Result[any]{
-		Code:      code,
-		Message:   message,
-		Data:      nil,
-		RequestID: responseID(w),
+		Code:        code,
+		Message:     message,
+		Data:        nil,
+		RequestID:   responseID(w),
+		FieldErrors: fields,
 	})
 }
 

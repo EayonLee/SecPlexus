@@ -16,7 +16,7 @@ import (
 
 // ListUsers 按查询条件与分页读取用户。
 func (s *Handler) ListUsers(c *gin.Context) {
-	var params model.ListQuery
+	var params model.UserListQuery
 	if err := c.ShouldBindQuery(&params); err != nil {
 		httpx.Reject(c, repository.ErrInvalid)
 		return
@@ -24,7 +24,9 @@ func (s *Handler) ListUsers(c *gin.Context) {
 	w := c.Writer
 	r := c.Request
 
-	page, err := s.Service.ListUsers(r.Context(), params.Limit, params.Offset, params.Q)
+	page, err := s.Service.ListUsers(r.Context(), params.Limit, params.Offset, repository.UserListFilter{
+		Query: params.Q, Status: enum.UserStatus(params.Status), RoleID: params.RoleID,
+	})
 	if err != nil {
 		httpx.Reject(c, err)
 		return
@@ -197,6 +199,7 @@ func apiUser(user repository.UserSummary) model.APIUser {
 		Status:      string(user.Status),
 		Configured:  user.Configured,
 		AuthEpoch:   user.AuthEpoch,
+		CreatedAt:   user.CreatedAt,
 		Roles:       roles,
 	}
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
-	cachekey "github.com/EayonLee/SecPlexus/src/packages/go/cache/key"
+	rediskey "github.com/EayonLee/SecPlexus/src/packages/go/redis/key"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("test database operation is required")
 	}
-	connection, err := pgx.Connect(ctx, os.Getenv("SPX_TEST_POSTGRES_URL"))
+	connection, err := pgx.Connect(ctx, os.Getenv("SPX_TEST_POSTGRESQL_URL"))
 	if err != nil {
 		return errors.New("cannot connect to test PostgreSQL administrator")
 	}
@@ -62,6 +62,34 @@ func run(ctx context.Context, args []string) error {
 			return errors.New("cannot expire owned authentication fixture")
 		}
 		return nil
+	case "seed-ingest":
+		if len(args) != 1 || !strings.HasPrefix(connection.Config().Database, "spx_e2e_") || len(connection.Config().Database) != 40 {
+			return errors.New("expected owned E2E database")
+		}
+		if _, err = connection.Exec(ctx, `
+			INSERT INTO ingest.parsing_rules (id, name, vendor, product, definition, builtin)
+			VALUES (gen_random_uuid(), 'E2E sample parser', 'Example', 'Gateway', $1, true)
+		`, ingestRuleFixture); err != nil {
+			return errors.New("cannot seed owned ingestion fixture")
+		}
+		return nil
+	case "kafka-groups":
+		if len(args) != 2 || !strings.HasPrefix(connection.Config().Database, "spx_e2e_") || len(connection.Config().Database) != 40 {
+			return errors.New("expected owned E2E database")
+		}
+		rows, err := connection.Query(ctx, `SELECT id FROM ingest.inputs WHERE protocol='kafka' AND configuration->>'topic'=$1`, args[1])
+		if err != nil {
+			return errors.New("cannot inspect owned Kafka inputs")
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return errors.New("cannot read owned Kafka input")
+			}
+			fmt.Println("spx-ingest-" + id)
+		}
+		return rows.Err()
 	case "drop":
 		if len(args) != 2 || !strings.HasPrefix(args[1], "spx_e2e_") || len(args[1]) != 40 {
 			return errors.New("invalid owned database name")
@@ -106,7 +134,7 @@ func cleanAccounts(ctx context.Context, config *pgx.ConnConfig) error {
 			return errors.New("cannot read owned account")
 		}
 		digest := sha256.Sum256([]byte(account))
-		keys = append(keys, cachekey.IAMLoginAccount.Format(hex.EncodeToString(digest[:])))
+		keys = append(keys, rediskey.IAMLoginAccount.Format(hex.EncodeToString(digest[:])))
 	}
 	if rows.Err() != nil {
 		return errors.New("cannot read owned accounts")
@@ -125,3 +153,28 @@ func cleanAccounts(ctx context.Context, config *pgx.ConnConfig) error {
 	}
 	return nil
 }
+
+// ingestRuleFixture 仅在测试数据库中验证规则预览、复制和多类分流。
+const ingestRuleFixture = `{
+  "description": "Example traffic and sign-in logs",
+  "contract_version": "v1",
+  "parse": {"mode": "json"},
+  "branches": [
+    {
+      "id": "traffic",
+      "name": "Traffic",
+      "class_uid": 4001,
+      "match": [{"field": "kind", "equals": "traffic"}],
+      "field_map": {"source": "src_endpoint.ip", "destination": "dst_endpoint.ip"},
+      "constants": {"activity_id": 6}
+    },
+    {
+      "id": "sign-in",
+      "name": "Sign in",
+      "class_uid": 3002,
+      "match": [{"field": "kind", "equals": "sign-in"}],
+      "field_map": {"account": "user.name", "destination": "dst_endpoint.ip", "result": "status_id"},
+      "constants": {"activity_id": 1}
+    }
+  ]
+}`

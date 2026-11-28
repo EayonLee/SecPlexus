@@ -107,7 +107,8 @@ http.interceptors.response.use(
     const path = new URL(error.path || "/", typeof window === "undefined" ? "http://localhost" : window.location.origin)
       .pathname;
     if (error.status === 401 && path !== "/api/v1/iam/auth/login") clear();
-    if (error.status === 503) useIdentity.setState({ status: "unavailable" });
+    // 身份投影和 CSRF 上下文不可达时暂停外壳；业务资源的失败交给当前页面恢复。
+    if (error.status === 503 && (path === "/api/v1/iam/me" || path === "/api/v1/iam/auth/context")) useIdentity.setState({ status: "unavailable" });
     if (error.code === "iam.csrf_invalid") csrfToken = "";
     if (error.code === "permission_denied" && !path.startsWith("/api/v1/iam/me")) void refreshMe();
     throw error;

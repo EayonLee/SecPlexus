@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/config"
@@ -23,7 +22,7 @@ func domainFixture(t *testing.T) (*Service, context.Context) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	secret := "isolated domain password"
-	if err := store.Seed(ctx, "admin", secret); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", secret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,12 +268,11 @@ func TestRoleNameIsGloballyUnique(t *testing.T) {
 	}
 }
 
-// TestSeedReappliesBuiltinData 固定启动同步语义：权限与内置角色只增不删，
-// 配置改名会收回旧账号的内置标记并让新账号接管。
-func TestSeedReappliesBuiltinData(t *testing.T) {
+// TestPermissionSyncReappliesBuiltinData 验证迁移同步权限，不接管已有账号。
+func TestPermissionSyncReappliesBuiltinData(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "isolated seed password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "isolated seed password"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -288,7 +286,7 @@ func TestSeedReappliesBuiltinData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.Seed(ctx, "admin", "isolated seed password"); err != nil {
+	if err := repository.Migrate(ctx, store.Pool.Config().ConnConfig.ConnString()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -301,51 +299,19 @@ func TestSeedReappliesBuiltinData(t *testing.T) {
 		t.Fatal("seed did not restore a missing builtin permission")
 	}
 
-	// 改名：旧账号失去内置标记，新账号接管；旧账号不再持有内置角色。
-	renamedUser := uuid.New()
-	if err := repository.InsertUser(ctx, store.DB, renamedUser, "renamed", "renamed", "Renamed", "", false); err != nil {
+	regularID := uuid.New()
+	if err := repository.InsertUser(ctx, store.DB, regularID, "regular", "regular", "Regular", "", false); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := store.Seed(ctx, "renamed", "isolated renamed password"); err != nil {
-		t.Fatal(err)
+	if err := store.SyncAdministrator(ctx, "regular", "isolated conflicting password"); err == nil {
+		t.Fatal("administrator maintenance took over an existing account")
 	}
-
 	var configured uuid.UUID
 	if err := store.Pool.QueryRow(ctx, `SELECT id FROM iam.users WHERE configured`).Scan(&configured); err != nil {
 		t.Fatal(err)
 	}
-
-	if configured != renamedUser {
-		t.Fatalf("configured administrator = %s, want %s", configured, renamedUser)
-	}
-
-	var oldConfigured bool
-	if err := store.Pool.QueryRow(ctx, `SELECT configured FROM iam.users WHERE id=$1`, before).Scan(&oldConfigured); err != nil {
-		t.Fatal(err)
-	}
-
-	if oldConfigured {
-		t.Fatal("previous configured account kept its builtin mark")
-	}
-
-	var oldBuiltin int
-	if err := store.Pool.QueryRow(ctx, `SELECT count(*) FROM iam.user_roles ur JOIN iam.roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.builtin`, before).Scan(&oldBuiltin); err != nil {
-		t.Fatal(err)
-	}
-
-	if oldBuiltin != 0 {
-		t.Fatal("previous configured account kept the builtin role")
-	}
-
-	// 新账号的密码是配置权威值。
-	login, err := repository.GetLoginUser(ctx, store.DB, "renamed")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err = (account.PasswordHasher{}).CompareHashAndPassword(login.PasswordHash, "isolated renamed password"); err != nil {
-		t.Fatal("configuration password was not applied to the renamed account")
+	if configured != before {
+		t.Fatal("permission sync changed the configured administrator")
 	}
 }
 

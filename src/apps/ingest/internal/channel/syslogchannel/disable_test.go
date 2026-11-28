@@ -2,7 +2,9 @@ package syslogchannel_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -11,6 +13,63 @@ import (
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
+
+func TestReloadClosesEstablishedTCPConnection(t *testing.T) {
+	port := freePort(t)
+	registry := input.NewMemory()
+	registry.Replace([]input.Entry{{
+		ID: "syslog-1", Protocol: input.ProtocolSyslog, Port: port, Mapping: syslogRule(t),
+	}})
+	publisher := &collector{}
+	line := pipeline.New(pipeline.Options{Workers: 1, BatchSize: 1}, publisher)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- line.Start(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+
+	channel := syslogchannel.New(registry, line, time.Hour, "127.0.0.1")
+	if err := channel.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+
+	dialer := net.Dialer{}
+	connection, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	message := "<34>1 2026-11-14T10:00:00Z fw01 app - - - first message"
+	if _, err = fmt.Fprintf(connection, "%d %s", len(message), message); err != nil {
+		t.Fatal(err)
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for publisher.count() == 0 {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("停用前未收到 TCP 样本")
+		}
+	}
+
+	registry.Replace(nil)
+	if err = channel.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = connection.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = connection.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("停用后 TCP 连接应已关闭，读取结果: %v", err)
+	}
+}
 
 // 停用一个接入点必须立即释放端口，不需要重启进程。
 //

@@ -24,7 +24,7 @@ func TestProcessBatchCommitsOnlyAfterPublishSucceeds(t *testing.T) {
 	var committed atomic.Int64
 
 	consumer := newConsumer(t, &countingPublisher{})
-	err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, batch,
+	err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, batch, nil,
 		func(_ context.Context, records []*kgo.Record) error {
 			committed.Add(int64(len(records)))
 
@@ -39,6 +39,26 @@ func TestProcessBatchCommitsOnlyAfterPublishSucceeds(t *testing.T) {
 	}
 }
 
+func TestProcessBatchCommitsInBoundedChunks(t *testing.T) {
+	records := make([]*kgo.Record, 501)
+	for offset := range records {
+		records[offset] = &kgo.Record{Topic: "external", Offset: int64(offset), Value: []byte(`{"src":"10.0.0.1"}`)}
+	}
+	publisher := &countingPublisher{}
+	consumer := newConsumer(t, publisher)
+	var lastOffsets []int64
+	if err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, records, nil,
+		func(_ context.Context, batch []*kgo.Record) error {
+			lastOffsets = append(lastOffsets, batch[len(batch)-1].Offset)
+			return nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if len(lastOffsets) != 2 || lastOffsets[0] != 499 || lastOffsets[1] != 500 || publisher.batches.Load() != 2 {
+		t.Fatalf("期望两批按连续位移提交，实际位移 %v，发布批次 %d", lastOffsets, publisher.batches.Load())
+	}
+}
+
 // 发布失败时绝不能提交：未提交的位移会在重启后重新投递，数据不丢。
 func TestProcessBatchSkipsCommitWhenPublishFails(t *testing.T) {
 	batch := []*kgo.Record{{Topic: "external", Value: []byte(`{"src":"10.0.0.1"}`)}}
@@ -50,13 +70,13 @@ func TestProcessBatchSkipsCommitWhenPublishFails(t *testing.T) {
 	defer cancel()
 
 	consumer := newConsumer(t, &failingPublisher{err: errors.New("broker unreachable")})
-	if err := consumer.processBatch(ctx, input.Entry{ID: "kafka-1"}, batch,
+	if err := consumer.processBatch(ctx, input.Entry{ID: "kafka-1"}, batch, nil,
 		func(_ context.Context, records []*kgo.Record) error {
 			committed.Add(int64(len(records)))
 
 			return nil
-		}); err != nil {
-		t.Fatalf("processBatch = %v", err)
+		}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("发布超时应让消费循环退出并保留位移: %v", err)
 	}
 
 	if committed.Load() != 0 {
@@ -70,7 +90,7 @@ func TestProcessBatchReturnsCommitError(t *testing.T) {
 	wanted := errors.New("commit rejected")
 
 	consumer := newConsumer(t, &countingPublisher{})
-	err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, batch,
+	err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, batch, nil,
 		func(context.Context, []*kgo.Record) error { return wanted })
 	if !errors.Is(err, wanted) {
 		t.Fatalf("processBatch = %v，期望提交错误", err)
@@ -83,7 +103,7 @@ func TestProcessBatchIgnoresEmptyBatch(t *testing.T) {
 	publisher := &countingPublisher{}
 
 	consumer := newConsumer(t, publisher)
-	if err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, nil,
+	if err := consumer.processBatch(context.Background(), input.Entry{ID: "kafka-1"}, nil, nil,
 		func(_ context.Context, records []*kgo.Record) error {
 			committed.Add(int64(len(records)))
 
@@ -92,7 +112,7 @@ func TestProcessBatchIgnoresEmptyBatch(t *testing.T) {
 		t.Fatalf("processBatch = %v", err)
 	}
 
-	if committed.Load() != 0 || publisher.batches.Load() != 1 {
+	if committed.Load() != 0 || publisher.batches.Load() != 0 {
 		t.Fatalf("空批次不应提交（提交 %d，发布批次数 %d）", committed.Load(), publisher.batches.Load())
 	}
 }
@@ -116,3 +136,75 @@ func (p *countingPublisher) Publish(_ context.Context, _ []pipeline.Event) error
 type failingPublisher struct{ err error }
 
 func (p *failingPublisher) Publish(_ context.Context, _ []pipeline.Event) error { return p.err }
+
+func TestProcessBatchKeepsEventIdentityAcrossRestarts(t *testing.T) {
+	received := time.Unix(1800000000, 0)
+	batch := []*kgo.Record{
+		{Topic: "external", Partition: 3, Offset: 40, Timestamp: received, Value: []byte("same")},
+		{Topic: "external", Partition: 3, Offset: 41, Timestamp: received, Value: []byte("same")},
+	}
+	source := input.Entry{ID: "kafka-1", Protocol: input.ProtocolKafka}
+	commitFailed := errors.New("commit rejected")
+	first := &recordedDelivery{}
+	err := newConsumer(t, first).processBatch(context.Background(), source, batch, nil,
+		func(context.Context, []*kgo.Record) error { return commitFailed })
+	if !errors.Is(err, commitFailed) {
+		t.Fatal(err)
+	}
+	restarted := &recordedDelivery{}
+	err = newConsumer(t, restarted).processBatch(context.Background(), source, batch, nil,
+		func(context.Context, []*kgo.Record) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.ids) != 2 || len(restarted.ids) != 2 || first.ids[0] == first.ids[1] ||
+		first.ids[0] != restarted.ids[0] || first.ids[1] != restarted.ids[1] {
+		t.Fatalf("identities before and after restart: %v, %v", first.ids, restarted.ids)
+	}
+}
+
+type recordedDelivery struct{ ids []string }
+
+func (p *recordedDelivery) Publish(_ context.Context, events []pipeline.Event) error {
+	for _, event := range events {
+		p.ids = append(p.ids, event.EventID)
+	}
+	return nil
+}
+
+func TestProcessBatchRetriesOnlyUnconfirmedRecords(t *testing.T) {
+	batch := []*kgo.Record{
+		{Topic: "external", Offset: 40, Value: []byte("first")},
+		{Topic: "external", Offset: 41, Value: []byte("second")},
+	}
+	publisher := &partialDelivery{}
+	consumer := newConsumer(t, publisher)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	var committed int
+	err := consumer.processBatch(ctx, input.Entry{ID: "test"}, batch, nil,
+		func(_ context.Context, input []*kgo.Record) error {
+			if len(publisher.confirmed) != len(input) {
+				t.Fatal("source offsets were committed before all events were confirmed")
+			}
+			committed += len(input)
+			return nil
+		})
+	if err != nil || committed != 2 || len(publisher.confirmed) != 2 || publisher.confirmed[0] == publisher.confirmed[1] {
+		t.Fatalf("unexpected result: commit count %d, confirmed %v, error %v", committed, publisher.confirmed, err)
+	}
+}
+
+type partialDelivery struct{ confirmed []string }
+
+func (p *partialDelivery) Publish(_ context.Context, events []pipeline.Event) error {
+	if len(p.confirmed) == 0 {
+		p.confirmed = append(p.confirmed, events[0].EventID)
+		return &pipeline.PartialPublishError{Failed: []int{1}, Cause: errors.New("second record not confirmed")}
+	}
+	for _, event := range events {
+		p.confirmed = append(p.confirmed, event.EventID)
+	}
+	return nil
+}

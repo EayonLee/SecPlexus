@@ -112,7 +112,7 @@ flowchart LR
   end
 
   subgraph DATA["Data plane"]
-    ING["ingestor<br/>OCSF normalization"]
+    ING["ingest<br/>OCSF normalization"]
     K["Kafka"]
     COR["correlator<br/>dedupe · correlate · attack chain"]
     AG["ai-gateway<br/>agentgateway"]
@@ -161,9 +161,7 @@ flowchart LR
   OS -.-> ING
 ```
 
-The diagram is the target architecture, not a claim that every service ships
-today. The first implemented slice is the control plane; the data plane, AI
-investigation, response and guardrail services are under active development.
+The diagram shows the target architecture. The current implementation includes IAM, Web, Console, and Ingest. Ingest accepts HTTP, Syslog, and Kafka input and publishes normalized events to Kafka.
 
 ## Tech stack
 
@@ -200,22 +198,29 @@ cd SecPlexus
 make config
 
 # 2. Edit .env:
-#    - change SPX_IAM_BOOTSTRAP_PASSWORD (at least 12 characters)
+#    - set SPX_IAM_BOOTSTRAP_PASSWORD (12–128 characters)
 #    - set SPX_IAM_CSRF_KEY (exactly 32 bytes; openssl rand -hex 16)
-#    - set SPX_CONSOLE_IAM_TOKEN (32-512 bytes; openssl rand -hex 32)
+#    - set distinct SPX_CONSOLE_IAM_TOKEN and SPX_INGEST_IAM_TOKEN values
+#      (32–512 bytes each; run openssl rand -hex 32 separately for each token)
 #    - point PostgreSQL/Redis at your instances
+#    - configure SPX_KAFKA_BROKERS and create the Event topic
 
 # 3. Optional: start the supplied PostgreSQL and Redis containers.
-make compose-up SERVICES="postgres redis"
+make compose-up SERVICES="postgresql redis"
 
-# 4. Apply IAM migrations and start IAM, Console and Web with hot reload.
+# 4. Apply IAM and Ingest migrations, then start IAM, Console, Ingest and Web.
 make dev
 ```
 
 Open <http://127.0.0.1:5173> and sign in with the administrator configured in
-`.env`. The example password `changeme-at-least-12` is a placeholder: change it
-before the first start. The configured administrator cannot be edited, disabled or
-re-passworded from the UI; change the configuration and restart IAM instead.
+`.env`. Set its password before the first start. The configured administrator cannot be edited, disabled or
+re-passworded from the UI. Set the new credentials in the deployment configuration and run IAM's explicit administrator maintenance command.
+
+After filling in `.env`, `make compose-up` builds and starts Web, IAM, Console, Ingest,
+PostgreSQL, Redis, Kafka and ClickHouse. It initializes the administrator, database schemas
+and Kafka topics before starting the services. The Event writer persists Events to ClickHouse
+permanently in UTC monthly partitions. Platform Kafka topics retain messages for seven days
+by default. [Ingest setup and verification](src/apps/ingest/README.md#本地启动与验证)
 
 `make dev` connects to the configured dependencies and never starts Docker.
 `make stop` stops exactly the process trees it started on macOS, Linux and
@@ -227,14 +232,14 @@ setting and the reverse-proxy setup.
 | Command | Purpose |
 | --- | --- |
 | `make config [MODULES="..."]` | Validate configuration offline. On first run it creates `.env` and stops for review. |
-| `make dev [MODULES="..."]` | Migrate and start IAM, Console and Web with hot reload. |
-| `make build` | Build both Go services and the Web production bundle. |
+| `make dev [MODULES="..."]` | Migrate and start IAM, Console, Ingest and Web with hot reload. |
+| `make build` | Build IAM, Console, Ingest and the Web production bundle. |
 | `make preview [MODULES="..."]` | Run the backends and preview the built Web app. |
-| `make compose-up [SERVICES="..."]` | Build and start the full Compose stack. |
+| `make compose-up [SERVICES="..."]` | Build and start the services in the Compose file. |
 | `make stop` | Stop this checkout's applications and containers; keep data. |
 | `make test` | Run script, Go and Web unit tests. |
 | `make test-e2e ARGS="--docker"` | Run the Playwright browser suite. |
-| `make integration ARGS="--docker --race"` | Run Go integration tests. |
+| `make integration ARGS="--docker --clickhouse"` | Run Go integration tests. |
 | `make typecheck` / `make lint` | TypeScript type check / Biome lint. |
 | `make vet` / `make lint-go` / `make vuln-go` | Go vet, golangci-lint, govulncheck. |
 | `make catalogs` / `make catalogs-generate` | Check / regenerate shared result-code and permission catalogs. |
@@ -273,16 +278,14 @@ comments, enums, indexes and migrations follow
 | [Plans](docs/plans/README.md) | Approved specs, implementation plans and validation evidence. |
 | [Changelog](CHANGELOG.md) | Notable changes, fixes and security-relevant updates. |
 | [Support](SUPPORT.md) | Where to ask questions and what to include. |
-| [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Web](src/apps/web/README.md) | Module contracts and responsibilities. |
+| [IAM](src/apps/iam/README.md) · [Console](src/apps/console/README.md) · [Ingest](src/apps/ingest/README.md) · [Web](src/apps/web/README.md) | Module contracts and responsibilities. |
 
 ## Build status
 
 SecPlexus is pre-1.0 and built in public. The repository currently contains the
-first implemented slice: the control plane (IAM, Web and Console). The data plane,
-AI investigation, response orchestration, AI runtime protection, vulnerability
-operations, agent security and threat intelligence are specified in
-[docs/plans](docs/plans/README.md) and under active development. Planned services
-are not presented as available.
+control plane (IAM, Web and Console) and the Ingest service. See the
+[Ingest README](src/apps/ingest/README.md) for setup and interfaces, and
+[the plans index](docs/plans/README.md) for the remaining work.
 
 ## Security
 

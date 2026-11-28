@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { SearchIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,33 +16,39 @@ export function SearchField({
   onSubmit,
   placeholder,
   submitLabel,
+  className,
 }: {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit?: (value: string) => void;
   placeholder: string;
-  submitLabel: string;
+  submitLabel?: string;
+  className?: string;
 }) {
   return (
     <>
-      <InputGroup className="w-64">
+      <InputGroup className={cn("h-7 w-full rounded-md sm:w-64", className)}>
         <InputGroupAddon>
           <SearchIcon />
         </InputGroupAddon>
         <InputGroupInput
-          className="h-8"
+          type="search"
+          className="h-7 min-w-0 truncate"
           value={value}
           placeholder={placeholder}
+          title={value || placeholder}
           aria-label={placeholder}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") onSubmit();
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) onSubmit?.(event.currentTarget.value);
           }}
         />
       </InputGroup>
-      <Button size="sm" variant="outline" onClick={onSubmit}>
-        {submitLabel}
-      </Button>
+      {onSubmit && submitLabel && (
+        <Button size="sm" variant="outline" onClick={() => onSubmit(value)}>
+          {submitLabel}
+        </Button>
+      )}
     </>
   );
 }

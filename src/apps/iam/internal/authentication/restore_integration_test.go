@@ -22,7 +22,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
 	password := "isolated restore password"
-	if err := store.Seed(ctx, "admin", password); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", password); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +59,7 @@ func TestBackupRestoreRevokesRestoredCredentialsBeforeServing(t *testing.T) {
 		defer cancel()
 
 		var command *exec.Cmd
-		if container := os.Getenv("SPX_TEST_POSTGRES_CONTAINER"); container != "" {
+		if container := os.Getenv("SPX_TEST_POSTGRESQL_CONTAINER"); container != "" {
 			command = exec.CommandContext(bounded, "docker", append([]string{"exec", "-i", container, tool, "-U", "postgres", "-d", connection.Database}, args...)...)
 		} else {
 			command = exec.CommandContext(bounded, tool, append([]string{"-d", connection.Database}, args...)...)

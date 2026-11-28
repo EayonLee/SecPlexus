@@ -16,7 +16,7 @@ type Config struct {
 	Level      string `yaml:"level"`        // 最低日志级别。
 	Stdout     bool   `yaml:"stdout"`       // 是否输出到标准输出。
 	File       string `yaml:"file"`         // 日志文件路径，空值表示不写文件。
-	MaxSizeMB  int    `yaml:"max_size_mb"`  // 单个日志文件的最大大小，单位 MB。
+	MaxSizeMB  int    `yaml:"max_size_mb"`  // 单个日志文件的大小上限，单位 MiB。
 	MaxBackups int    `yaml:"max_backups"`  // 保留的轮转文件数量。
 	MaxAgeDays int    `yaml:"max_age_days"` // 轮转文件保留天数。
 	Compress   bool   `yaml:"compress"`     // 是否压缩轮转文件。
@@ -79,5 +79,14 @@ func Open(c Config, service string) (*slog.Logger, func() error, error) {
 		closeLog = rotating.Close
 	}
 
-	return slog.New(slog.NewJSONHandler(io.MultiWriter(writers...), &slog.HandlerOptions{Level: level})).With("service", service), closeLog, nil
+	handler := slog.NewJSONHandler(io.MultiWriter(writers...), &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
+			if len(groups) == 0 && attr.Key == slog.TimeKey && attr.Value.Kind() == slog.KindTime {
+				return slog.Time(slog.TimeKey, attr.Value.Time().UTC())
+			}
+			return attr
+		},
+	})
+	return slog.New(handler).With("service", service), closeLog, nil
 }

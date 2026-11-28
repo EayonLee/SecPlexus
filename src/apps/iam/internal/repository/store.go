@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
+	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/repository/sqlcgen"
 )
 
 const ManagementLock int64 = 0x73707869616d
@@ -69,6 +71,8 @@ func (s *Store) Transaction(ctx context.Context, change func(*sql.Tx) error) err
 // Audit 描述需要在事务中记录的审计事件。
 // 审计没有组织维度，目标由 target_type/target_id 表达。
 type Audit struct {
+	EventID    uuid.UUID         // 服务重投时复用的标识；零值由 IAM 生成。
+	OccurredAt *time.Time        // 已知的事实发生时间；为空时使用当前事务的数据库时钟。
 	ActorID    *uuid.UUID        // 操作者标识，系统事件可为空。
 	ActorName  string            // 审计时的操作者名称快照。
 	ActorType  enum.ActorType    // 用户、系统或部署操作员，取值见 enum.ActorType。
@@ -80,6 +84,11 @@ type Audit struct {
 	RequestID  string            // 关联本次请求的标识。
 	DecisionID *uuid.UUID        // 授权决定标识，可为空。
 	Metadata   map[string]any    // 经过筛选的审计扩展字段，编码后不超过 8192 字节。
+}
+
+// RecordAudit 登记一个独立的审计事实，由事件 ID 支持幂等重投。
+func (s *Store) RecordAudit(ctx context.Context, audit Audit) error {
+	return AppendAudit(ctx, s.DB, audit)
 }
 
 // AppendAudit 在调用方给出的连接或事务中写入审计事件。
@@ -103,47 +112,77 @@ func AppendAudit(ctx context.Context, tx DB, a Audit) error {
 		return ErrInvalid
 	}
 
-	_, err = tx.ExecContext(
-		ctx,
-		`INSERT INTO iam.audit_events(id,actor_type,actor_id,actor_name,action,target_type,target_id,outcome,reason_code,request_id,decision_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		uuid.New(),
-		a.ActorType,
-		a.ActorID,
-		a.ActorName,
-		a.Action,
-		a.TargetType,
-		a.TargetID,
-		a.Outcome,
-		a.Reason,
-		a.RequestID,
-		a.DecisionID,
-		data,
-	)
+	if a.EventID == uuid.Nil {
+		a.EventID = uuid.New()
+	}
+	var occurredAt sql.NullTime
+	if a.OccurredAt != nil {
+		occurredAt = sql.NullTime{Time: a.OccurredAt.UTC(), Valid: true}
+	}
 
-	return err
+	return queries(tx).InsertAuditEvent(ctx, sqlcgen.InsertAuditEventParams{
+		ID:         a.EventID,
+		ActorType:  string(a.ActorType),
+		ActorID:    a.ActorID,
+		ActorName:  sql.NullString{String: a.ActorName, Valid: true},
+		Action:     a.Action,
+		TargetType: a.TargetType,
+		TargetID:   a.TargetID,
+		Outcome:    string(a.Outcome),
+		ReasonCode: sql.NullString{String: a.Reason, Valid: true},
+		RequestID:  a.RequestID,
+		DecisionID: a.DecisionID,
+		Metadata:   data,
+		OccurredAt: occurredAt,
+	})
 }
 
-// Seed 在显式初始化或启动时幂等写入内置数据：权限目录、内置角色与配置管理员。
-// 事务与 advisory 锁保证并发启动收敛到同一状态；已存在的账号不会被重复提权。
-func (s *Store) Seed(ctx context.Context, username, password string) error {
+// syncPermissions 按 IAM 的目录同步权限和内置角色，不改变任何登录凭据。
+func (s *Store) syncPermissions(ctx context.Context) error {
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
 		if err := LockManagement(ctx, tx, ManagementLock); err != nil {
 			return err
 		}
-
 		if err := syncCatalog(ctx, tx); err != nil {
 			return err
 		}
+		return syncBuiltinRole(ctx, tx)
+	})
+}
 
-		roleID, err := syncBuiltinRole(ctx, tx)
-		if err != nil {
+// InitializeAdministrator 仅在首次部署创建管理员。重复执行不会改名、改密或撤销会话。
+func (s *Store) InitializeAdministrator(ctx context.Context, username, password string) error {
+	return s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := LockManagement(ctx, tx, ManagementLock); err != nil {
 			return err
 		}
-
-		_, err = syncAdministrator(ctx, tx, username, password, roleID)
-
-		return err
+		if _, err := configuredAdministrator(ctx, tx); !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return applyAdministrator(ctx, tx, username, password)
 	})
+}
+
+// SyncAdministrator 按部署配置显式维护托管管理员，不接管已有的普通账号。
+func (s *Store) SyncAdministrator(ctx context.Context, username, password string) error {
+	return s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := LockManagement(ctx, tx, ManagementLock); err != nil {
+			return err
+		}
+		return applyAdministrator(ctx, tx, username, password)
+	})
+}
+
+func applyAdministrator(ctx context.Context, tx *sql.Tx, username, password string) error {
+	var roleID uuid.UUID
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM iam.roles WHERE builtin`).Scan(&roleID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("administrator role is missing; run IAM migrate first")
+		}
+		return err
+	}
+	_, err := syncAdministrator(ctx, tx, username, password, roleID)
+	return err
 }
 
 // syncCatalog 以代码中的权限目录为准逐键 upsert：缺失插入、元数据更新、移除的键标记 retired。
@@ -151,7 +190,11 @@ func syncCatalog(ctx context.Context, tx *sql.Tx) error {
 	for _, p := range authorization.Catalog() {
 		_, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO iam.permissions(permission_key,description,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status='active',updated_at=now()`,
+			`INSERT INTO iam.permissions(permission_key,description,risk_level,delegable,requires_recent_auth,status) VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(permission_key) DO UPDATE SET description=EXCLUDED.description,risk_level=EXCLUDED.risk_level,delegable=EXCLUDED.delegable,requires_recent_auth=EXCLUDED.requires_recent_auth,status='active',updated_at=now()
+				WHERE (iam.permissions.description,iam.permissions.risk_level,iam.permissions.delegable,
+					iam.permissions.requires_recent_auth,iam.permissions.status)
+				IS DISTINCT FROM (EXCLUDED.description,EXCLUDED.risk_level,EXCLUDED.delegable,
+					EXCLUDED.requires_recent_auth,EXCLUDED.status)`,
 			p.Key,
 			p.Description,
 			p.RiskLevel,
@@ -179,8 +222,8 @@ func syncCatalog(ctx context.Context, tx *sql.Tx) error {
 }
 
 // syncBuiltinRole 保证内置角色存在并持有目录中全部 active 权限。
-// 权限只增不删：目录里新增的键在下次启动时补齐，移除的键保留原授权。
-func syncBuiltinRole(ctx context.Context, tx *sql.Tx) (uuid.UUID, error) {
+// 权限只增不删：迁移补齐新增键，移除的键保留原授权。
+func syncBuiltinRole(ctx context.Context, tx *sql.Tx) error {
 	var id uuid.UUID
 	err := tx.QueryRowContext(ctx, `SELECT id FROM iam.roles WHERE builtin`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -190,16 +233,16 @@ func syncBuiltinRole(ctx context.Context, tx *sql.Tx) (uuid.UUID, error) {
 			`INSERT INTO iam.roles(id,name,description,builtin) VALUES($1,$2,'',true)`,
 			id, authorization.BuiltinRoleName,
 		); err != nil {
-			return uuid.Nil, err
+			return err
 		}
 	} else if err != nil {
-		return uuid.Nil, err
+		return err
 	} else if _, err = tx.ExecContext(
 		ctx,
-		`UPDATE iam.roles SET name=$2,description='',updated_at=now() WHERE id=$1`,
+		`UPDATE iam.roles SET name=$2,description='',updated_at=now() WHERE id=$1 AND (name IS DISTINCT FROM $2 OR description IS DISTINCT FROM '')`,
 		id, authorization.BuiltinRoleName,
 	); err != nil {
-		return uuid.Nil, err
+		return err
 	}
 
 	_, err = tx.ExecContext(
@@ -208,16 +251,15 @@ func syncBuiltinRole(ctx context.Context, tx *sql.Tx) (uuid.UUID, error) {
 		id,
 	)
 	if err != nil {
-		return uuid.Nil, err
+		return err
 	}
 
-	return id, EnsureBaselineRole(ctx, tx)
+	return EnsureBaselineRole(ctx, tx)
 }
 
 // EnsureBaselineRole 幂等补齐基线角色及其读取权限。
 //
-// 放在 Seed 而不是迁移里：权限目录每次启动都会同步，新动作只有同步之后才存在，
-// 在迁移阶段按 join 授权会漏掉尚未入库的动作。
+// 权限目录同步后再补齐授权，使新增权限同样生效。
 // 基线角色不是 builtin——roles_single_builtin 唯一索引只允许一个内置角色。
 func EnsureBaselineRole(ctx context.Context, tx DB) error {
 	if _, err := tx.ExecContext(ctx,
@@ -243,15 +285,14 @@ const AuthorizationBaselineRoleName = "authenticated"
 
 // BaselinePermissionKeys 是基线角色授予的权限：只允许读取，写操作必须显式授权。
 var BaselinePermissionKeys = []string{
-	// 登录即可订阅自己的运维事件流。
-	"console.events.read",
-	// 阅读接入点与解析映射：足以排障，不构成管理能力。
+	// 登录即可读取自身的运营授权上下文。
+	"console.context.read",
+	// 阅读数据接入与解析规则：足以排障，不构成管理能力。
 	"ingest.input.read",
-	"ingest.mapping.read",
+	"ingest.parsing_rule.read",
 }
 
 // VerifySchema 校验迁移版本兼容，不在服务启动时自动改表。
-// 内置数据由 Seed 在启动时幂等补齐，因此这里不再把数据存在性当作 schema 状态。
 func (s *Store) VerifySchema(ctx context.Context) error {
 	current, target, pending, err := schemaState(ctx, s.DB)
 	if err != nil || pending || current != target {

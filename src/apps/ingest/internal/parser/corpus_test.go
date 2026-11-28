@@ -19,24 +19,24 @@ type corpusVariant struct {
 }
 
 var corpusVariants = []corpusVariant{
-	{name: "json", file: "json.log", spec: parser.Spec{Mode: parser.ModeJSON}},
-	{name: "cef", file: "cef.log", spec: parser.Spec{Mode: parser.ModeCEF}},
-	{name: "kv", file: "kv.log", spec: parser.Spec{Mode: parser.ModeKV}},
+	{name: "json", file: "json.txt", spec: parser.Spec{Mode: parser.ModeJSON}},
+	{name: "cef", file: "cef.txt", spec: parser.Spec{Mode: parser.ModeCEF}},
+	{name: "kv", file: "kv.txt", spec: parser.Spec{Mode: parser.ModeKV}},
 	{
 		name: "kv-colon",
-		file: "kv-colon.log",
-		spec: parser.Spec{Mode: parser.ModeKV, KV: parser.KVSpec{Delimiter: ":", Entry: ","}},
+		file: "kv-colon.txt",
+		spec: parser.Spec{Mode: parser.ModeKV, KV: parser.KVSpec{KeyValueSeparator: ":", FieldSeparator: ","}},
 	},
 	{
 		name: "regex",
-		file: "regex.log",
+		file: "regex.txt",
 		spec: parser.Spec{Mode: parser.ModeRegex, Pattern: `(?P<time>\S+) (?P<level>\S+) (?P<msg>.*)`},
 	},
 	{
 		name: "delimiter-comma",
-		file: "delimiter.log",
+		file: "delimiter.txt",
 		spec: parser.Spec{Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{
-			Separator: ",", Columns: []string{"a", "b", "c", "d"},
+			Separator: ",", FieldNames: []string{"a", "b", "c", "d"},
 		}},
 	},
 }
@@ -49,7 +49,7 @@ func TestCorpusParsesEverySample(t *testing.T) {
 		t.Run(variant.name, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("testdata", "corpus", variant.file))
 			if err != nil {
-				t.Skipf("缺少语料 %s: %v", variant.file, err)
+				t.Fatalf("缺少语料 %s: %v", variant.file, err)
 			}
 
 			instance, err := parser.New(variant.spec)
@@ -88,17 +88,19 @@ func TestCorpusParsesEverySample(t *testing.T) {
 
 // 数组语料必须拆成两条：这是 HTTP 批量推送最常见的形态。
 func TestCorpusArraySplitsPerElement(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("testdata", "corpus", "json.log"))
+	data, err := os.ReadFile(filepath.Join("testdata", "corpus", "json.txt"))
 	if err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 
+	hasArray := false
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "[") {
 			continue
 		}
 
+		hasArray = true
 		messages, err := parser.Split(parser.ModeJSON, []byte(line))
 		if err != nil {
 			t.Fatalf("数组拆分失败: %v", err)
@@ -106,5 +108,8 @@ func TestCorpusArraySplitsPerElement(t *testing.T) {
 		if len(messages) != 2 {
 			t.Fatalf("拆出 %d 条，期望 2", len(messages))
 		}
+	}
+	if !hasArray {
+		t.Fatal("JSON 语料缺少批量数组")
 	}
 }

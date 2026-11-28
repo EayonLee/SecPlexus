@@ -21,7 +21,7 @@ require('node:fs').writeFileSync('web-build.json', JSON.stringify({
   trustedOrigin: process.env.SPX_WEB_ORIGIN,
   iamHost: process.env.SPX_IAM_HOST,
   iamPort: process.env.SPX_IAM_PORT,
-  databasePassword: process.env.SPX_POSTGRES_PASSWORD,
+  databasePassword: process.env.SPX_POSTGRESQL_PASSWORD,
   internalToken: process.env.SPX_CONSOLE_IAM_TOKEN,
 }));
 `;
@@ -49,7 +49,7 @@ require('node:fs').writeFileSync('web-build.json', JSON.stringify({
 }
 
 test('root build passes public configuration to Web and excludes backend credentials', (t) => {
-  const configuration = 'SPX_WEB_ORIGIN=https://spx.example\nSPX_IAM_HOST=iam.corp\nSPX_IAM_PORT=18081\nSPX_POSTGRES_PASSWORD=database-only\nSPX_CONSOLE_IAM_TOKEN=internal-only\n';
+  const configuration = 'SPX_WEB_ORIGIN=https://spx.example\nSPX_IAM_HOST=iam.corp\nSPX_IAM_PORT=18081\nSPX_POSTGRESQL_PASSWORD=database-only\nSPX_CONSOLE_IAM_TOKEN=internal-only\n';
   const { root, web } = buildWorkspace(t, configuration);
   assert.deepEqual(web, { iamHost: 'iam.corp', iamPort: '18081' });
   assert.equal(readFileSync(path.join(root, '.env'), 'utf8'), configuration);
@@ -61,6 +61,7 @@ test('root build excludes authentication origin from Web because metadata needs 
 });
 
 test('root build works without creating development configuration', (t) => {
-  const { root } = buildWorkspace(t);
+  const { root, web } = buildWorkspace(t);
+  assert.equal(web.iamHost, '127.0.0.1');
   assert.equal(existsSync(path.join(root, '.env')), false);
 });

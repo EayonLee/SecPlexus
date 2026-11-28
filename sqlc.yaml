@@ -36,3 +36,21 @@ sql:
             go_type: { import: "github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum", type: "SessionState" }
           - db_type: "jsonb"
             go_type: { import: "encoding/json", type: "RawMessage" }
+  - engine: postgresql
+    schema: src/apps/ingest/migrations/postgresql
+    queries: src/apps/ingest/internal/repository/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: src/apps/ingest/internal/repository/sqlcgen
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: uuid
+            nullable: true
+            go_type: { type: string, pointer: true }
+          - db_type: timestamptz
+            go_type: { import: time, type: Time }

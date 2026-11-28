@@ -12,10 +12,13 @@ import (
 // 但不能让下游拿不到接入点与解析结论——排障全部依赖 metadata.spx。
 func TestFallbackBodyKeepsBookkeeping(t *testing.T) {
 	job := Job{Source: input.Entry{ID: "conn-1"}, Raw: []byte("payload"), Received: time.Now()}
-	event := Event{EventID: "event-1", Outcome: Outcome{Status: StatusError, Stage: StageMap, Reason: ReasonFormatMismatch}}
+	event, _, err := job.mixedEvent(Event{EventID: "event-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var body map[string]any
-	if err := json.Unmarshal(fallbackBody(job, event), &body); err != nil {
+	if err := json.Unmarshal(event.Body, &body); err != nil {
 		t.Fatalf("兜底事件不是合法 JSON: %v", err)
 	}
 

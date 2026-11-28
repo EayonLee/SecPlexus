@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,12 +13,13 @@ import (
 
 // Role 保存角色及其当前权限；仅在模块内部用于委派校验。
 type Role struct {
-	ID          string   // 资源标识。
-	Name        string   // 角色显示名称。
-	Description string   // 用途说明。
-	Builtin     bool     // 是否为内置角色；内置角色不可修改或删除。
-	UserCount   int64    // 当前关联用户数。
-	Permissions []string // 当前权限键集合。
+	ID          string    // 资源标识。
+	Name        string    // 角色显示名称。
+	Description string    // 用途说明。
+	Builtin     bool      // 是否为内置角色；内置角色不可修改或删除。
+	UserCount   int64     // 当前关联用户数。
+	UpdatedAt   time.Time // 角色最近修改时间。
+	Permissions []string  // 当前权限键集合。
 }
 
 // CreateRole 在调用方事务中创建全局角色。

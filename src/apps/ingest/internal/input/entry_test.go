@@ -2,9 +2,29 @@ package input_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 )
+
+func TestExpiredSnapshotFencesAllReceiveChannels(t *testing.T) {
+	registry := input.NewMemory()
+	token := input.DigestToken("stale-token")
+	registry.ReplaceUntil([]input.Entry{
+		{ID: "http", Protocol: input.ProtocolHTTP, Token: token},
+		{ID: "syslog", Protocol: input.ProtocolSyslog, Port: 1514},
+		{ID: "kafka", Protocol: input.ProtocolKafka, Kafka: input.KafkaBinding{Brokers: []string{"broker"}, Topic: "logs"}},
+	}, time.Now().Add(-time.Second))
+	if registry.Loaded() || len(registry.SyslogBindings()) != 0 || len(registry.KafkaSources()) != 0 {
+		t.Fatal("expired snapshot remained available")
+	}
+	if _, ok := registry.ByTokenDigest(token); ok {
+		t.Fatal("expired credential remained active")
+	}
+	if _, ok := registry.ByID("syslog"); ok {
+		t.Fatal("a previously bound listener can still resolve its expired source")
+	}
+}
 
 // Replace 建立索引后，按标识与令牌都能查到。
 func TestMemoryLookupByIDAndToken(t *testing.T) {

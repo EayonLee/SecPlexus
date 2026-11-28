@@ -1,0 +1,92 @@
+[
+  {
+    "name": "event_id",
+    "type": "UUID",
+    "comment": "metadata.uid | 事件 ID"
+  },
+  {
+    "name": "event_time",
+    "type": "DateTime64(3, 'UTC')",
+    "comment": "time | 事件发生时间"
+  },
+  {
+    "name": "received_at",
+    "type": "DateTime64(3, 'UTC')",
+    "comment": "metadata.spx.received_at | 接收时间"
+  },
+  {
+    "name": "class_uid",
+    "type": "UInt32",
+    "comment": "class_uid | 事件类型 ID"
+  },
+  {
+    "name": "category_uid",
+    "type": "UInt16",
+    "comment": "category_uid | 事件类别 ID"
+  },
+  {
+    "name": "activity_id",
+    "type": "UInt16",
+    "comment": "activity_id | 活动类型 ID"
+  },
+  {
+    "name": "type_uid",
+    "type": "UInt64",
+    "comment": "type_uid | 事件类型编码"
+  },
+  {
+    "name": "severity_id",
+    "type": "UInt8",
+    "comment": "severity_id | 严重程度"
+  },
+  {
+    "name": "ocsf_version",
+    "type": "LowCardinality(String)",
+    "comment": "metadata.version | OCSF 版本"
+  },
+  {
+    "name": "contract_version",
+    "type": "LowCardinality(String)",
+    "comment": "metadata.spx.contract_version | 平台契约版本"
+  },
+  {
+    "name": "input_id",
+    "type": "UUID",
+    "comment": "metadata.spx.input_id | 数据接入 ID"
+  },
+  {
+    "name": "vendor",
+    "type": "LowCardinality(Nullable(String))",
+    "comment": "metadata.spx.vendor | 来源厂商"
+  },
+  {
+    "name": "product",
+    "type": "LowCardinality(Nullable(String))",
+    "comment": "metadata.spx.product | 来源产品"
+  },
+  {
+    "name": "src_ip",
+    "type": "Nullable(IPv6)",
+    "comment": "src_endpoint.ip | 源 IP"
+  },
+  {
+    "name": "dst_ip",
+    "type": "Nullable(IPv6)",
+    "comment": "dst_endpoint.ip | 目的 IP"
+  },
+  {
+    "name": "src_port",
+    "type": "Nullable(UInt16)",
+    "comment": "src_endpoint.port | 源端口"
+  },
+  {
+    "name": "dst_port",
+    "type": "Nullable(UInt16)",
+    "comment": "dst_endpoint.port | 目的端口"
+  },
+  {
+    "name": "event_json",
+    "type": "String",
+    "comment": "完整标准事件 JSON"
+  }
+]

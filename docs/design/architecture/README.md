@@ -1,6 +1,6 @@
 # SecPlexus 架构文档
 
-> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块以各模块 README（[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md)、[Web](../../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，职责边界见 [02 §2.1](02-technical-architecture.md)。下文尚未实现的服务只描述规划，不代表已交付能力。
+> 当前实现包含 [Web](../../../src/apps/web/README.md)、[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md) 和 [Ingest](../../../src/apps/ingest/README.md)。下游关联、模型网关和 AI 运营能力在本文中按目标架构描述。
 
 
 > AI 原生安全运营平台 —— 告警运营、漏洞运营、大模型护栏、智能体安全，编织成一张互联的安全网络。
@@ -15,7 +15,7 @@
 │                                                                         │
 │   资产基座（主机/容器/云/AI资产）                                          │
 │        │ 挂载                                                            │
-│   告警(Alert·事实) ──▶ 事件视图(Incident·TTL聚合) ──▶ 案件(Case·运营对象)    │
+│   Event（标准事件） ──▶ Alert（告警） ──▶ Incident View / Case    │
 │        │                     AI 以事件组为研判单元          一键立案       │
 │        │                                                                │
 │   AI 研判（图编排骨架+受限LLM）──▶ 三队列工作台 ──▶ SOAR 处置 ──▶ 回写上游   │
@@ -52,7 +52,7 @@
 
 1. **确定性的事交给代码，不确定的事交给 Agent**——分界线是"这一步能不能用字段精确描述"。
 2. **Agent 负责想，SOAR 负责做**——AI 只调查不执行，处置必须人批（或按挣得的授权）。
-3. **告警是事实，事件是视图，案件是对象**——兼容用户的告警运营习惯，AI 内部按事件组研判。
+3. **Event 与 Alert 是核心实体。** Event 在 ClickHouse 留存，Alert 在 PostgreSQL 管理状态并引用 Event；Incident View 按告警分组研判。[事件契约与存储](../../plans/event-contract/spec.md)
 4. **每一次自动化都要有据可查**——"有文档的结论"而不是"无解释的关闭"。
 5. **数据面质量先于 AI**——AI 再强也救不了喂进来的垃圾（Microsoft agent 被用户评 "mid" 的教训）。
 6. **大脑的产出永久，输入只留工作窗口**——案件、调查记录、机构记忆永久；告警是用户系统的数据，只留 90 天工作记忆，考古跳回用户自己的 SIEM（存储即定位：我们不是第二档案馆）。

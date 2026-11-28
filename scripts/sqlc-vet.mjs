@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { testPostgresURL } from "../tests/integration/dependencies.mjs";
 
 // sqlc vet 的 db-prepare 规则会把每条查询在真实数据库上 PREPARE 一次，
 // 抓出静态分析看不出的类型与转换问题。脚本自己建库、跑真实迁移、结束时删库，
@@ -8,16 +10,10 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 process.chdir(root);
 
-const adminURL = process.env.SPX_TEST_POSTGRES_URL;
-if (!adminURL) {
-  console.error("SPX_TEST_POSTGRES_URL is required: sqlc vet prepares every query against a real database.");
-  process.exit(1);
-}
-
 const sqlcVersion = process.env.SQLC_VERSION ?? "v1.31.1";
 const gooseVersion = process.env.GOOSE_VERSION ?? "v3.29.0";
 // 配置必须与被检查的 schema 同目录解析相对路径，因此放在仓库根目录，用完即删。
-const configPath = ".sqlc-vet.yaml";
+const configPath = `.sqlc-vet-${randomUUID()}.yaml`;
 
 function run(command, args, extraEnv = {}) {
   const result = spawnSync(command, args, {
@@ -38,30 +34,39 @@ function vetConfig() {
     "      - sqlc/db-prepare",
     "",
   ].join("\n");
-  const needle = "    queries: src/apps/iam/internal/repository/queries\n";
-  if (!source.includes(needle)) throw new Error("sqlc.yaml no longer matches the expected layout");
-  writeFileSync(configPath, source.replace(needle, needle + block), "utf8");
+  const withDatabase = source.replace(/^(    queries: .+\n)/gm, (_, queries) => queries + block);
+  if (source === withDatabase) throw new Error("No sqlc query sets found");
+  writeFileSync(configPath, withDatabase, { encoding: "utf8", flag: "wx" });
 }
 
 let database;
+let adminURL;
+let ownsConfig = false;
 try {
-  database = run("go", ["run", "./tests/integration/database", "create"]);
-  const target = new URL(adminURL);
+  adminURL = testPostgresURL();
+  let target;
+  try {
+    target = new URL(adminURL);
+  } catch {
+    throw new Error("SPX_TEST_POSTGRESQL_URL must be a valid PostgreSQL URL.");
+  }
+  if (!["postgres:", "postgresql:"].includes(target.protocol) || !target.hostname) {
+    throw new Error("SPX_TEST_POSTGRESQL_URL must be a valid PostgreSQL URL.");
+  }
+  database = run("go", ["run", "./tests/integration/database", "create"], { SPX_TEST_POSTGRESQL_URL: adminURL });
   target.pathname = `/${database}`;
   const dsn = target.toString();
 
-  run("go", [
-    "run",
-    `github.com/pressly/goose/v3/cmd/goose@${gooseVersion}`,
-    "-dir",
-    "src/apps/iam/migrations",
-    "postgres",
-    dsn,
-    "up",
-  ]);
+  for (const [module, directory] of [["iam", "migrations"], ["ingest", "migrations/postgresql"]]) {
+    run("go", [
+      "run", `github.com/pressly/goose/v3/cmd/goose@${gooseVersion}`,
+      "-env", "none", "-dir", `src/apps/${module}/${directory}`, "-table", `${module}_vet_versions`, "up",
+    ], { GOOSE_DRIVER: "postgres", GOOSE_DBSTRING: dsn });
+  }
   console.log("Migrations applied to the owned vet database.");
 
   vetConfig();
+  ownsConfig = true;
   run("go", ["run", `github.com/sqlc-dev/sqlc/cmd/sqlc@${sqlcVersion}`, "vet", "-f", configPath], {
     SQLC_VET_URL: dsn,
   });
@@ -70,11 +75,11 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
-  rmSync(configPath, { force: true });
+  if (ownsConfig) rmSync(configPath, { force: true });
   if (database) {
     const result = spawnSync("go", ["run", "./tests/integration/database", "drop", database], {
       stdio: ["ignore", "ignore", "inherit"],
-      env: process.env,
+      env: { ...process.env, SPX_TEST_POSTGRESQL_URL: adminURL },
     });
     if (result.status !== 0) {
       console.error("Could not remove the owned vet database.");

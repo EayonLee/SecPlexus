@@ -50,7 +50,7 @@ func TestSlowQueryIsReported(t *testing.T) {
 	started := QueryTracer{}.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{})
 	time.Sleep(1100 * time.Millisecond)
 	QueryTracer{}.TraceQueryEnd(started, nil, pgx.TraceQueryEndData{})
-	if !strings.Contains(output.String(), "db.slow") {
+	if !strings.Contains(output.String(), "postgresql.slow") {
 		t.Fatalf("slow query was not reported: %s", output.String())
 	}
 }

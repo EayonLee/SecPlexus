@@ -44,18 +44,18 @@ type Parser interface {
 	Parse(raw []byte) (map[string]any, error)
 }
 
-// KVSpec 描述键值对的三个分隔符。
+// KVSpec 描述键值对的字段分隔符、键值分隔符和引号。
 // 只用一个状态机覆盖 logfmt、CEF 扩展区与自定义键值——通用库无法适配任意分隔符组合。
 type KVSpec struct {
-	Delimiter string // 键与值之间，默认 "="。
-	Entry     string // 条目之间，默认 " "。
-	Quote     string // 包围值时可含分隔符；空值使用默认双引号。
+	FieldSeparator    string `json:"entry"`     // 字段之间，默认空格。
+	KeyValueSeparator string `json:"delimiter"` // 键与值之间，默认 "="。
+	Quote             string `json:"quote"`     // 包围值时可含分隔符；空值使用默认双引号。
 }
 
-// DelimiterSpec 描述按列切分的参数。
+// DelimiterSpec 描述按分隔符提取字段的参数。
 type DelimiterSpec struct {
-	Separator string   // 列分隔符，必须是单个字符，默认 ","。
-	Columns   []string // 列名，按位置与列一一对应。
+	Separator  string   // 分隔符，必须是单个字符，默认 ","。
+	FieldNames []string `json:"columns"` // 已配置的字段名；省略时按位置生成 field_1、field_2 等。
 }
 
 // Spec 是解析规则中线格式相关的那部分参数。
@@ -63,7 +63,7 @@ type Spec struct {
 	Mode      string        // 解析模式，取值见 Mode* 常量。
 	Pattern   string        // ModeRegex 的表达式，使用 Go 命名捕获组语法 (?P<name>...)。
 	KV        KVSpec        // ModeKV 的分隔符配置。
-	Delimiter DelimiterSpec // ModeDelimiter 的分隔符与列名。
+	Delimiter DelimiterSpec // ModeDelimiter 的分隔符配置。
 }
 
 // Factory 按规则参数构造解析器。构造期完成正则预编译等一次性工作，

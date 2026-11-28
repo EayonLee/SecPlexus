@@ -24,6 +24,23 @@ test("missing service locations and unusable addresses are rejected", () => {
   expect(() => readWebConfiguration({ ...environment, SPX_IAM_PORT: "65536" })).toThrow();
 });
 
+test("Ingest upstream follows the configured runtime target", () => {
+  expect(
+    readWebConfiguration({ ...environment, SPX_INGEST_HOST: "ingest.corp", SPX_INGEST_PORT: "18082" }).apiOrigins,
+  ).toMatchObject({ ingest: "http://ingest.corp:18082" });
+  expect(
+    readWebConfiguration({
+      ...environment,
+      SPX_INGEST_ORIGIN: "https://ingest.corp:18082",
+      SPX_INGEST_HOST: "0.0.0.0",
+      SPX_INGEST_PORT: "0",
+    }).apiOrigins,
+  ).toMatchObject({ ingest: "https://ingest.corp:18082" });
+  expect(() => readWebConfiguration({ ...environment, SPX_INGEST_ORIGIN: "http://invalid.corp/path" })).toThrow(
+    /SPX_INGEST_ORIGIN/,
+  );
+});
+
 test("configuration diagnostics name the environment key without exposing its value", () => {
   let message = "";
   try {

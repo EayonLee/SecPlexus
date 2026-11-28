@@ -1,6 +1,6 @@
 # SecPlexus Console
 
-Console 是安全运营业务后端，承载自身业务及有实际需要的跨域查询汇总。身份、会话和授权由 IAM 提供；Console 不读取 IAM 表，也不导入 IAM 的 internal 包。当前仅提供身份上下文和带持续授权检查的 SSE 连接，案件与业务工作台尚未实现，现有事件流不是业务事件总线。
+Console 是安全运营业务后端，承载自身业务及有实际需要的跨域查询汇总。身份、会话和授权由 IAM 提供；Console 不读取 IAM 表，也不导入 IAM 的 internal 包。当前提供授权上下文和健康检查。案件和运营工作台属于后续功能。
 
 ## 职责与接口归属
 
@@ -28,7 +28,7 @@ sequenceDiagram
     C->>I: HTTP + 服务凭证 + 原请求上下文
     I->>I: 检查会话与当前授权
     I-->>C: Principal + decision_id（无范围字段）
-    C->>C: 校验返回范围是 platform
+    C->>C: 从已验证的授权结果读取身份
     C-->>W: 当前身份访问上下文
 ```
 
@@ -37,43 +37,27 @@ sequenceDiagram
 - `cmd`：启动参数和配置加载。
 - `internal/bootstrap`：IAM 客户端、HTTP 生命周期与优雅退出。
 - `internal/config`：独立YAML配置及环境变量覆盖。
-- `internal/handler`：声明路由所需 action、校验 IAM 返回的范围是 platform；不使用浏览器的身份或角色头。
+- `internal/router` 声明路由所需权限。`internal/handler` 读取已授权的身份。
 - [`iamclient`](../../packages/go/iamclient/client.go)：复用的IAM客户端，统一API路径、标准HTTP传输、有界请求、错误契约；不接受浏览器指定所需action。
-- [原生路由](internal/router/routes.go)、[响应模型](internal/handler/models.go)及[IAM 客户端](../../packages/go/iamclient/client.go)定义实际边界；服务凭证不进入 Web。
+- [原生路由](internal/router/routes.go)、[响应模型](internal/model/context.go)及[IAM 客户端](../../packages/go/iamclient/client.go)定义实际边界；服务凭证不进入 Web。
 
 ## API
 
 | API | 权限 | 行为 |
 |---|---|---|
-| GET `/api/v1/console/context` | `iam.users.read` | 返回当前用户与决策ID |
-| GET `/api/v1/console/events` | 同上 | 建连及每25秒重新授权（单次IAM请求最多5秒）；撤权或IAM不可用即关闭，不继续发送业务数据 |
+| GET `/api/v1/console/context` | `console.context.read` | 返回经 IAM 验证的用户和授权决策 ID |
+| GET `/health/live` | 公共探针 | HTTP 进程可响应 |
+| GET `/health/ready` | 公共探针 | IAM 凭据可用，所需权限已登记 |
 
-401为会话失效，403为权限或CSRF拒绝，503为身份服务故障。客户端不会把503当作退出，不缓存允许结果，不透传内部Set-Cookie。未来资源仓储必须根据真实资源归属查询，不能把本层capability判断当作对象ACL；高危执行点须重新校验，异步任务保存发起者/决策信息而不保存Cookie。
+401 表示会话失效，403 表示权限拒绝，503 表示 IAM 不可用。每次上下文请求使用当前会话和授权结果。
 
 ## 配置与运行
 
-直接维护[config.yaml](config.yaml)：app为监听host及port；iam为连接host/port及服务token；logging为JSON日志与轮转。没有数据库、Redis或空业务配置占位。
+根 [环境模板](../../../.env.example) 的 Console 分组列出端口、IAM 服务凭据、日志级别和独立运行选项。[config.yaml](config.yaml) 提供默认值。Compose 通过服务名连接 IAM，日志由 Docker 管理。独立运行使用 `SPX_IAM_HOST/PORT` 连接 IAM，Web 使用 `SPX_CONSOLE_HOST/PORT` 连接 Console。文件日志可按需设置。
 
 ```sh
-# 从仓库根执行；进程环境提供私有凭证。
+go run ./src/apps/console/cmd check-config --config src/apps/console/config.yaml
 go run ./src/apps/console/cmd --config src/apps/console/config.yaml
 ```
 
-YAML字段直接声明环境变量和默认值，参数组件逐值展开，Viper/mapstructure严格解码。根连接变量为`SPX_IAM_HOST/PORT`，本机监听用`SPX_CONSOLE_BIND_HOST`及`SPX_CONSOLE_PORT`；服务凭证用`SPX_CONSOLE_IAM_TOKEN`。专用 IAM host/port 环境覆盖仅用于调用方确有不同目标的场景。HTTPS由Nginx等入口处理，应用无scheme或证书配置。token直接来自环境，不通过凭证文件。
-
-默认本机日志为`logs/console.log`，同时输出stdout；容器默认仅stdout，由Docker轮转。与IAM及其他副本使用不同日志文件，不能共写同一个轮转文件。
-
-源码、二进制和Compose的路径/配置规则见[配置指南](../../../docs/development/configuration.md)。
-
-### 启动与路由代码
-
-`cmd/main.go` 读取配置，`internal/bootstrap/serve.go` 初始化 IAM 客户端和 HTTP 服务，并负责服务关闭。Gin接口统一在 `internal/router/routes.go` 注册，普通路由显式注册，SSE使用原生SSEvent/Writer.Flush，处理函数通过显式依赖访问 IAM；配置加载器负责环境变量解析。
-
-
-普通接口通过 `src/packages/go/result` 返回统一 Result，SSE 直接使用流协议。公共请求标识、日志和异常恢复在共享 HTTP middleware；身份访问由 IAM 内部客户端校验，不读取 IAM 私表。config 只解析/校验文件，bootstrap 按配置创建客户端并负责关闭空闲连接。Console 没有实际 DB/cache 依赖，不增加占位配置。
-
-运行诊断见 [日志与错误定位](../../../docs/development/observability.md)。内部 IAM 调用记录 upstream_request_id 和受控失败阶段，SSE 记录建立/结束及撤权原因，不记录请求凭据。
-
-## 离线配置检查
-
-运行 `go run ./src/apps/console/cmd check-config --config src/apps/console/config.yaml` 校验完整运行配置；不连接依赖、不执行迁移、不创建业务日志。根目录 `pnpm config:check` 按模块注入统一环境并校验所有选中模块；必须先填写根 `.env`。配置字段、优先级、默认值与重启要求见[配置指南](../../../docs/development/configuration.md)。
+排查时先看存活与就绪探针，再用有效账号访问授权上下文。结合请求 ID 和上游请求 ID 定位 IAM 失败。安全事件的存储和回查由 Ingest 所有。 [配置指南](../../../docs/development/configuration.md) · [日志与错误定位](../../../docs/development/observability.md)

@@ -16,10 +16,12 @@ import (
 func main() {
 	brokers := flag.String("brokers", "", "comma separated broker list")
 	topic := flag.String("topic", "", "topic to read from")
+	input := flag.String("input", "", "optional source identifier")
+	count := flag.Int("count", 1, "number of matching events")
 	timeout := flag.Duration("timeout", 30*time.Second, "upper bound for reading one message")
 	flag.Parse()
 
-	if *brokers == "" || *topic == "" {
+	if *brokers == "" || *topic == "" || *count < 1 || *count > 100 {
 		fail("brokers and topic are required")
 	}
 
@@ -38,28 +40,45 @@ func main() {
 
 	defer client.Close()
 
-	for {
+	events := make([]json.RawMessage, 0, *count)
+	for len(events) < *count {
 		fetches := client.PollFetches(ctx)
 		if err = fetches.Err(); err != nil {
 			fail("poll failed: " + err.Error())
 		}
-
-		var payload []byte
-		fetches.EachRecord(func(record *kgo.Record) { payload = record.Value })
-
-		if len(payload) > 0 {
-			if !json.Valid(payload) {
+		fetches.EachRecord(func(record *kgo.Record) {
+			if len(events) >= *count {
+				return
+			}
+			if !json.Valid(record.Value) {
 				fail("event is not valid JSON")
 			}
-
-			_, _ = os.Stdout.Write(payload)
-			return
-		}
-
-		if ctx.Err() != nil {
-			fail("no message arrived before the timeout")
-		}
+			if *input != "" {
+				var event struct {
+					Metadata struct {
+						SPX struct {
+							InputID string `json:"input_id"`
+						}
+					}
+				}
+				if err := json.Unmarshal(record.Value, &event); err != nil {
+					fail("event is not a JSON object")
+				}
+				if event.Metadata.SPX.InputID != *input {
+					return
+				}
+			}
+			events = append(events, record.Value)
+		})
 	}
+	if *count == 1 {
+		_, _ = os.Stdout.Write(events[0])
+		return
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(events); err != nil {
+		fail("could not encode events")
+	}
+
 }
 
 // fail 只输出阶段，不回显地址或凭据。

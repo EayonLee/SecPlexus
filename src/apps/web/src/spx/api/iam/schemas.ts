@@ -94,6 +94,8 @@ export const zApiLoginResponse = z.object({
 
 // 时区是展示偏好，由 /me 一并返回；它不是授权作用域，缺省时按浏览器时区渲染。
 export const zApiMe = z.object({
+  email: z.string().nullish(),
+  created_at: z.iso.datetime({ offset: true }).optional(),
   permissions: z.array(z.string()),
   principal: zApiPrincipal,
   roles: z.array(zApiRoleRef),
@@ -115,9 +117,11 @@ export const zApiRole = z.object({
   name: z.string(),
   permissions: z.array(z.string()),
   user_count: z.int().gte(0).lte(9007199254740991),
+  updated_at: z.iso.datetime({ offset: true }).optional(),
 });
 
 export const zApiUser = z.object({
+  created_at: z.iso.datetime({ offset: true }).optional(),
   configured: z.boolean(),
   display_name: z.string(),
   email: z.string().nullable(),

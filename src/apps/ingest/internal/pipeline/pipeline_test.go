@@ -10,7 +10,6 @@ import (
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
-	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/parser"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 )
 
@@ -50,12 +49,7 @@ func (r *recorder) events() []pipeline.Event {
 func jsonRule(t *testing.T) *normalizer.Compiled {
 	t.Helper()
 
-	engine, err := normalizer.Compile(normalizer.Mapping{
-		ID:        "pipeline-test",
-		Parse:     parser.Spec{Mode: parser.ModeJSON},
-		FieldMap:  map[string]string{"src": "src_endpoint.ip"},
-		Constants: map[string]any{"class_uid": 2004},
-	})
+	engine, err := normalizer.CompileDefinition([]byte(`{"contract_version":"v1","parse":{"mode":"json"},"branches":[{"id":"network","name":"Network","class_uid":4001,"field_map":{"src":"src_endpoint.ip"}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,15 +141,15 @@ func TestParseFailureStillPublishesWithStatus(t *testing.T) {
 	if err := json.Unmarshal(event.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["class_uid"] != float64(pipeline.ClassUIDGeneric) {
-		t.Fatalf("fallback class = %#v", body["class_uid"])
+	if body["class_uid"] != float64(0) {
+		t.Fatalf("未分类记录应使用基础事件: %#v", body["class_uid"])
 	}
-	if body["message"] != "this is not json" {
-		t.Fatalf("raw message not preserved: %#v", body["message"])
+	if _, exists := body["message"]; exists {
+		t.Fatal("diagnostic event contains the device payload")
 	}
 }
 
-func TestGenericConnectorPassesThrough(t *testing.T) {
+func TestInputWithoutRuleProducesDiagnostic(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})
 	entry := input.Entry{ID: "conn-generic", Protocol: input.ProtocolHTTP}
 

@@ -1,16 +1,17 @@
 import type { ReactNode } from "react";
 
-/**
- * Toolbar 是列表页工具条的唯一结构：查询条件在左，操作按钮成组靠右。
- *
- * 各页不再自行拼 flex 容器，避免按钮位置与尺寸在不同页面漂移；
- * 传入的按钮统一使用 size="sm"，与 h-8 的输入框同高。
- */
+import { Card } from "@/components/ui/card";
+
+/** 标题、筛选、记录与分页共用模板的 Card 表面。 */
+export function ListSurface({ children }: { children: ReactNode }) {
+  return <Card className="@container/list min-w-0 gap-0 py-0">{children}</Card>;
+}
+
 export function Toolbar({ children, actions }: { children?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {children}
-      {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
+    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      {children && <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>}
+      {actions && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

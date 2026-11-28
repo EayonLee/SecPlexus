@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import en from "../../messages/en.json";
 import zh from "../../messages/zh-CN.json";
-import { oppositeLocale, resolveLocale } from "../../src/i18n/config";
+import { messageFallback, oppositeLocale, resolveLocale } from "../../src/i18n/config";
 
 function keys(value: object, prefix = ""): string[] {
   return Object.entries(value).flatMap(([key, entry]) =>
@@ -25,6 +25,20 @@ describe("platform localization", () => {
 
   test("provides the same message keys in both languages", () => {
     expect(keys(zh).sort()).toEqual(keys(en).sort());
+  });
+
+  test("keeps a missing key out of the UI and preserves its diagnostic", () => {
+    const errors: string[] = [];
+    const catalog = structuredClone(zh);
+    Reflect.deleteProperty(catalog.Common, "allOptions");
+    const translate = createTranslator({
+      locale: "zh-CN",
+      messages: catalog,
+      getMessageFallback: messageFallback,
+      onError: (error) => errors.push(error.code),
+    });
+    expect(translate("Common.allOptions")).toBe("—");
+    expect(errors).toEqual(["MISSING_MESSAGE"]);
   });
 
   test("uses the approved dashboard names and ICU pagination", () => {
@@ -52,8 +66,27 @@ describe("platform localization", () => {
         });
         expect(
           translate("value", {
+            names: "Edge",
+            fields: "Source IP",
+            carried: 1,
+            version: 2,
+            passed: 1,
+            field: "message",
+            source: "host",
+            target: "normalized_host",
             count: 2,
+            label: "TCP",
             total: 2,
+            limit: 120,
+            first: 1,
+            last: 2,
+            current: 1,
+            title: "Example",
+            number: 1,
+            key: "example",
+            level: "2",
+            code: "invalid_value",
+            inputs: "Example input",
             matched: 1,
             selected: 1,
             page: 1,
@@ -62,6 +95,7 @@ describe("platform localization", () => {
             name: "Example",
             month: "June",
             range: "1–5",
+            type: "JSON",
           }),
         ).not.toBe("");
       }

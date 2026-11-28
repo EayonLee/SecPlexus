@@ -45,10 +45,10 @@ func (QueryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 	}
 
 	level := slog.LevelWarn
-	event := "db.slow"
+	event := "postgresql.slow"
 	if data.Err != nil {
 		level = slog.LevelError
-		event = "db.failed"
+		event = "postgresql.failed"
 		var failure *pgconn.PgError
 		if errors.As(data.Err, &failure) && (strings.HasPrefix(failure.Code, "23") || failure.Code == "22P02") {
 			level = slog.LevelWarn

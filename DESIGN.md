@@ -684,19 +684,19 @@ The system runs predominantly flat. Elevation is reserved for two interaction la
 
 ## SecPlexus Implementation Mapping
 
-This section records how the system above is realized in `src/apps/web`. It is not part of the extracted Meta analysis.
+This section defines the implementation for SecPlexus. The preceding brand study supplies palette and chart references. Product surfaces take their composition and component geometry from the Web template.
 
 ### Token mapping
 
-`src/apps/web/src/app/globals.css` keeps the shadcn token *names* and only changes their *values*. Components stay stock shadcn; only the two shape rules below are applied on top.
+`src/apps/web/src/app/globals.css` keeps the shadcn token *names* and only changes their *values*. Component geometry follows the local Web template and the sizing rules below.
 
 | shadcn token | Meta source | Light | Dark |
 |---|---|---|---|
 | `--background` | `{colors.canvas}` | `#ffffff` | `#0a0a0a` |
 | `--foreground` | `{colors.ink-deep}` | `#0a1317` | `#fafafa` |
-| `--card` / `--popover` | `{colors.canvas}` | `#ffffff` | `#171717` |
-| `--primary` | `{colors.primary}` | `#0064e0` | `#0091ff` |
-| `--primary-foreground` | `{colors.on-primary}` | `#ffffff` | `#0a1317` |
+| `--card` / `--sidebar` / `--popover` | Dashboard template neutral surfaces | `#fafafa` | `#171717` |
+| `--primary` | `{colors.primary}` | `#0064e0` | `#0064e0` |
+| `--primary-foreground` | `{colors.on-primary}` | `#ffffff` | `#ffffff` |
 | `--secondary` / `--muted` / `--accent` | `{colors.surface-soft}` | `#f1f4f7` | `#262626` |
 | `--muted-foreground` | `{colors.steel}` | `#5d6c7b` | `#a3a3a3` |
 | `--destructive` | `{colors.critical}` / `{colors.critical-strong}` | `#e41e3f` | `#f0284a` |
@@ -704,23 +704,44 @@ This section records how the system above is realized in `src/apps/web`. It is n
 | `--input` | `{colors.hairline}` | `#ced0d4` | `#333333` |
 | `--radius` | `{rounded.lg}` (input base) | `0.75rem` | same |
 
+The root theme defines the canvas and content surface for both modes. The shell, page gutters and space around content use `--background`. Sidebar, lists, cards, detail bodies and editor bodies use the neutral content surface. List headers, rows and pagination inherit that surface. A table group heading or inset region can use `--muted`. Dialogs, sheets, popovers and menus use `--popover`; their separation comes from borders, shadow or a scrim. A lone page title, gap, or unboxed status uses the underlying surface.
+
+The template places these decisions in the root tokens and shared Sidebar, Card, and overlay primitives. SecPlexus uses one neutral value for the sidebar, cards and overlays per theme. Product blue stays in primary actions, focus rings, links, and interactive selection, with semantic status colors for outcomes. Add new authenticated routes under the shared shell and choose shared components by their role. Keep palette values in the root theme.
+
 Tailwind v4 derives `rounded-xl` = `--radius + 4px` (16px = `{rounded.xl}`).
+
+### Console content width
+
+The authenticated shell supplies the content frame around every route and inside its toolbar. The full-width frame fills the space available beside the sidebar. At desktop widths of 64rem and above, centered content occupies 92% of that space up to 80rem. Both modes use the same fluid gutters. At narrower widths both modes use the available space. Tables and split editors flow within the frame; individual search controls and reading columns can constrain their own measure.
+
+**Resource feedback.** Place the shadcn Empty-based state in the content region directly below its toolbar. The bounded area is 13–18rem tall, with an icon, semantic heading, optional explanation and recovery action. Use the attention token for failure and the primary token for empty and filtered results. An initial error replaces the result, a failed refresh with usable content shows an inline notice, and an empty filter offers a reset. A full-height state is reserved for routes without the console shell.
+
+**Business side panels.** Side sheets share `--sheet-inline-size`: full viewport below 40rem, then 90vw up to 84rem. Header, scrollable body and fixed footer share a 64rem content measure. At 44rem of available panel width, field groups use two equal columns. System settings follows the Products drawer at up to 32rem, with aligned 1rem side gutters and a separately scrollable body. Use the viewport width when narrower. Editing actions stay in the footer. Read-only details use the header close button. Mobile navigation uses its navigation width. The opener regains focus after dismissal.
+
+
+### Management lists
+
+Use the template SidebarGroup and SidebarMenuButton to give sibling resources distinct menu entries. Keep the list title and its main action in PageHeader. Users places the header and search inside its Card and uses the template’s padded rows. Roles puts its header above ListSurface and groups the page of results by role type. Audit uses the Tasks toolbar and compact event rows. All four settings routes share the Profile breadcrumb with a plain-text System settings parent. SearchField follows Products; ListSelect uses the same small SelectTrigger, portalled SelectContent and selected-item indicator for filter and page-size choices. Date filters use the template Calendar inside a Popover. All lists use the parsing-rule list footer through `ListPagination`. Known totals appear on the left, with page size, page position and first/previous/next/last on the right. Cursor lists keep the same alignment and expose previous/next with the current position. Filter triggers display the field name and current value. Searchable list filters reuse the compact Select trigger styles, then open a focused, empty search field above their choices. The popup follows the trigger and stays within the viewport. Options occupy a single line, with an ellipsis for long text and the full accessible name. Show a selection count only after selection and group it with the controls to which it applies. A single routine row action can be a ghost button; a group of operations belongs in a dropdown with destructive actions marked.
+
+Every business table shares a left alignment for headers, values, checkboxes, and row actions. The shared table slots set text alignment, and controls within a cell follow the same edge.
 
 ### Shape
 
-Only two geometry rules are applied to stock shadcn components: `button.tsx` and `badge.tsx` take `rounded-full` in their base class, per "buttons are NEVER squared". Every size variant drops its own radius override so the pill is not shadowed by a narrower radius. Cards, inputs and popovers keep stock shadcn rounding.
+Buttons use the template Button base, size-specific rounding and variants. Badges use the template badge shape and SecPlexus semantic status colors. Form controls and cards share the template radius scale.
 
 ### Dark mode
 
 `Known Gaps` states the brand published no dark-mode token set. The project therefore uses a neutral grey ramp — `#0a0a0a` canvas, `#171717` card, `#262626` border — with no hue in any channel, which is what keeps it from reading green. Three consequences worth keeping:
 
-- `{colors.primary}` at `#0064e0` is 3.68:1 on `#0a0a0a`, under AA for text-bearing controls. Dark `--primary` therefore uses `{colors.primary-soft}` `#0091ff` (6.12:1) with an ink foreground; white on `#0091ff` is only 3.23:1.
+- Dark primary controls use cobalt `#0064e0` with white labels. Their focus indication uses `--ring` at `#0091ff`.
 - `--ring` is opaque rather than alpha. Twenty-six components paint `ring-ring/50`, halving whatever alpha the token declares; an alpha token composited to 1.86:1 on white, below the 3:1 WCAG 1.4.11 floor for focus indicators.
 - `bg-foreground text-background` inverts into a light panel under `.dark`. The sign-in panel therefore carries explicit dark variants (`dark:bg-card dark:text-foreground`).
 
 ### Typography
 
 Optimistic VF is proprietary and not commercially available. `registry.ts` registers Montserrat (the documented first fallback) and `preferences-config.ts` defaults to it. `ss01`/`ss02` cannot be applied because they belong to Optimistic VF's feature set.
+
+The workbench sets the default primary heading: inherited UI font, 1.5rem size, weight 600, 2rem line height and -0.025em tracking. `PageHeader` composes `PageTitle`, an optional operational notice and a page action. Users and Roles use the same primary heading as the workbench. Table, dialog and form titles keep their own component hierarchy.
 
 ### Charts
 
@@ -732,6 +753,8 @@ Optimistic VF is proprietary and not commercially available. `registry.ts` regis
 
 ### Component deltas
 
-- Buttons and badges: `rounded-full`, per the pill signature.
+- Buttons and badges use their template variants.
 - Workbench: stock shadcn card grid — no hero band, no custom KPI strip.
-- Settings (`/settings/profile`, `/settings/account`): card-grouped sections in a 2/1 column split, matching the reference dashboard's layout grammar.
+- Profile (`/settings/profile`) uses the template breadcrumb, identity header, line tabs and overview rail. Display the actual account, roles and time zone. Place account security on its own tab.
+- Operational details use the Profile label/value layout on one page surface. Use section headings and separators for connection settings and diagnostics. Empty grid cells inherit the page surface. Keep source identity columns visible together, with secondary counters yielding first when the table narrows.
+- Extraction value types use the shared Badge shape at the surrounding text size. Use the same text and color mapping everywhere the type is shown. String is blue, number violet, boolean teal, array amber, object rose, and null neutral. Use the light and dark values defined with the value-type badge in the Web stylesheet. These categories describe the source value, independent of event severity or validation status.

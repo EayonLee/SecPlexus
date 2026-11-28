@@ -20,9 +20,9 @@ import (
 // UnmigratedDatabase 创建独立测试数据库，并仅注册本次资源的清理。
 func UnmigratedDatabase(t *testing.T) *repository.Store {
 	t.Helper()
-	dsn := os.Getenv("SPX_TEST_POSTGRES_URL")
+	dsn := os.Getenv("SPX_TEST_POSTGRESQL_URL")
 	if dsn == "" {
-		t.Fatal("SPX_TEST_POSTGRES_URL is required; use the isolated integration runner")
+		t.Fatal("SPX_TEST_POSTGRESQL_URL is required; use the isolated integration runner")
 	}
 
 	ctx := context.Background()

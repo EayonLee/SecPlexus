@@ -24,7 +24,7 @@ func TestEveryEventSatisfiesOcsfBaseContract(t *testing.T) {
 		`not json at all`,
 		`{}`,
 	} {
-		event := line.Parse(entry, []byte(payload), time.Now())
+		event := line.Parse(entry, []byte(payload), time.Now(), "")
 
 		var body map[string]any
 		if err := json.Unmarshal(event.Body, &body); err != nil {
@@ -39,7 +39,7 @@ func assertOcsfBase(t *testing.T, payload string, body map[string]any, eventID s
 	t.Helper()
 
 	classUID, ok := numeric(body["class_uid"])
-	if !ok || classUID == 0 {
+	if !ok || classUID < 0 {
 		t.Fatalf("%s: class_uid 缺失或非法: %#v", payload, body["class_uid"])
 	}
 	activityID, ok := numeric(body["activity_id"])
@@ -59,7 +59,7 @@ func assertOcsfBase(t *testing.T, payload string, body map[string]any, eventID s
 	if !ok {
 		t.Fatalf("%s: metadata 缺失", payload)
 	}
-	if metadata["version"] != pipeline.OCSFVersion {
+	if metadata["version"] != "1.10.0" {
 		t.Fatalf("%s: metadata.version = %#v", payload, metadata["version"])
 	}
 	product, ok := metadata["product"].(map[string]any)

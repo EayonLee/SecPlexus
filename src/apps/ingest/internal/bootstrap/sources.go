@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/signal"
 	"sync"
@@ -12,43 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/input"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/observation"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/repository"
 	"github.com/EayonLee/SecPlexus/src/packages/go/logging"
 )
 
 // sourceRefresher 让运行期的接入点集合跟随数据库变化。
 //
-// 语义与 nginx 的 fail-safe reload 一致：新配置整体校验通过才切换，
-// 任何一条失败就保留上一份成功配置并在 readiness 上报告降级——
-// 绝不出现"一部分生效、一部分静默消失"的中间状态。
+// 数据库不可访问时，上一份快照只在租期内可用。单条配置损坏时只隔离对应接入。
 type sourceRefresher struct {
-	pool     *pgxpool.Pool
-	registry *input.Memory
-	interval time.Duration
+	pool         *pgxpool.Pool
+	registry     *input.Memory
+	interval     time.Duration
+	observations *observation.Store
+	activation   func(input.Entry) input.ChannelActivation
 
-	mu       sync.RWMutex
-	degraded string // 非空表示最近一次刷新失败的原因。
+	mu            sync.RWMutex
+	degraded      string    // 非空表示最近一次刷新失败的原因。
+	lastConfirmed time.Time // 最近一次完成配置及运行确认的本地时间。
 }
 
 // newSourceRefresher 创建刷新器。
-func newSourceRefresher(pool *pgxpool.Pool, registry *input.Memory, interval time.Duration) *sourceRefresher {
+func newSourceRefresher(pool *pgxpool.Pool, registry *input.Memory, observations *observation.Store, activation func(input.Entry) input.ChannelActivation, interval time.Duration) *sourceRefresher {
 	if interval <= 0 {
 		interval = repository.ReloadInterval
 	}
 
-	return &sourceRefresher{pool: pool, registry: registry, interval: interval}
+	return &sourceRefresher{pool: pool, registry: registry, interval: interval, observations: observations, activation: activation}
 }
 
-// Load 加载一次；失败时保留旧集合并记下降级原因。
-func (r *sourceRefresher) Load(ctx context.Context) error {
-	entries, problems, err := repository.LoadInputs(ctx, r.pool)
-	if err == nil && len(problems) > 0 {
-		for _, problem := range problems {
-			logging.From(ctx).Error("Source did not compile", "event", "input.compile_failed",
-				"input_id", problem.SourceID, "reason", problem.Reason)
-		}
+const sourceLease = 15 * time.Second
 
-		err = errors.New("some sources did not compile")
+// Load 读取一次权威快照，失败时不会续期。
+func (r *sourceRefresher) Load(ctx context.Context) error {
+	expires := time.Now().Add(sourceLease)
+	loadContext, cancel := context.WithTimeout(ctx, r.interval)
+	defer cancel()
+	snapshot, err := repository.LoadInputs(loadContext, r.pool)
+	if err == nil {
+		err = r.observations.Participate(loadContext, expires)
 	}
 
 	if err != nil {
@@ -63,15 +64,47 @@ func (r *sourceRefresher) Load(ctx context.Context) error {
 		return err
 	}
 
-	r.registry.Replace(entries)
+	for id, target := range snapshot.Targets {
+		if target.Problem != "" {
+			logging.From(ctx).Warn("Source configuration rejected", "event", "input.configuration.rejected",
+				"input_id", id, "reason", target.Problem)
+		}
+	}
+	r.registry.ReplaceUntil(snapshot.Entries, expires)
+	for _, entry := range snapshot.Entries {
+		target := snapshot.Targets[entry.ID]
+		state := r.activation(entry)
+		target.Online, target.Draining, target.Problem = state.Online, state.Draining, state.Problem
+		snapshot.Targets[entry.ID] = target
+	}
+	if err := r.observations.Acknowledge(loadContext, snapshot.Targets, expires); err != nil {
+		r.registry.ReplaceUntil(nil, time.Now())
+		r.mu.Lock()
+		r.degraded = err.Error()
+		r.mu.Unlock()
+		logging.From(ctx).Error("Could not confirm source configuration", "event", "input.configuration.confirmation_failed",
+			"error", logging.Error(err))
+		return err
+	}
 
 	r.mu.Lock()
 	r.degraded = ""
+	r.lastConfirmed = time.Now()
 	r.mu.Unlock()
 
-	logging.From(ctx).Info("Sources loaded", "event", "input.loaded", "count", len(entries))
+	logging.From(ctx).Info("Sources loaded", "event", "input.loaded", "count", len(snapshot.Entries))
 
 	return nil
+}
+
+// SnapshotAge 返回距上次确认的时间，用于在快照租期内发现故障。
+func (r *sourceRefresher) SnapshotAge() time.Duration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.lastConfirmed.IsZero() {
+		return 0
+	}
+	return time.Since(r.lastConfirmed)
 }
 
 // Degraded 返回最近一次刷新失败的原因；空串表示健康。

@@ -1,0 +1,131 @@
+{
+  "contract_version": "v1",
+  "columns": [
+    {
+      "name": "event_id",
+      "path": "metadata.uid",
+      "type": "UUID",
+      "conversion": "uuid",
+      "comment": "metadata.uid | 事件 ID"
+    },
+    {
+      "name": "event_time",
+      "path": "time",
+      "type": "DateTime64(3, 'UTC')",
+      "conversion": "epoch_millis",
+      "comment": "time | 事件发生时间"
+    },
+    {
+      "name": "received_at",
+      "path": "metadata.spx.received_at",
+      "type": "DateTime64(3, 'UTC')",
+      "conversion": "epoch_millis",
+      "comment": "metadata.spx.received_at | 接收时间"
+    },
+    {
+      "name": "class_uid",
+      "path": "class_uid",
+      "type": "UInt32",
+      "conversion": "unsigned",
+      "comment": "class_uid | 事件类型 ID"
+    },
+    {
+      "name": "category_uid",
+      "path": "category_uid",
+      "type": "UInt16",
+      "conversion": "unsigned",
+      "comment": "category_uid | 事件类别 ID"
+    },
+    {
+      "name": "activity_id",
+      "path": "activity_id",
+      "type": "UInt16",
+      "conversion": "unsigned",
+      "comment": "activity_id | 活动类型 ID"
+    },
+    {
+      "name": "type_uid",
+      "path": "type_uid",
+      "type": "UInt64",
+      "conversion": "unsigned",
+      "comment": "type_uid | 事件类型编码"
+    },
+    {
+      "name": "severity_id",
+      "path": "severity_id",
+      "type": "UInt8",
+      "conversion": "unsigned",
+      "comment": "severity_id | 严重程度"
+    },
+    {
+      "name": "ocsf_version",
+      "path": "metadata.version",
+      "type": "LowCardinality(String)",
+      "conversion": "string",
+      "comment": "metadata.version | OCSF 版本"
+    },
+    {
+      "name": "contract_version",
+      "path": "metadata.spx.contract_version",
+      "type": "LowCardinality(String)",
+      "conversion": "string",
+      "comment": "metadata.spx.contract_version | 平台契约版本"
+    },
+    {
+      "name": "input_id",
+      "path": "metadata.spx.input_id",
+      "type": "UUID",
+      "conversion": "uuid",
+      "comment": "metadata.spx.input_id | 数据接入 ID"
+    },
+    {
+      "name": "vendor",
+      "path": "metadata.spx.vendor",
+      "type": "LowCardinality(Nullable(String))",
+      "conversion": "blank_to_null",
+      "comment": "metadata.spx.vendor | 来源厂商"
+    },
+    {
+      "name": "product",
+      "path": "metadata.spx.product",
+      "type": "LowCardinality(Nullable(String))",
+      "conversion": "blank_to_null",
+      "comment": "metadata.spx.product | 来源产品"
+    },
+    {
+      "name": "src_ip",
+      "path": "src_endpoint.ip",
+      "type": "Nullable(IPv6)",
+      "conversion": "ipv4_mapped_ipv6",
+      "comment": "src_endpoint.ip | 源 IP"
+    },
+    {
+      "name": "dst_ip",
+      "path": "dst_endpoint.ip",
+      "type": "Nullable(IPv6)",
+      "conversion": "ipv4_mapped_ipv6",
+      "comment": "dst_endpoint.ip | 目的 IP"
+    },
+    {
+      "name": "src_port",
+      "path": "src_endpoint.port",
+      "type": "Nullable(UInt16)",
+      "conversion": "unsigned",
+      "comment": "src_endpoint.port | 源端口"
+    },
+    {
+      "name": "dst_port",
+      "path": "dst_endpoint.port",
+      "type": "Nullable(UInt16)",
+      "conversion": "unsigned",
+      "comment": "dst_endpoint.port | 目的端口"
+    },
+    {
+      "name": "event_json",
+      "path": "",
+      "type": "String",
+      "conversion": "event_json",
+      "comment": "完整标准事件 JSON"
+    }
+  ]
+}

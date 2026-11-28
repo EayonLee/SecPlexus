@@ -39,27 +39,13 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 	}
 }
 
-// SSE 端点必须声明为 text/event-stream，否则浏览器不会按流处理。
-func TestEventsRouteIsRegistered(t *testing.T) {
+func TestPrototypeEventsRouteIsNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	client, err := iamclient.New("http://127.0.0.1:8081", strings.Repeat("c", 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(client.Close)
-	router.Register(engine, &handler.Server{IAM: client}, client)
-
-	var found bool
-	for _, route := range engine.Routes() {
-		if route.Method == http.MethodGet && route.Path == "/api/v1/console/events" {
-			found = true
-		}
-	}
-
-	if !found {
-		t.Fatal("events route is not registered")
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/console/events", nil)
+	testHandler(t).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", recorder.Code)
 	}
 }
 

@@ -5,6 +5,7 @@ package repository_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,7 +18,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	store := testutil.Database(t)
 	ctx := context.Background()
 	original, changed := "configured administrator password", "rotated configuration password"
-	if err := store.Seed(ctx, "admin", original); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", original); err != nil {
 		t.Fatal(err)
 	}
 	before, err := repository.GetLoginUser(ctx, store.DB, "admin")
@@ -27,7 +28,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if !before.Configured {
 		t.Fatal("seeded administrator is not marked as configured")
 	}
-	if err = store.Seed(ctx, "admin", original); err != nil {
+	if err = store.SyncAdministrator(ctx, "admin", original); err != nil {
 		t.Fatal(err)
 	}
 	repeated, err := repository.GetLoginUser(ctx, store.DB, "admin")
@@ -37,7 +38,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if repeated.PasswordHash != before.PasswordHash || repeated.AuthEpoch != before.AuthEpoch {
 		t.Fatal("unchanged configuration invalidated credentials")
 	}
-	if err = store.Seed(ctx, "admin", changed); err != nil {
+	if err = store.SyncAdministrator(ctx, "admin", changed); err != nil {
 		t.Fatal(err)
 	}
 	after, err := repository.GetLoginUser(ctx, store.DB, "admin")
@@ -50,7 +51,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 	if after.ID != before.ID || after.AuthEpoch <= before.AuthEpoch {
 		t.Fatal("credential rotation did not preserve the account or bump its version")
 	}
-	if err = store.Seed(ctx, "admin", ""); err == nil {
+	if err = store.SyncAdministrator(ctx, "admin", ""); err == nil {
 		t.Fatal("missing authoritative password was accepted")
 	}
 }
@@ -59,7 +60,7 @@ func TestConfiguredAdministratorCredentialsAreAuthoritativeAndIdempotent(t *test
 func TestConfiguredAdministratorAndBuiltinRoleAreUnique(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "first configured password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "first configured password"); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.InsertUser(ctx, store.DB, uuid.New(), "regular", "regular", "Regular", "", true); err == nil {
@@ -101,14 +102,14 @@ func TestConfiguredAdministratorAndBuiltinRoleAreUnique(t *testing.T) {
 func TestRenamingConfiguredAdministratorMovesBuiltinIdentity(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "isolated rename password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "isolated rename password"); err != nil {
 		t.Fatal(err)
 	}
 	var oldID uuid.UUID
 	if err := store.Pool.QueryRow(ctx, `SELECT id FROM iam.users WHERE configured`).Scan(&oldID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Seed(ctx, "renamed", "isolated rename password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "renamed", "isolated rename password"); err != nil {
 		t.Fatal(err)
 	}
 	var newID uuid.UUID
@@ -131,5 +132,48 @@ func TestRenamingConfiguredAdministratorMovesBuiltinIdentity(t *testing.T) {
 	}
 	if oldBuiltin != 0 {
 		t.Fatal("previous configured account kept the builtin role")
+	}
+}
+
+func TestStartupDoesNotChangeAdministratorCredentialsOrClaimAccounts(t *testing.T) {
+	store := testutil.Database(t)
+	ctx := context.Background()
+	var permissionsBefore time.Time
+	if err := store.Pool.QueryRow(ctx, "SELECT max(updated_at) FROM iam.permissions").Scan(&permissionsBefore); err != nil {
+		t.Fatal(err)
+	}
+	regularID := uuid.New()
+	if err := repository.InsertUser(ctx, store.DB, regularID, "regular", "regular", "Regular", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InitializeAdministrator(ctx, "regular", "initial setup password"); err == nil {
+		t.Fatal("first initialization took over an existing account")
+	}
+	if err := store.InitializeAdministrator(ctx, "admin", "initial setup password"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repository.GetLoginUser(ctx, store.DB, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InitializeAdministrator(ctx, "admin", "different startup password"); err != nil {
+		t.Fatal(err)
+	}
+	var permissionsAfter time.Time
+	if err := store.Pool.QueryRow(ctx, "SELECT max(updated_at) FROM iam.permissions").Scan(&permissionsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if !permissionsAfter.Equal(permissionsBefore) {
+		t.Fatal("administrator initialization changed the permission catalog")
+	}
+	if err := store.SyncAdministrator(ctx, "regular", "explicit but conflicting password"); err == nil {
+		t.Fatal("explicit maintenance took over an existing account")
+	}
+	after, err := repository.GetLoginUser(ctx, store.DB, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.ID != after.ID || before.PasswordHash != after.PasswordHash || before.AuthEpoch != after.AuthEpoch {
+		t.Fatal("repeated initialization or conflicting maintenance changed the administrator")
 	}
 }

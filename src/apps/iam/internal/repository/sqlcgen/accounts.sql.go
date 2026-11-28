@@ -8,6 +8,7 @@ package sqlcgen
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -87,15 +88,21 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 	return err
 }
 
-const readUserTimeZone = `-- name: ReadUserTimeZone :one
-SELECT timezone FROM iam.users WHERE id = $1::uuid
+const readUserProfile = `-- name: ReadUserProfile :one
+SELECT timezone, email, created_at FROM iam.users WHERE id = $1::uuid
 `
 
-func (q *Queries) ReadUserTimeZone(ctx context.Context, id uuid.UUID) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, readUserTimeZone, id)
-	var timezone sql.NullString
-	err := row.Scan(&timezone)
-	return timezone, err
+type ReadUserProfileRow struct {
+	Timezone  sql.NullString
+	Email     sql.NullString
+	CreatedAt time.Time
+}
+
+func (q *Queries) ReadUserProfile(ctx context.Context, id uuid.UUID) (ReadUserProfileRow, error) {
+	row := q.db.QueryRowContext(ctx, readUserProfile, id)
+	var i ReadUserProfileRow
+	err := row.Scan(&i.Timezone, &i.Email, &i.CreatedAt)
+	return i, err
 }
 
 const resetPassword = `-- name: ResetPassword :exec

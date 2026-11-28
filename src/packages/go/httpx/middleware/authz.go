@@ -23,6 +23,15 @@ import (
 // 放在中间件包而不是协议客户端：共享库停在 net/http 层，
 // 与 Web 框架的适配属于使用方的基础设施。
 func Guard(client *iamclient.Client, action, targetType string) gin.HandlerFunc {
+	return guard(client, action, targetType, false)
+}
+
+// GuardWithDurableAudit 将成功写入的审计事实交由业务事务持久化；拒绝与失败仍由守卫记录。
+func GuardWithDurableAudit(client *iamclient.Client, action, targetType string) gin.HandlerFunc {
+	return guard(client, action, targetType, true)
+}
+
+func guard(client *iamclient.Client, action, targetType string, durableAudit bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		request := ctx.Request
 
@@ -79,6 +88,12 @@ func Guard(client *iamclient.Client, action, targetType string) gin.HandlerFunc 
 		}
 
 		ctx.Set(iamclient.PrincipalKey, decision)
+		if durableAudit {
+			ctx.Request = request.WithContext(iamclient.ContextWithAudit(request.Context(), iamclient.AuditEvent{
+				Action: action, TargetType: targetType, Outcome: string(iamclient.AuditOutcomeSuccess),
+				RequestID: RequestID(request), DecisionID: decision.DecisionID,
+			}))
+		}
 		ctx.Next()
 
 		outcome := string(iamclient.AuditOutcomeSuccess)
@@ -86,7 +101,7 @@ func Guard(client *iamclient.Client, action, targetType string) gin.HandlerFunc 
 			outcome = string(iamclient.AuditOutcomeFailure)
 		}
 
-		if unsafeMethod(request.Method) || outcome != string(iamclient.AuditOutcomeSuccess) {
+		if (unsafeMethod(request.Method) && !durableAudit) || outcome != string(iamclient.AuditOutcomeSuccess) {
 			recordAudit(client, request.Context(), request, action, targetType, ctx.Param("id"), outcome, decision.DecisionID)
 		}
 	}

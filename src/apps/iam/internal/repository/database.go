@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-// Migrate 使用配置的数据库账号执行版本化迁移，普通服务启动不自动改表。
+// Migrate 使用配置的数据库账号执行版本化迁移，随后同步权限目录和内置角色。
 func Migrate(ctx context.Context, dsn string) (err error) {
 	started := time.Now()
 	completed := false
@@ -52,6 +52,10 @@ func Migrate(ctx context.Context, dsn string) (err error) {
 		return fmt.Errorf("IAM migration failed: %w", err)
 	}
 
+	if err = (&Store{Pool: pool, DB: db}).syncPermissions(ctx); err != nil {
+		return fmt.Errorf("IAM permission catalog sync failed: %w", err)
+	}
+
 	completed = true
 	return nil
 }
@@ -75,7 +79,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 
 	if err = pool.Ping(ctx); err != nil {
 		pool.Close()
-		logging.From(ctx).Error("PostgreSQL connection failed", "event", "dependency.failed", "dependency", "postgres", "error", logging.Error(err))
+		logging.From(ctx).Error("PostgreSQL connection failed", "event", "dependency.failed", "dependency", "postgresql", "error", logging.Error(err))
 		return nil, errors.New("IAM database unavailable")
 	}
 

@@ -23,7 +23,7 @@
 - 禁止断言实现细节（内部调用次数、私有字段）代替断言可观察行为。
 - 断言机器可消费的值（解析后的字段、稳定令牌、边界错误码），不断言面向人阅读的散文。
 - 集成测试必须使用自有隔离资源并清理；不得连接或改写开发库。
-- 缺少 `SPX_TEST_POSTGRES_URL`、`SPX_TEST_REDIS_URL` 或 `SPX_TEST_KAFKA_BROKERS` 时，对应集成测试跳过而非失败；跳过不算覆盖。
+- 外部依赖模式的全套集成和 E2E 入口要求三项测试连接齐全，缺项时在创建资源前失败。直接运行单个 Go 包时，以用例实际执行结果计算覆盖，跳过不算通过。
 - 配置用例断言的是 YAML 默认值，`TestMain` 会清空 `SPX_*`：本地 source 过 `.env` 时不会再出现与环境相关的假失败。
 
 ## 原则
@@ -54,24 +54,26 @@
 
 ## 可执行入口
 
+本地全栈验收优先使用已配置的测试服务。根公开模板面向应用部署。需要复用本地测试服务时，在私有 `.env` 或进程环境中显式配置 `SPX_TEST_POSTGRESQL_URL`、`SPX_TEST_REDIS_URL` 和 `SPX_TEST_KAFKA_BROKERS` 后运行以下命令。进程环境优先。缺少任一项时入口会提前报错。Kafka 账号需要创建和删除测试主题、使用和删除测试消费组的权限。套件按本次命名的确切资源回收，包括用例失败后的正常收尾。
+
 ```sh
 make test
 make catalogs
 make typecheck
 make build
-make integration ARGS="--docker --race"
+make integration ARGS="--race"
 make install-browsers
-make test-e2e ARGS="--docker"
+make test-e2e
 ```
 
 以上入口在macOS、Linux、PowerShell与`cmd.exe`中统一通过GNU Make执行；Makefile配方不依赖POSIX shell，平台差异由Node脚本承担。`make test`先由[scripts/test-scripts.mjs](../../scripts/test-scripts.mjs)枚举脚本测试，再运行Go与Web单测，不依赖shell通配符展开。
 
-集成测试也支持显式提供`SPX_TEST_POSTGRES_URL`与`SPX_TEST_REDIS_URL`，不加`--docker`。CI 的 `Integration (ubuntu-latest)` job 用 `make integration ARGS="--docker"` 跑 iam、console、ingest 同一套用例：临时 `postgres:16-alpine` 与 `redis:7-alpine` 容器、随机端口与临时凭据，结束时按名称清理；宿主机另装 `postgresql-client-16`，让备份恢复用例的 `pg_dump` 与服务端同主版本。
-外部Redis优先专用测试库；当前用户明确允许远程 DB0，测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
+CI 的 `Integration (ubuntu-24.04)` 任务使用 `make integration ARGS="--docker --clickhouse"`。该任务启动临时 PostgreSQL、Redis、Kafka 和 ClickHouse，结束后只清理本次资源。宿主机使用与 PostgreSQL 服务端主版本相同的 `pg_dump`。ClickHouse 必须执行空库迁移、重复执行、历史事件回读和备份恢复。本地使用独占的外部 ClickHouse 时，设置 `SPX_TEST_CLICKHOUSE_URL` 并传入 `--clickhouse`；配置了文件备份目标时可显式设置 `SPX_TEST_CLICKHOUSE_BACKUPS=1` 复验恢复。只有显式传入 `--clickhouse` 才运行事件存储测试。
+外部 Redis 优先使用专用测试库。测试仅清理随机测试账号/会话拥有的精确键，共享来源桶保留并按原 TTL 到期，禁止 FLUSH 或前缀清理。PG测试连接需要创建独立测试库的权限；测试只删除自己创建的`spx_test_<UUID>`数据库。
 备份恢复用例使用与服务端兼容的 pg_dump/pg_restore；外部PG无需构建应用容器，测试仍创建独立随机数据库。
 
-`--docker`明确授权测试脚本创建独立的临时PG/Redis容器、随机端口和临时凭据，结束后清理自有资源。
-浏览器套件构建真实服务，启动两个IAM及两个Console实例，并通过根启动脚本启动第一个实例及Web。CI 的 `E2E (ubuntu-24.04)` job 用 `make test-e2e ARGS="--docker"` 跑同一套用例（9 个场景），并用 `TZ=Asia/Shanghai` 让浏览器不在 UTC，从而覆盖展示时区偏好。
+CI 和需要独立依赖版本的本地复现可显式传入 `--docker`。此选项每次创建 PostgreSQL、Redis、Kafka 三个容器并使用随机端口。普通浏览器走查直接使用已启动的 Web 服务。同时运行开发栈和全栈 E2E 时使用独立的项目目录，分别保存进程登记和 Next.js 构建输出。
+浏览器套件构建真实服务，启动两个IAM及两个Console实例，并通过根启动脚本启动第一个实例及Web。CI 的 `E2E (ubuntu-24.04)` job 用 `make test-e2e ARGS="--docker"` 跑同一套用例，并用 `TZ=Asia/Shanghai` 让浏览器不在 UTC，从而覆盖展示时区偏好。
 浏览器环境先本地构建 Next.js，再通过 preview 入口启动并等待页面与 API 就绪；不连接正常开发库、不部署服务。它验证默认管理员初始化登录、新用户直接登录、主动改密、管理中心角色编辑、五种权限组合、跨标签退出、SSE撤权及越权访问拒绝。
 不读取或改写开发数据库，也不使用开发登录凭据。
 
@@ -128,7 +130,7 @@ E2E优先语义定位（role/label等）和用户可见结果，避免内部CSS�
 
 前端测试和工具配置由 `src/apps/web/` 维护：`vitest.config.mts`、`playwright.config.ts`、`tests/unit/`、`tests/e2e/`。根命令只编排 Go/脚本检查并转发 Web 命令，不持有前端测试依赖。
 
-构建与类型检查覆盖全部 Next.js 路由。E2E 使用真实 Cookie、CSRF、主动改密、角色权限、越权拒绝及 SSE 撤权。通过 `make test-e2e ARGS="--docker --grep <名称>"` 可定向运行。安装浏览器使用 `make install-browsers`。原作者站点统计、仓库星数和托管配置已移除；测试不依赖这些外部服务。
+构建与类型检查覆盖全部 Next.js 路由。E2E 使用真实 Cookie、CSRF、主动改密、角色权限、越权拒绝及 SSE 撤权。通过 `make test-e2e ARGS="--grep <名称>"` 可定向运行。安装浏览器使用 `make install-browsers`。原作者站点统计、仓库星数和托管配置已移除；测试不依赖这些外部服务。
 
 国际化回归还覆盖中英文词典键、ICU变量和复数、Dashboard真实组件的双语渲染。既有IAM浏览器用例在登录前显式选择中文，独立于默认语言；语言切换浏览器检查覆盖 Cookie 持久化、html lang、元信息和桌面菜单不换行。
 
@@ -144,12 +146,12 @@ make vet
 make lint-go
 make vuln-go
 make build
-make integration ARGS="--docker --race"
-make test-e2e ARGS="--docker"
-make test-e2e ARGS="--docker --manual"
+make integration ARGS="--race"
+make test-e2e
+make test-e2e ARGS="--manual"
 ```
 
-`make sqlc-vet` 需要可连接的 PostgreSQL（`SPX_TEST_POSTGRES_URL`，允许建库）：它建一个临时库、应用迁移、把每条生成查询 PREPARE 一次后删库；CI 的 `Static checks` job 带 `postgres:16` 服务跑同一步。
+`make sqlc-vet` 从进程环境或根 `.env` 读取 `SPX_TEST_POSTGRESQL_URL`，该连接须允许建库。它建一个独立临时库、应用迁移、把每条生成查询 PREPARE 一次后删除该库和本次的临时配置。CI 的 `Static checks` 任务用隔离的 PostgreSQL 运行同一步。
 
 `catalogs:check` 同时执行迁移边界检查（`scripts/migrations-check.mjs`）：每个模块的迁移只能引用自己 schema 内的对象，跨 schema `REFERENCES` 直接失败；其表驱动测试随 `make test`（`scripts/test-scripts.mjs`） 运行。
 
@@ -160,8 +162,8 @@ manual模式创建相同的独立双副本栈，在权限0600的临时文件中�
 
 ## 可信入口与生命周期回归
 
-全栈 E2E 直接启动 Next/IAM/Console。可以显式提供 `SPX_TEST_POSTGRES_URL`（允许创建临时库的管理连接）和 `SPX_TEST_REDIS_URL`，或显式 `--docker` 创建测试组件。远程 PG 只创建/删除本次随机临时库；Redis 只删除该库唯一账号/会话的精确键，不执行 FLUSH 或全平台前缀清理，也不删除共享来源桶。共用 DB 时来源桶仍共享计数并按原 TTL 到期，测试账号必须唯一。使用共享组件前需明确确认环境。备份恢复集成另需兼容版本的 pg_dump/pg_restore。
-Kafka 消费语义（最早位移、发布失败不提交、重启后重投）需要真实 broker：`SPX_TEST_KAFKA_BROKERS=host:9092 go test -tags=integration ./src/apps/ingest/internal/channel/kafkachannel/`。
+全栈 E2E 直接启动 Next/IAM/Console。可以提供上面的三项测试连接，或显式 `--docker` 创建测试组件。远程 PG 只创建/删除本次随机临时库；Redis 只删除该库唯一账号/会话的精确键，不执行 FLUSH 或全平台前缀清理，也不删除共享来源桶。共用 DB 时来源桶仍共享计数并按原 TTL 到期，测试账号必须唯一。使用共享组件前需明确确认环境。备份恢复集成另需兼容版本的 pg_dump/pg_restore。
+Kafka 集成入口的 `--docker` 模式会启动临时 broker，实测最早位移、发布失败重投和同实体的生产批次内顺序。使用自备隔离 broker 时：`SPX_TEST_KAFKA_BROKERS=host:9092 go test -tags=integration ./src/apps/ingest/internal/channel/kafkachannel/`。
 
 共享 HTTP 生命周期的真实监听测试覆盖后一个绑定失败释放前者、多个监听并行停止接收、默认及自定义 BaseContext 的活跃事件流观察退出取消，并保留自定义上下文值及无强杀退出；执行 `go test -race ./src/packages/go/httpx`。服务自身的资源仍由各 bootstrap 拥有，测试不停止已有进程。定向 Axios 边界测试使用真实本机 HTTP 响应覆盖迟到 401、错误密码及无效写入确认，不以手写 mock 实现代替网络/Axios 行为。
 

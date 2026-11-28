@@ -1,10 +1,11 @@
 import { useTranslations } from "next-intl";
 
-import { useWorkbenchData } from "./_components/workbench.config";
+import { PageHeader } from "../../components/page-header";
+import { AlertsTable } from "./_components/alerts-table/table";
 import { InsightCards } from "./_components/insight-cards";
 import { OperationalCards } from "./_components/operational-cards";
 import { OverviewCards } from "./_components/overview-cards";
-import { AlertsTable } from "./_components/alerts-table/table";
+import { useWorkbenchData } from "./_components/workbench.config";
 
 export default function Page() {
   const t = useTranslations("Dashboard");
@@ -12,10 +13,7 @@ export default function Page() {
   const { recentLeadsData } = useWorkbenchData();
   return (
     <div className="@container/main flex flex-col gap-4 md:gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-semibold text-2xl tracking-tight">{t("title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("sampleNotice")}</p>
-      </header>
+      <PageHeader title={t("title")} />
       <OverviewCards />
       <InsightCards />
       <OperationalCards />

@@ -1,5 +1,5 @@
 "use client";
-import { type ReactNode, useId } from "react";
+import { type ComponentProps, type ReactNode, useId, useRef } from "react";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslations } from "next-intl";
@@ -14,6 +14,15 @@ import {
 } from "react-hook-form";
 import type { z } from "zod";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,8 +42,7 @@ import { errorMessageKey } from "../iam/session";
 import { requestReauth } from "./reauth";
 import { SheetPanel } from "./sheet-panel";
 
-// 表单外壳有对话框与抽屉两种形态：字段少的确认走对话框，
-// 字段多的新建/编辑走右侧抽屉，正文独立滚动、底栏固定，绝不出现横向滚动。
+// 短表单使用对话框，长表单使用右侧抽屉，删除使用危险操作确认框。
 export function FormDialog<TInput extends FieldValues, TOutput extends FieldValues>({
   title,
   description,
@@ -46,6 +54,9 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
   submitDisabled = false,
   variant = "dialog",
   confirmVariant = "default",
+  submitLabel,
+  layout,
+  returnFocus,
 }: {
   title: string;
   description?: string;
@@ -55,16 +66,33 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
   submitDisabled?: boolean;
   onClose: () => void;
   onSubmit: (values: TOutput) => Promise<unknown>;
-  variant?: "dialog" | "sheet";
+  variant?: "dialog" | "sheet" | "alert";
   confirmVariant?: "default" | "destructive";
+  submitLabel?: string;
+  layout?: "product" | "management";
+  returnFocus?: HTMLElement | null;
 }) {
   const t = useTranslations("Common");
+  const compact = layout === "product";
   const errors = useTranslations("Errors");
   const descriptionID = useId();
   const formID = useId();
   const form = useForm<TInput, unknown, TOutput>({ resolver: zodResolver(schema), defaultValues });
   const businessState = useFormState({ control: form.control });
   const busy = businessState.isSubmitting;
+  const opener = useRef<HTMLElement | null>(null);
+  const rememberOpener = () => {
+    if (document.activeElement instanceof HTMLElement) opener.current = document.activeElement;
+  };
+  const restoreFocus = (event: Event) => {
+    const target = returnFocus ?? opener.current;
+    if (target?.isConnected) {
+      event.preventDefault();
+      requestAnimationFrame(() => {
+        if (target.isConnected) target.focus({ preventScroll: true });
+      });
+    }
+  };
 
   // save 在需要近期密码确认时先走全局确认框，确认成功后重放一次提交。
   // 表单本身不承载确认字段：同一个确认框覆盖抽屉与对话框两种形态。
@@ -88,6 +116,7 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
     <form
       id={formID}
       noValidate
+      className={compact ? "-mx-4 min-h-0 overflow-y-auto px-4 py-4" : undefined}
       onSubmit={form.handleSubmit(async (values) => {
         form.clearErrors("root");
         try {
@@ -114,16 +143,48 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
       </Button>
       <Button type="submit" form={formID} variant={confirmVariant} disabled={busy || submitDisabled}>
         {busy && <Spinner data-icon="inline-start" />}
-        {t("confirm")}
+        {submitLabel ?? t("confirm")}
       </Button>
     </>
   );
 
   if (variant === "sheet")
     return (
-      <SheetPanel title={title} description={description} footer={footer} onClose={close}>
-        <div className="px-6 py-5">{body}</div>
+      <SheetPanel
+        title={title}
+        description={description}
+        footer={footer}
+        onClose={close}
+        layout={layout === "management" ? layout : undefined}
+        returnFocus={returnFocus}
+      >
+        <div className="py-5">{body}</div>
       </SheetPanel>
+    );
+
+  if (variant === "alert" && description)
+    return (
+      <AlertDialog
+        open
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+      >
+        <AlertDialogContent onOpenAutoFocus={rememberOpener} onCloseAutoFocus={restoreFocus}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{title}</AlertDialogTitle>
+            <AlertDialogDescription>{description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {body}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+            <Button type="submit" form={formID} variant="destructive" disabled={busy || submitDisabled}>
+              {busy && <Spinner data-icon="inline-start" />}
+              {submitLabel ?? t("confirm")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     );
 
   return (
@@ -134,7 +195,10 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
       }}
     >
       <DialogContent
+        className={compact ? "flex max-h-[90dvh] flex-col gap-0 sm:max-w-lg" : undefined}
         aria-describedby={description ? descriptionID : undefined}
+        onOpenAutoFocus={rememberOpener}
+        onCloseAutoFocus={restoreFocus}
         onEscapeKeyDown={(event) => {
           // Base UI 的候选弹层与 Radix Dialog 分别处理 Escape，先让候选框关闭。
           const target = event.target;
@@ -146,12 +210,12 @@ export function FormDialog<TInput extends FieldValues, TOutput extends FieldValu
             event.preventDefault();
         }}
       >
-        <DialogHeader>
+        <DialogHeader className={compact ? "-mx-4 shrink-0 border-b px-4 pb-4 pr-12" : undefined}>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription id={descriptionID}>{description}</DialogDescription>}
         </DialogHeader>
         {body}
-        <DialogFooter>{footer}</DialogFooter>
+        <DialogFooter className={compact ? "shrink-0 bg-popover" : undefined}>{footer}</DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -164,36 +228,66 @@ export function FormInput({
   error,
   errorText,
   type = "text",
+  fullRow = false,
   description,
   placeholder,
+  autoComplete,
+  textareaVariant,
+  maxLength,
+  required,
+  readOnly,
 }: {
   label: string;
   registration: UseFormRegisterReturn;
   error?: FormError;
   errorText?: string;
+  fullRow?: boolean;
   type?: "text" | "password" | "email" | "textarea";
   description?: string;
   placeholder?: string;
+  autoComplete?: string;
+  textareaVariant?: ComponentProps<typeof Textarea>["variant"];
+  maxLength?: number;
+  required?: boolean;
+  readOnly?: boolean;
 }) {
   const id = useId();
   const errors = useTranslations("Errors");
+  const descriptionID = description ? `${id}-description` : undefined;
+  const errorID = error ? `${id}-error` : undefined;
+  const describedBy = [descriptionID, errorID].filter(Boolean).join(" ") || undefined;
   return (
-    <Field data-invalid={!!error}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    <Field data-full-row={fullRow} data-invalid={!!error}>
+      <FieldLabel htmlFor={id} required={required}>
+        {label}
+      </FieldLabel>
       {type === "textarea" ? (
-        <Textarea id={id} {...registration} aria-invalid={!!error} />
+        <Textarea
+          id={id}
+          {...registration}
+          variant={textareaVariant}
+          placeholder={placeholder}
+          readOnly={readOnly}
+          aria-required={required}
+          aria-invalid={!!error}
+          aria-describedby={describedBy}
+        />
       ) : (
         <Input
           id={id}
           {...registration}
           type={type}
           placeholder={placeholder}
-          autoComplete={type === "password" ? "new-password" : "off"}
+          autoComplete={autoComplete ?? (type === "password" ? "new-password" : "off")}
+          maxLength={maxLength}
+          readOnly={readOnly}
+          aria-required={required}
           aria-invalid={!!error}
+          aria-describedby={describedBy}
         />
       )}
-      {description && <FieldDescription>{description}</FieldDescription>}
-      {error && <FieldError>{errorText ?? errors("invalidRequest")}</FieldError>}
+      {description && <FieldDescription id={descriptionID}>{description}</FieldDescription>}
+      {error && <FieldError id={errorID}>{errorText ?? errors("invalidRequest")}</FieldError>}
     </Field>
   );
 }

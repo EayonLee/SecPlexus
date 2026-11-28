@@ -17,6 +17,7 @@ Desktop.ini
 logs/
 .spx/
 .sqlc-vet.yaml
+.sqlc-vet-*.yaml
 /tmp/
 /secrets/
 certs/

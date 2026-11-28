@@ -1,9 +1,8 @@
 # 02 · 技术架构
 
-> 实施状态：当前已落地的入口是 React Web、Go IAM/Console 和真实共享包；具体技术边界以各模块 README 为准。本文包含后续平台能力规划，未实现服务不作为本轮交付。
+> 当前实现包含 [Web](../../../src/apps/web/README.md)、[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md) 和 [Ingest](../../../src/apps/ingest/README.md)。下游关联、模型网关和 AI 运营能力在本文中按目标架构描述。
 
 
-> **版本说明（2026-11-07 修订）**：服务清单已按仓库现状修订。`iam`、`console`、`llm-gateway` 使用 Go（Gin；`llm-gateway` 内嵌 Bifrost `core` 作为供应商适配层），Web 使用 Next.js + React + shadcn，其余 Python 服务仍为规划、尚未实现。三个已有实现的模块（Web / IAM / Console）的身份、会话、权限与存储设计以各模块 README（[IAM](../../../src/apps/iam/README.md)、[Console](../../../src/apps/console/README.md)、[Web](../../../src/apps/web/README.md)）为准；`llm-gateway` 尚未实现，其职责边界见下表与 §1.1。下文尚未实现的服务只描述规划，不代表已交付能力。
 
 
 > 用大白话说：10 个自研服务 + 6 个开源组件跑在 PostgreSQL、Redis、Kafka 和 ClickHouse 上。数据从左边流进来（告警 + AI 流量两条入口），经过归并降噪变成告警和事件视图，AI 在图编排的骨架里研判，人批了以后 SOAR 执行处置回写回原系统。存储只上一个 PG（量级算过账），检索不自研发语言。
@@ -16,7 +15,7 @@
 
 | # | 服务 | 类型 | 语言 | 职责 | 为什么拆 |
 |---|---|---|---|---|---|
-| 1 | `ingestor` | 自研 | Go（Gin） | 一切外部数据的唯一入口：syslog/HTTP/Kafka 接入、格式探测、厂商模板映射为 OCSF、发布 Kafka | 改动最频繁（每接一家厂商就改），独立发版；突发流量独立扛；只收不发库，接收路径零阻塞 |
+| 1 | `ingest` | 自研 | Go（Gin） | 一切外部数据的唯一入口：Syslog、HTTP、Kafka 接入，按解析映射生成 OCSF 并发布 Kafka | 改动最频繁（每接一家厂商就改），独立扩容；接入点和映射存 PostgreSQL，事件走 Kafka |
 | 2 | `correlator` | 自研 | Python | D1 去重 → D2 窗口折叠 → D3 跨源关联 → 告警 + 事件视图（攻击链） | 吞吐瓶颈，纯 CPU，按实体标识分区保序扩容 |
 | 3 | `agent-runtime` | 自研 | Python（内嵌 NeMo Guardrails 库） | AI 推理业务逻辑：研判 Agent（图编排骨架）、NL→查询、**guardrail 检测 API**（ai-policy 的模型类检测调这里）。**模型调用本身经 `llm-gateway`** | **LLM 有 1/4 概率超时/无结果**【官方文档·腾讯实测】，必须和管线故障隔离——部署时独立容器 |
 | 4 | `soar` | 自研 | Python | **通用 workflow/playbook 引擎宿主**（orchestrator 库）、预案库、审批状态机（持久化暂停）、高危动作执行、按上游原生 ID 回写；通知（邮件/IM/工单）是 governed action | 安全边界：Agent 提议 / SOAR 执行的权限分界 |
@@ -35,7 +34,7 @@
 
 ### 1.2 每个模块的技术架构
 
-十一个模块分三类：**已交付的三个 Go/Web**、**规划中的五个 Python + 一个 Go（ingestor）**、**一个开源数据面**。下面只写"用什么技术、连什么存储、跟谁说话"，不写字段和接口细节。
+当前实现四个模块：Web、IAM、Console 和 Ingest。后续规划包括五个 Python 服务、模型网关与开源 AI 数据面。
 
 ```
                         ┌──────────── 已交付 ────────────┐
@@ -43,9 +42,10 @@
                         │             └─▶ Redis
                         └─▶ console(Go) ──▶ iam（服务凭证+用户上下文）
 
-                        ┌──────────── 规划中 ────────────┐
-  数据源 ──▶ ingestor(Go) ──▶ Kafka ──▶ correlator(Py) ──┬─▶ PostgreSQL（告警）
-                                                          └─▶ ClickHouse（遥测）
+  数据源 ──▶ ingest(Go) ──▶ Kafka ──▶ Ingest Event 存储进程 ──▶ ClickHouse（Event）
+
+                             ┌────── 下游规划 ──────┐
+                      Kafka ─┴─▶ correlator 消费组 ──▶ PostgreSQL（Alert、证据引用）
                               correlator ──▶ agent-runtime(Py) ──▶ llm-gateway(Go) ──▶ 供应商
                               agent-runtime ──▶ soar(Py) ──▶ 上游系统回写
                               scheduler(Py) ──定时──▶ 各模块
@@ -58,20 +58,18 @@
 |---|---|---|---|---|
 | `iam` | Go 1.27 + Gin 1.12；**sqlc 1.31 生成类型化查询**、pgx v5 做驱动（ORM 已移除，见 [数据访问层计划](../../plans/sqlc-data-layer/plan.md)）；SCS 管 Session；Argon2id 存密码；Cobra 管命令；Goose 管迁移 | PostgreSQL（自己的表 + 会话）<br>Redis（限流） | `/api/v1/iam/*`：用户接口走 Cookie + CSRF；服务接口走服务凭证 | 无（它是最底层） |
 | `console` | Go + Gin；**没有数据库** | 无自有存储 | `/api/v1/console/*`：全部请求先向 IAM 换授权结论 | `iam`（经 `iamclient`） |
-| `web` | Next 16 + React 19；next-intl 双语；TanStack Query 取数；Zod + RHF 管表单；Axios 请求；Tailwind 4 + shadcn | 无（浏览器端状态） | 页面 + 同源窄代理 `/api/v1/{module}/*` | `iam`、`console`（服务端转发） |
+| `ingest` | Go + Gin | PostgreSQL（接入点、解析规则及修订）<br>Redis（限流）<br>ClickHouse（可选 Event 存储） | `/api/v1/ingest/*`：管理面使用 IAM 会话，HTTP 推送使用接入点令牌 | IAM、Kafka |
+| `web` | Next 16 + React 19；next-intl 双语；TanStack Query 取数；Zod + RHF 管表单；Axios 请求；Tailwind 4 + shadcn | 无（浏览器端状态） | 页面 + 同源窄代理 `/api/v1/{module}/*` | `iam`、`console`、`ingest`（服务端转发） |
 
 **为什么 `console` 没有数据库**：它当前只做"验证身份与授权后的 SSE"。等案件和工作台真正实现时，再按模块自己的表加。AGENTS 里写死了这条：模块拥有自己的配置、启动和表——不预先建空库占位。
 
 **为什么 `iam` 的数据访问走 sqlc 而不是 ORM**：SQL 是唯一事实源，`sqlc generate` 产出类型化查询与行结构，列名、类型和参数在编译期受检查；schema 直接取 goose 迁移，不维护第二份 DDL；生成物入库并由 CI 的 `sqlc diff` 拦截漂移。这里的取舍与依据见 [数据访问规范](../../development/data-access.md) 与 [数据访问层改造计划](../../plans/sqlc-data-layer/plan.md)。ORM 已经移除：仓库层只由 sqlc 生成查询、显式事务与 `database/sql` 组成，底层始终是同一个 pgx 连接池；迁移仍由 Goose 显式执行，不做自动建表。
 
-#### 规划中（ingestor 与 Python 五件）
-
-这六个服务**还没有代码**，技术栈只定到"语言 + 关键库"这一层：
+#### 规划中的业务服务
 
 | 模块 | 语言/关键库 | 存储 | 跟谁说话 |
 |---|---|---|---|
-| `ingestor` | Go + Gin | Kafka（产出）<br>PostgreSQL（connectors 注册表） | 对外收数据；对内发 Kafka；不写业务数据 |
-| `correlator` | Python | PostgreSQL（告警/事件视图）<br>ClickHouse（遥测）<br>Redis（去重窗口） | 消费 Kafka；产出告警 |
+| `correlator` | Python | PostgreSQL（告警与证据引用）<br>Redis（去重窗口） | 独立消费标准 Event；产出 Alert 并保存证据引用 |
 | `agent-runtime` | Python + NeMo Guardrails | PostgreSQL（Ledger） | 调 `llm-gateway`；读告警 |
 | `soar` | Python + orchestrator 库 | PostgreSQL（预案、审批状态） | 执行处置；回写上游 |
 | `ai-policy` | Python | 内存规则 + Redis | 被 `ai-gateway` 回调；异步调 `agent-runtime` |
@@ -86,13 +84,13 @@
 
 #### 一条贯穿全局的规矩
 
-**模块之间只通过 HTTP 契约或消息队列通信，不读对方的表、不导入对方的 internal 包。** 已交付的两个 Go 服务就是这样：`console` 只拿 `iamclient`，不碰 IAM 的表和内部实现。
+**模块之间只通过 HTTP 契约或消息队列通信，不读对方的表、不导入对方的 internal 包。** Console 和 Ingest 通过 `iamclient` 调用 IAM。
 
 **两个容易混淆的区分**：`ai-gateway` 管的是**用户**的 AI 流量（防护对象），`llm-gateway` 管**我们自己**调模型的流量（内部出口）——方向相反不能共用；`soar` 与 `agent-runtime` 的分界是"想"和"做"——高危动作不能跑在 AI 进程里。
 
-**语言版图**：当前 Web 使用 TypeScript/React，IAM、Console 与规划的 llm-gateway 使用 Go，根 Go module 统一管理服务及共享包。后续 AI 能力可按实际生态选择 Python；跨语言依赖通过公开契约隔离，不因语言选择增加不存在的服务或生成多套协议真源。Python 模块调用模型统一经 llm-gateway 的 HTTP 接口，不内嵌 Go 库，也不各自持有供应商凭据。workflow/playbook 等后续服务的选择由各自需求方案确认。
+**语言版图**：当前 Web 使用 TypeScript/React，IAM、Console、Ingest 与规划的 llm-gateway 使用 Go，根 Go module 统一管理服务及共享包。后续 AI 能力可按实际生态选择 Python；跨语言依赖通过公开契约隔离，不因语言选择增加不存在的服务或生成多套协议真源。Python 模块调用模型统一经 llm-gateway 的 HTTP 接口，不内嵌 Go 库，也不各自持有供应商凭据。workflow/playbook 等后续服务的选择由各自需求方案确认。
 
-**组件 / 角色 / 镜像**：每个模块是一个独立的部署单元，独立启动（Go 模块由 `ARG APP` 参数化构建，共用一个 Dockerfile；Web 独立执行 `next build`）。**不使用"一个镜像 + 角色开关启动所有服务"的多角色模式**——那会让故障隔离和独立扩容失效。当前交付的 Go 模块为 `iam`、`console`，规划中的 `llm-gateway` 同样通过 `ARG APP=llm-gateway` 构建，不新增 Dockerfile
+**组件 / 角色 / 镜像**：每个模块是一个独立的部署单元，独立启动（Go 模块由 `ARG APP` 参数化构建，共用一个 Dockerfile；Web 独立执行 `next build`）。**不使用"一个镜像 + 角色开关启动所有服务"的多角色模式**——那会让故障隔离和独立扩容失效。当前交付的 Go 模块为 `iam`、`console`、`ingest`，规划中的 `llm-gateway` 同样通过 `ARG APP=llm-gateway` 构建，不新增 Dockerfile
 
 ## 2. 数据流：以数据流入为主轴
 
@@ -120,11 +118,11 @@
         ▼                                         ▼
 ════════════ 数据处理主链路（自上而下）══════════════
   ┌─────────────────────────────────────────────────────┐
-  │ ① ingestor —— 接入 · 归一化                           │
+  │ ① ingest —— 接入 · 归一化                           │
   │    OCSF 归一化 · 形状判别 · L0/L1 校验                  │
   │    raw payload → 对象存储（永不进主表）                  │
   └────────────────────────┬────────────────────────────┘
-                           │ Kafka（实体标识作 partition key，保序）
+                           │ Kafka（实体分区）；独立写入组 → ClickHouse Event
   ┌────────────────────────▼────────────────────────────┐
   │ ② correlator —— 降噪 · 关联                            │
   │    D1 去重 → D2 窗口折叠 → D3 跨源关联 → 攻击链滚动聚合    │
@@ -157,7 +155,7 @@
 
 三条设计要点：
 
-1. **两条数据源的汇合点在 ①**——`ai-policy` 拦下的注入事件回流 `ingestor`，从此和 EDR 告警走完全相同的链路。"防护对象 = 运营对象"在架构上就这一条线。
+1. **两条数据源的汇合点在 ①**——`ai-policy` 拦下的注入事件回流 `ingest`，从此和 EDR 告警走完全相同的链路。"防护对象 = 运营对象"在架构上就这一条线。
 2. **跨阶段连接全靠队列不靠调用**——①→② 走 Kafka，②→③ 走 Case 事件；任何一级慢了或挂了，上游照常摄入，恢复后接着跑。
 3. **`worker` 和 `agent` 必须分进程不是洁癖**——LLM 卡住会阻塞去重；且两者扩容维度完全不同（CPU 密集 vs 网络等待密集）。
 
@@ -189,7 +187,11 @@
 
 ### 3.1 核心实体
 
+Ingest 校验 Event 后发布 Kafka。独立 Event 存储进程通过专用组写入 ClickHouse，在存储或隔离确认后提交位移。未来 correlator 使用自己的消费组生成 Alert 并写 PostgreSQL。各模块管理自身迁移和领域 API。公共包发布经过版本化的契约派生物，前端通过字段查询 API 获取运行中支持的目录。[Event / Alert 业务边界](../../plans/event-contract/spec.md) · [Event 表字段、排序键与重放](../../plans/event-contract/storage.md)
+
 ```
+events            ClickHouse 标准 Event；所有通过校验的观测均可写入和检索
+alert_events      PostgreSQL 告警证据关系；引用 event_id、事件时间及类别
 assets            资产（含 AI 资产）+ 指纹；关键性等级（处置门控用）
 alerts            告警：OCSF 2004 结构 + 实体抽取 + ATT&CK + chain 元数据
                   + source_refs[]（上游原生 ID 映射，一对多）
@@ -206,12 +208,12 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 **三条贯穿性设计**：
 
 1. **业务表用不可变 UUID 主键，按时间 + 实体标识分区**（模型见 §3.4）。这是"架构上支持未来多集群"的真正含义——不是现在就上多集群，而是现在不做未来拆不动的事：届时按时间窗口或 hash 拆分都不用改主键结构。不引入额外的范围列。
-2. **保留策略 = 工作记忆模型**（详见 §6.1）：归一化告警 90 天滚动窗口（按天分区过期自动清）、raw payload 7–30 天可配、事件视图 TTL 滚动；**案件、调查 Ledger、机构记忆/影子决策永久**（大脑的产出与经验）。
+2. **保留策略 = 工作记忆模型**（详见 §6.1）：ClickHouse 的标准 Event 永久保存。规划中的告警与事件视图按各自规格管理生命周期；**案件、调查 Ledger、机构记忆/影子决策永久**（大脑的产出与经验）。
 3. **证据自包含原则（由 2 推出，防止 90 天清理割裂永久案件）**：案件和 Ledger 在结案时保存**证据快照**——研判依据的关键字段、source_refs、原始日志摘要冗余进 Ledger（它本来就存 prompt/工具调用/返回全文，天然自包含）。告警行过期清理**不影响**任何永久对象的完整性：案件回看证据读快照、处置回写读案件上冗余的 source_refs、影子统计读永久的 shadow_decisions 表。一句话：**告警是可再生的原料，案件和 Ledger 才是账本。**
 
-### 3.2 归一化：OCSF 2004，不追全量映射
+### 3.2 标准事件与检测发现
 
-**【官方文档】** OCSF v1.9.0（当前稳定版）2024-11 捐给 Linux Foundation，2026-06 成为 ITU 国际标准；`security_finding`(2001) **已废弃**（since 1.1.0），新项目直接用 `detection_finding`(**2004**)。
+现有 Ingest 声明 OCSF 1.1.0，新契约目标为 1.10.0。每条 Event 按实际类别校验；网络流量首批采用 Network Activity。Detection Finding（2004）用于表达检测发现。平台 Alert 另有运营 ID、状态、依据和证据引用。[事件契约](../../plans/event-contract/spec.md)
 
 四个必抄的机制【官方文档·OCSF 2004 定义】：
 
@@ -368,7 +370,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 | 数据 | 角色 | 保留 |
 |---|---|---|
 | 归一化告警（PostgreSQL） | 大脑的输入 | **工作记忆：默认 90 天滚动窗口（可配），按天分区过期自动清理**。要考古？跳回用户自己的 SIEM 查，我们保留跳转链接。案件的完整性不依赖告警行存活——证据快照自包含（见 §3.1 第 3 条） |
-| 原始日志 / 归一化事件（ClickHouse） | 大脑的原料，含用户直接投递的日志 | 按天分区 TTL 滚动过期；量由用户决定，不是我们的资产 |
+| 原始日志 / 归一化事件（ClickHouse） | 大脑的原料，含用户直接投递的日志 | 标准 Event 及其正文永久保留，按 UTC 事件发生月分区 |
 | raw payload | 归一化回放依据 | 7–30 天可配 |
 | 事件视图 | 研判分组 | TTL 滚动，可重建（不变） |
 | **案件 Case** | 大脑的产出 | **永久** |
@@ -439,7 +441,7 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 | 数据 | 估算 |
 |---|---|
 | 归一化告警 | 降噪后 10 万条/天 × ~1KB × 90 天 ≈ **9–27GB** |
-| 原始日志（若用户提供） | 按实际量单独评估，走 ClickHouse，按天分区 TTL |
+| 原始日志（若用户提供） | 按实际量单独评估，随标准 Event 保存在 ClickHouse，按 UTC 月分区 |
 | 行业均值参考 | 约 3,000–4,500 条告警/天（04 §5.1），10 万/天是我们的设计容量 |
 
 说明：以上为设计容量，需在实现时通过索引、分区和真实负载验证。若告警量增长到 PostgreSQL 无法承受（单一部署 > 100 万条/天），首先引入的是 Panther 式的拆分——告警核心状态留在 PG、告警内容外置到 ClickHouse——而不是把整张告警表迁走。
@@ -473,7 +475,8 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 | `httpx` | 请求绑定与通用中间件 | 所有 Gin 服务共用，各自实现必然漂移 |
 | `logging` | 结构化日志 | 日志格式要全平台一致才能关联排查 |
 | `configuration` | YAML + 环境变量加载与校验 | 配置解析规则只能有一份 |
-| `cache` | Redis 客户端与类型化 key 模板 | key 前缀集中定义，避免散落拼接 |
+| `redis` | Redis 客户端与类型化 key 模板 | key 前缀集中定义，避免散落拼接 |
+| `postgresql` | PostgreSQL 连接配置 | 共用连接串构造与校验，模块持有自己的仓储 |
 | `iamclient` | IAM 授权接口的客户端 | 调用方不该碰 IAM 私有实现或表 |
 
 **规划中（随对应服务落地）**：
@@ -481,8 +484,8 @@ entities          实体档案（IP/账号/主机/hash）：画像、历史、�
 | 包 | 内容 | 为什么是库 |
 |---|---|---|
 | `llmclient` | llm-gateway 的客户端 | 与 `iamclient` 同款：类型化请求、错误映射、不暴露 Bifrost 类型 |
-| `contracts` | OCSF 模型、枚举、查询 IR、RequestContext | 全部服务共用，服务化只有网络开销 |
-| `connectors` | 厂商模板 + 归一化 profile + 回归样本 | 只被 ingestor 引用，独立版本化 |
+| Event / Alert 消费类型 | 从 Ingest / correlator 各自维护的版本化契约派生，按实际消费者发布 | 多个模块共享字段含义与枚举，运行时可离线解释已知版本 |
+| `connectors` | 厂商模板 + 归一化 profile + 回归样本 | 只被 ingest 引用，独立版本化 |
 | `orchestrator` | workflow 引擎：10 类节点、持久化审批暂停、幂等键 | correlator/agent/soar 复用；处置动作是 tool 节点调用的工具，不是节点类型——否则每接一个厂商就要改引擎 |
 | `audit` | 追加式哈希链审计 | 审计必须内嵌在每个写入点，不能是旁路服务 |
 

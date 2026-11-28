@@ -54,13 +54,10 @@ func TestDevicePushDoesNotWriteAudit(t *testing.T) {
 	t.Cleanup(cancel)
 	go func() { _ = line.Start(ctx) }()
 
-	server := httptest.NewServer(router.RootHandler(&handler.Server{}, router.Deps{
-		Registry: registry,
-		Limiter:  allowAllLimiter{},
-		Pipeline: line,
-		MaxBody:  8 << 20,
-		IAM:      client,
-		Admin:    &fakeStore{},
+	server := httptest.NewServer(router.Handler(&handler.Server{}, router.Deps{
+		Push:  devicePush(registry, line),
+		IAM:   client,
+		Admin: &handler.Admin{Store: &fakeStore{}},
 	}))
 	t.Cleanup(server.Close)
 

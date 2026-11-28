@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { clearRuntime, processAlive, readRuntime, runtimeFile, writeRuntime } from './runtime.mjs';
+import { assertStackAvailable, clearRuntime, processAlive, readRuntime, runtimeFile, writeRuntime } from './runtime.mjs';
 
 function workspace(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'spx-runtime-'));
@@ -34,4 +34,16 @@ test('runtime registry ignores malformed state and invalid entries', (t) => {
 test('processAlive distinguishes the current process from a missing pid', () => {
   assert.equal(processAlive(process.pid), true);
   assert.equal(processAlive(99999999), false);
+});
+
+test('full-stack preflight detects either owner of this checkout before provisioning', (t) => {
+  const root = workspace(t);
+  writeRuntime(root, [{ pid: process.pid, module: 'iam' }]);
+  assert.throws(() => assertStackAvailable(root, true));
+  clearRuntime(root);
+  const directory = path.join(root, 'src/apps/web/.next/dev');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(path.join(directory, 'lock'), JSON.stringify({ pid: process.pid }));
+  assert.throws(() => assertStackAvailable(root, true));
+  assert.doesNotThrow(() => assertStackAvailable(root, false));
 });

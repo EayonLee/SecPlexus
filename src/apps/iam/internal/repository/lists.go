@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -22,7 +23,15 @@ type UserSummary struct {
 	Status      enum.UserStatus // 当前启用状态，取值见 enum.UserStatus。
 	Configured  bool            // 是否为配置托管的内置管理员。
 	AuthEpoch   int64           // 账号版本。
+	CreatedAt   time.Time       // 创建时间。
 	Roles       []RoleRef       // 直接持有的角色，按名称排序。
+}
+
+// UserListFilter 按名称、状态和直接分配角色筛选用户。
+type UserListFilter struct {
+	Query  string
+	Status enum.UserStatus
+	RoleID string
 }
 
 // UserPage 是一页用户；Total 是同一筛选条件下的总行数。
@@ -44,7 +53,7 @@ type RolePage struct {
 // AuditEvent 是一条审计事实。游标边界就是 OccurredAt 与 ID，服务端自己编码。
 type AuditEvent struct {
 	ID         uuid.UUID       // 事件标识。
-	OccurredAt time.Time       // 事件时间，数据库时钟。
+	OccurredAt time.Time       // 审计事实发生时间。
 	ActorType  string          // 触发者类型，取值见 enum.ActorType。
 	ActorName  *string         // 触发者名称；系统事件为空。
 	Action     string          // 稳定动作名，形如 iam.auth.login。
@@ -63,14 +72,16 @@ func likePattern(value string) string {
 }
 
 // ListUsers 按用户名、显示名或邮箱模糊搜索用户，并附带角色投影。
-func ListUsers(ctx context.Context, db DB, limit, offset int, query string) (UserPage, error) {
+func ListUsers(ctx context.Context, db DB, limit, offset int, filter UserListFilter) (UserPage, error) {
 	pattern := ""
-	if query != "" {
-		pattern = likePattern(query)
+	if filter.Query != "" {
+		pattern = likePattern(filter.Query)
 	}
 
 	rows, err := queries(db).ListUsers(ctx, sqlcgen.ListUsersParams{
 		Query:      pattern,
+		Status:     string(filter.Status),
+		RoleID:     filter.RoleID,
 		PageLimit:  int32(limit),
 		PageOffset: int32(offset),
 	})
@@ -89,6 +100,7 @@ func ListUsers(ctx context.Context, db DB, limit, offset int, query string) (Use
 			Status:      row.Status,
 			Configured:  row.Configured,
 			AuthEpoch:   row.AuthEpoch,
+			CreatedAt:   row.CreatedAt.UTC(),
 		}
 
 		if row.Email.Valid {
@@ -125,6 +137,7 @@ func UserByID(ctx context.Context, db DB, id uuid.UUID) (UserSummary, error) {
 		Status:      row.Status,
 		Configured:  row.Configured,
 		AuthEpoch:   row.AuthEpoch,
+		CreatedAt:   row.CreatedAt.UTC(),
 	}
 
 	if row.Email.Valid {
@@ -165,9 +178,24 @@ func rolesByUserIDs(ctx context.Context, db DB, ids []uuid.UUID) (map[uuid.UUID]
 	return grouped, nil
 }
 
-// ListRoles 返回全局角色，内置角色也在列表中且排序稳定。
-func ListRoles(ctx context.Context, db DB, limit, offset int) (RolePage, error) {
-	rows, err := queries(db).ListRoles(ctx, sqlcgen.ListRolesParams{PageLimit: int32(limit), PageOffset: int32(offset)})
+// ListRoles 按名称模糊搜索全局角色，内置角色排在自定义角色前。
+func ListRoles(ctx context.Context, db DB, limit, offset int, query string, builtin *bool) (RolePage, error) {
+	pattern := ""
+	if query != "" {
+		pattern = likePattern(query)
+	}
+
+	var scope sql.NullBool
+	if builtin != nil {
+		scope = sql.NullBool{Bool: *builtin, Valid: true}
+	}
+
+	rows, err := queries(db).ListRoles(ctx, sqlcgen.ListRolesParams{
+		Builtin:    scope,
+		Query:      pattern,
+		PageLimit:  int32(limit),
+		PageOffset: int32(offset),
+	})
 	if err != nil {
 		return RolePage{}, err
 	}
@@ -182,6 +210,7 @@ func ListRoles(ctx context.Context, db DB, limit, offset int) (RolePage, error) 
 			Description: row.Description,
 			Builtin:     row.Builtin,
 			UserCount:   row.UserCount,
+			UpdatedAt:   row.UpdatedAt.UTC(),
 		})
 		ids = append(ids, row.ID)
 	}
@@ -211,6 +240,7 @@ func RoleByID(ctx context.Context, db DB, id uuid.UUID) (Role, error) {
 		Description: row.Description,
 		Builtin:     row.Builtin,
 		UserCount:   row.UserCount,
+		UpdatedAt:   row.UpdatedAt.UTC(),
 	}
 
 	granted, err := permissionsByRoleIDs(ctx, db, []uuid.UUID{id})
@@ -249,10 +279,10 @@ func permissionsByRoleIDs(ctx context.Context, db DB, ids []uuid.UUID) (map[uuid
 
 // AuditFilter 是审计列表的服务端筛选条件；可见范围由 iam.audit.read 决定，没有组织维度。
 type AuditFilter struct {
-	Actor   string // 触发者名称模糊匹配；空串表示不筛选。
-	Outcome string // 结果精确匹配；空串表示不筛选。
-	From    string // 起始日期（含），格式 YYYY-MM-DD；空串表示不限。
-	To      string // 结束日期（含）；空串表示不限。
+	Actor   string     // 触发者名称模糊匹配；空串表示不筛选。
+	Outcome string     // 结果精确匹配；空串表示不筛选。
+	From    *time.Time // 起始时刻（含）；nil 表示不限。
+	To      *time.Time // 结束时刻（不含）；nil 表示不限。
 }
 
 // AuditPage 是审计列表的一页；NextCursor 为空表示没有更早的事件。
@@ -297,9 +327,14 @@ func ListAuditEvents(ctx context.Context, db DB, filter AuditFilter, limit int, 
 	page := AuditPage{Items: []AuditEvent{}}
 	params := sqlcgen.ListAuditEventsParams{
 		Outcome:   filter.Outcome,
-		FromDate:  filter.From,
-		ToDate:    filter.To,
 		PageLimit: int32(limit + 1),
+	}
+
+	if filter.From != nil {
+		params.FromTime = sql.NullTime{Time: filter.From.UTC(), Valid: true}
+	}
+	if filter.To != nil {
+		params.ToTime = sql.NullTime{Time: filter.To.UTC(), Valid: true}
 	}
 
 	if filter.Actor != "" {

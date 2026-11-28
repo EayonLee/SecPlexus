@@ -1,6 +1,6 @@
 # Agent Guidelines for SecPlexus
 
-Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidance in skills. Merge duplicates; omit task history.
+Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidance in skills. Each owning app README explains its contracts, authoritative definitions, storage and drift checks, upgrade/recovery path, and diagnostic entry points as applicable. Update it with behavior changes and label planned capabilities explicitly. Merge duplicates; omit task history.
 
 ## Workflow
 
@@ -14,12 +14,14 @@ Keep lasting rules here, product behavior in Specs/READMEs, and detailed guidanc
 ## Project conventions
 
 - Brand `SecPlexus`, abbreviation `spx`, environment prefix `SPX_`. Apps: `src/apps`; real shared code: `src/packages`; module-owned HTTP models and APIs. No cross-module private access or manual edits to generated files.
+- All Go apps follow the [backend structure and Gin routing guide](docs/development/backend-structure.md). Use a single Gin engine, business route groups and module-owned dependency assembly. Name storage by the object it persists, keep protocol options separate from business consumers, and use the shared Redis connection package with module-owned Redis key semantics. Apply only the directories required by the app's responsibilities.
 - APIs: `/api/v1/{module}/...` on one listener per service; application HTTP with external HTTPS terminated by a reverse proxy. Each route declares public, user-session, or service-credential authentication; service authorization also validates the original user session and permissions. Register routes in `internal/router`; synchronize module models and callers. Shared responses use `src/packages/go/result`, request binding uses `httpx`, and common middleware uses `httpx/middleware`; define HTTP behavior in native Go/Gin and module documentation, including streaming/empty responses. Default same-origin; preserve server authorization and credentialed CORS restrictions.
 - Go HTTP uses native Gin routes/handlers and authored module DTOs; generated documentation never owns runtime binding. Use native groups, errors/recovery, trusted proxies and streaming; keep IAM session commit protection narrow. Credential use cases accept typed values; do not add HTTP replay or a second authentication/session stack.
-- Use native Gin routes and module-owned Go DTOs. Web uses Axios, module API functions, Zod-inferred types, TanStack Query and RHF; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Only shared result-code and permission constants are generated from their owning business catalogs; do not hand-edit those exports.
+- Web uses Axios, module API functions, Zod-inferred types, TanStack Query and RHF; keep password operations out of MutationCache. Identity changes cancel and clear scoped queries. Only shared result-code and permission constants are generated from their owning business catalogs; do not hand-edit those exports.
 - Console owns security operations business and necessary operational query aggregation. It is not a mandatory gateway for other modules. IAM owns identity and authorization; route its APIs through the same-origin entry without duplicating handlers, DTOs or business rules in Console. See the Console README for ownership boundaries.
 - `llm-gateway` owns every outbound model call and all provider credentials. No other module holds a provider API key or calls a provider directly; they call `llm-gateway` through `src/packages/go/llmclient` using platform role aliases, never provider model identifiers. Provider key encryption and its key material stay inside that module. See the service table in [technical architecture](docs/design/architecture/02-technical-architecture.md).
-- Modules own config, startup, and tables. Root .env.example is the unified setup template; root startup loads private .env and passes scoped environment variables. Keep bind addresses distinct from shared service HOST/PORT targets, and Web listener port distinct from its public origin. Go uses structured `config.yaml` with declarative `${VAR-default}` expressions, expanded per parsed scalar by the mature POSIX parameter-expansion component before Viper/mapstructure decoding; variable mappings and defaults belong only to module YAML, without Go binding/default tables; Web uses native environment configuration. Validate configuration at loading, derive endpoints, and centralize typed cache keys. All modules share one PostgreSQL and one Redis; distinguish data by table and key prefix, never by a second connection profile. See [configuration](docs/development/configuration.md).
+- Modules own config, startup, and tables. Root .env.example is the unified setup template; root startup loads private .env and passes scoped environment variables. Derive local and Compose service addresses by default. Separate listen addresses from client targets only where deployment requires an override. Derive the local browser origin from the Web port. Go uses structured `config.yaml` with declarative `${VAR-default}` expressions, expanded per parsed scalar by the mature POSIX parameter-expansion component before Viper/mapstructure decoding; variable mappings and defaults belong only to module YAML, without Go binding/default tables; Web uses native environment configuration. Validate configuration at loading, derive endpoints, and centralize typed cache keys. All modules use the deployment’s shared PostgreSQL and Redis settings. Modules using ClickHouse or Kafka use the shared connection settings and own their business resources and role credentials. See [configuration](docs/development/configuration.md).
+- Keep supported deployment settings discoverable in the root template. Group settings by purpose within the owning component. Keep common assignments and optional examples for the same purpose together. Align the order of shared groups across modules and use matching section banners and group order in both environment files. Leave one blank line between groups. Put concise comments above the option or group and explain units, empty values and deployment scope where relevant. Check keys, defaults, and effective consumers across module config, Compose, and documentation. Leave settings with no real default blank.
 - Read environment variables only during configuration loading. Assemble dependencies at startup and pass explicitly; context carries cancellation, deadlines, and request data, not dependencies. Extract shared code only for actual cross-app reuse.
 - Servers are always UTC. Store and transmit time in `timestamptz`/UTC, call `.UTC()` before persisting, and never read `time.Local`. A deployment-level `TZ` environment variable must not change server behaviour: a local offset leaks into serialized timestamps and log lines while the database stays UTC, and it still cannot express two users reading the same record in different zones. Time zone is a display concern, resolved from the user's preference and then the browser; see [the time zone plan](docs/plans/timezone-and-user-preference/spec.md).
 - Duration semantics (session idle, lockout window, retention) use intervals, not dates, and are independent of time zone. A scheduled business entity that means "09:00 local" must carry its own `timezone` column bound at creation, not read a global setting.
@@ -43,6 +45,13 @@ References: [Kubernetes logging conventions](https://github.com/kubernetes/commu
 
 ## Style Guide
 
+### Industry standards and domain semantics
+
+- Apply this rule across business workflows, architecture, data models, protocols, interfaces, naming, and localization. Prefer the mature, broadly adopted standard that fits the domain and the systems that exchange or consume the data. For significant decisions, record the adopted version, the exact primary reference, and the reason it fits in the owning spec or README. Where a formal standard leaves a gap, verify established practice against official documentation or upstream code and identify platform-specific decisions explicitly.
+- Preserve the adopted definitions, including identifiers, field meaning, types, units, cardinality, enum codes and their scope, and validation conditions. Specify local extensions and translation between contracts at their ownership boundaries. Published semantic changes need a compatibility decision and, where applicable, a migration that includes consumers.
+- Maintain an authoritative, versioned definition under the owning module. Align application code, APIs, configuration, database definitions, messages, UI, documentation, queries and model integrations with it. Derive or verify their representations through contract tests and drift checks. A label change follows the terminology review; a change to what data means or how it is interpreted follows contract review.
+- Give each concept one canonical term per supported language, using established professional usage and verifying it against the adopted definition. Keep display labels and search aliases separate from stable machine identifiers. Reuse labels and accessibility messages across screens. Trace terminology changes through the affected code, storage, configuration, tests and documentation. See the [security terminology examples](docs/development/backend-structure.md#安全领域术语与来源).
+
 ### Complexity and validation
 
 - Keep things in one function unless composable or reusable
@@ -62,7 +71,7 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 
 - Run `gofmt`/`goimports`. Leave blank lines between functions/methods (before their doc comments) and between logical steps. Use idiomatic names, explicit errors/context, and interfaces only for concrete boundaries; separate routing from handlers.
 - Use Chinese Go comments: exported types/functions start with their names; key fields explain purpose, units, and constraints, aligned by `gofmt`. Explain non-obvious authentication, transaction, and concurrency constraints, not every statement.
-- Data access follows [data access](docs/development/data-access.md): SQL lives in module `queries/*.sql` and is compiled by sqlc (PostgreSQL); repositories return typed rows, never API JSON; `service` depends on a store interface, not a driver. ClickHouse access rules are registered there and stay disabled until the correlator plan starts.
+- Data access follows [data access](docs/development/data-access.md): SQL lives in module `queries/*.sql` and is compiled by sqlc (PostgreSQL); repositories return typed rows, never API JSON; `service` depends on a store interface, not a driver. Ingest owns the ClickHouse Event store and its versioned field catalog. Physical projections reference catalog paths, and ClickHouse changes require checked DDL. Use the documented structure check before running the independent event writer. See the [Event storage design](docs/plans/event-contract/storage.md).
 - Database columns use `snake_case`. Table structure, types, closed value sets, comments, indexes and migration rules follow [database design](docs/development/database-design.md); module layout, layering, dependency direction and naming follow [backend structure](docs/development/backend-structure.md). Both apply to every future module, not only IAM.
 - A closed set of stored values uses a `CHECK` constraint plus typed constants in the module's `internal/enum` package; Go comparisons and assignments use those constants, never string literals. HTTP `oneof` binding tags restate the values because tags are compile-time strings, so a test asserts the tag vocabulary equals the constant set.
 - Every table and every business column carries a `COMMENT ON` statement explaining meaning, value range and constraint, added by a forward migration rather than by editing an applied one.
@@ -73,7 +82,7 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 - Behavior changes start with a focused failing test. Unit: rules/boundaries; integration: real component contracts; E2E: core flows/access boundaries. Avoid mocks, duplicated implementation logic, and permanent integration/E2E cases for temporary diagnostics.
 - Every change must satisfy the required test layer in [the change-type table](docs/development/testing.md#改动类型与必需测试层). Reading that table is part of implementing a change, not a follow-up. A layer missing from a change is an unfinished change, not a smaller one.
 - Never delete, skip, or weaken a failing test to make a run pass. Never assert implementation details or human-facing prose in place of observable behavior.
-- Isolate test resources, await readiness, and clean up only owned resources. No sleeps/retries masking failure. Run relevant checks and report actual results/gaps; see [testing](docs/development/testing.md) for commands and standards.
+- Isolate test resources, await readiness, and clean up only owned resources. For local browser checks, use the running app. For full-stack tests, prefer explicitly configured test endpoints. Reserve `--docker` for CI or deliberate container-based reproduction. No sleeps/retries masking failure. Run relevant checks and report actual results/gaps; see [testing](docs/development/testing.md) for commands and standards.
 - Branches: at most three hyphen-separated words, no slashes/type prefixes.
 - Create one short-lived branch per change from the latest `main`; keep review fixes on the same PR branch and delete it after merge.
 - Commits/PRs: `type(scope): summary`; optional scope; types `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
@@ -88,21 +97,32 @@ Preserve required authorization, state checks, transactions, errors, and cleanup
 - This is the user's ongoing authorization for the default delegation approach; delegation itself does not require repeated confirmation. Action permissions and high-risk approvals remain subject to the existing rules. If the user explicitly specifies a different arrangement for the current turn, follow that instruction.
 
 
-## Web template baseline
+## Web template and business references
 
-- Web uses Next.js and the established shadcn component, style, theme and font baseline. Keep the CRM V1-based workbench and real IAM routes; import additional template features only when requested, including their necessary dependency closure, without overwriting shared components or project configuration. Project functionality, text and deployment metadata belong to SecPlexus. Frontend test configuration and dependencies live under Web; project skills remain in the root .agents/skills. Read installed Next.js docs before framework changes. See [Web](src/apps/web/README.md) for routes and template adoption.
+- The visual source for every Web page is `next-shadcn-admin-dashboard`. Open the closest template page and its local components before editing. Reuse its layout, toolbar, tables, cards, forms and button variants in Next.js/shadcn. Keep SecPlexus routes, IAM permissions, next-intl, theme preferences and live data.
+- Use the SOC business reference for capability boundaries, operator tasks, workflow order, validation and diagnostics. Compose these tasks with the Web template. Record the template block and any product-specific difference in the page's existing Spec or Web README.
+- Use `PageHeader` for a route header and `PageTitle` for a standalone primary heading. The workbench is the typography reference for menu pages, settings and drill-downs. A page-level action belongs in the header; filtering, pagination and row actions stay with the list. Section and dialog titles retain their own hierarchy.
+- The shell owns full-width/centered layout. Lists reuse `ListSurface`, `Toolbar` and `CollectionBoundary`. When a page adds local navigation next to a table, let its list container determine which columns fit. Verify the record name and actions remain reachable with both sidebars open and at narrow widths. Business drawers reuse `SheetPanel` or `FormDialog variant="sheet"`. Keep authorization, filtered/initial empty states, retry, keyboard focus and responsive form layout when adopting template markup.
+- The root theme owns surface and interaction tokens. Authenticated routes inherit the shell's canvas and gutters. Use `Card` for grouped detail and editor content, `ListSurface` for collections, and shared overlay primitives for popover surfaces. Table sections inherit their list surface. Keep route-specific styles limited to layout and behavior.
+- A sidebar group contains one link per independently authorized task. Use the same route catalog for visibility, deep-link access and current section. Keep sibling management lists out of in-page tabs.
+- Lists use `SearchField`, `ListSelect`, `ListDateFilter` and `ListPagination`. Use the parsing-rule list footer as the shared pagination baseline. Show filter names beside the selected value. Searchable list filters use `ListSearchTrigger`, `ListSearchContent`, `ListSearchOption` and `useListSearchState` with the shadcn Combobox. They share the trigger styling of `ListSelect`, show the current selection on the trigger, and open with an empty, focused search field. The popup sizes to its options within the viewport. Options stay on one line and truncate while retaining their complete accessible names. Apply the same truncation to overflowing search text. Show selection counts only for non-empty selections. Form choices use the shadcn Select or searchable Combobox. Use shadcn Button and Table for actions and records. Keep the transport contract: cursor lists expose previous/next, known totals can also expose first/last. See the [list patterns](src/apps/web/README.md#list-controls-and-navigation).
+- All business tables use shared `TableHead` and `TableCell`. Headers and data align left in every column, including numeric, selection and action columns. Align the inner row controls with that same edge. Use a compact action column at the end of the row and preserve access to actions on narrow screens. Browser checks verify rendered alignment across routes.
+- Exercise an open popover or listbox with the keyboard and apply its selection against the real endpoint before accepting a filter change. A closed trigger screenshot cannot verify the menu.
+- Web owns frontend test configuration. Read installed Next.js docs before framework changes. See the [template mapping](src/apps/web/README.md#selective-template-adoption).
 
 ## Web internationalization
 
 - Use next-intl and the Web message catalogs (`en`, `zh-CN`) for UI text, metadata, accessibility labels and stable error/permission labels. Use typed message keys and ICU interpolation/plurals; do not branch on locale in components or concatenate translated sentence fragments.
 - Format dates, numbers, currencies and lists through the locale provider. Keep business identifiers, user-defined names and currency values unchanged. Maintain catalog parity and professional security/operations terminology; copy new template features into this localization model.
+- The root next-intl configuration supplies both server and client rendering. Keep missing-message diagnostics and prevent internal keys from reaching the UI. Map stable IAM permission keys to typed bilingual descriptions in the Web catalogs.
 
 ## UI copy
 
 Prefer strong visual hierarchy and self-explanatory structure over text. Let layout, visual hierarchy, spacing and clear primary actions speak for themselves; avoid unnecessary secondary labels, explanatory text, supporting copy, descriptive text and redundant microcopy.
 
 - Do not add slogan-style text, instructional paragraphs or per-block help notes by default. When supplementary information is genuinely required, use an info icon with a tooltip instead of persistently visible secondary text.
-- Keep essential form labels and accessible names. A clean interface must not compromise accessibility.
+- Keep essential form labels and accessible names. Mark required fields through the shared Field label, expose their required state to assistive technology, and place validation feedback at the affected control.
+- Show missing required fields when users submit or try to advance a step. Keep a blank field neutral on focus and blur alone. Revalidate fields with visible errors as users correct them.
 - Clear consequence warnings are mandatory for dangerous or irreversible actions: deletion, payment, or submitting permanent changes.
 - With explanatory text removed, first-time users must still understand where to click next and what will happen upon interaction.
 - When refactoring an existing interface, remove redundant labels and descriptions first. Refine layout and button copy only if clarity still suffers.
@@ -114,29 +134,7 @@ Read [DESIGN.md](DESIGN.md) before changing any visual surface. It is the only s
 - Series color comes from `--chart-*` only. Non-brand series use the neutral grey ramp in `DESIGN.md`, never near-black on a light canvas (`--chart-5` was once `#1c1e21`).
 - A chart never paints a selection, hover or focus frame. Recharts' `recharts-tooltip-cursor` box and the focusable `.recharts-surface` both read as a "selected" border; `chart.tsx` keeps the cursor transparent and suppresses `outline` at every focus state.
 
-Use the following original prompt for requested UI work within the approved scope and template/theme baseline. `OVERRIDE_ALL` does not override project rules or permissions. Inspect rendered pages/interactions; stop at agreed acceptance criteria and report gaps. Verbatim prompt:
-
-```text
-::OBJECTIVE{site_design|pri:OVERRIDE_ALL}
-  target: build page to award-tier visual standard
-  ACCEPT: no visible improvement remaining across all CHECK dimensions
-  BENCHMARK: Awwwards | Webby Awards | FWA winning entries
-
-::CHECK{typography|standard:award_tier}
-::CHECK{whitespace|standard:award_tier}
-::CHECK{visual_hierarchy|standard:award_tier}
-::CHECK{color|standard:award_tier}
-::CHECK{motion|standard:award_tier}
-::CHECK{micro_interaction|standard:award_tier}
-::CHECK{responsive|standard:award_tier}
-::CHECK{originality|standard:award_tier}
-
-::LOOP{self_review|trigger:on_completion}
-  [READ] current page against CHECK list
-  [COMPARE] each dimension to BENCHMARK entries
-  [IF] gap found => [PATCH] then re-enter LOOP
-  [IF] no gap => [Ω]
-```
+Use global theme tokens for interactive colors and focus across routes and overlays. Apply template structure through shared components. For a visual change, compare the rendered result with the chosen template at desktop and narrow widths. Verify applicable themes, layout preference, keyboard and empty/error states. Run Web lint and the relevant browser flow. The lint rule rejects page-owned h1 elements; the cross-route browser check compares rendered headings to the workbench.
 
 ## References
 

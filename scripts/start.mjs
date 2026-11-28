@@ -1,12 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, watch } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync, watch } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadEnvironment, moduleEnvironment, webEnvironment } from './environment.mjs';
 import { endpoint, serviceConnection, webEndpoints, webListener, webOrigin } from './endpoints.mjs';
 import { terminateProcessTree } from './processes.mjs';
-import { clearRuntime, processAlive, readRuntime, writeRuntime } from './runtime.mjs';
+import { assertStackAvailable, clearRuntime, writeRuntime } from './runtime.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 // Windows cannot launch a PE image without the .exe extension, so builds keep it there.
@@ -30,19 +30,6 @@ function syncRuntime() {
     writeRuntime(root, [...runtime.values()].sort((left, right) => left.pid - right.pid));
   } catch (error) {
     console.error(`Cannot update .spx/run.json: ${error.message}`);
-  }
-}
-function assertWebAvailable() {
-  const filename = path.join(root, 'src/apps/web/.next/dev/lock');
-  if (!existsSync(filename)) return;
-  let lock;
-  try {
-    lock = JSON.parse(readFileSync(filename, 'utf8'));
-  } catch {
-    return;
-  }
-  if (Number.isInteger(lock.pid) && processAlive(lock.pid)) {
-    throw new Error(`A Web dev server is already running (PID ${lock.pid}). Run pnpm stop (or make stop) first.`);
   }
 }
 // Windows 上刚退出的子进程可能短暂持有可执行文件句柄；清理失败不影响命令结果，
@@ -77,7 +64,7 @@ async function terminate(child) {
   await terminateProcessTree(child);
 }
 async function ready(service, child) {
-  const target = new URL('/health/ready', endpoint(service.public_addr));
+  const target = new URL('/health/ready', endpoint(service.public_addr, service.scheme));
   const deadline = Date.now() + 30000;
   while (!stopping && child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
     try { if ((await fetch(target, {signal: AbortSignal.timeout(1000)})).ok) return; } catch {}
@@ -89,18 +76,16 @@ async function main() {
   const command = process.argv[2] ?? 'dev';
   if (!['dev', 'preview', 'check-config'].includes(command)) throw new Error('Supported application commands: dev, preview, check-config.');
   const selected = process.argv.slice(3);
-  const modules = selected.length ? selected : ['iam','console','web'];
-// ingest 需要 Kafka 与 IAM token，在通道落地前不进默认栈；显式传入模块名启动。
-  if (new Set(modules).size !== modules.length || modules.some(module => !['iam','console','ingest','web'].includes(module))) throw new Error('Select web, iam, ingest or console once each.');
+  const supported = ['iam', 'console', 'ingest', 'web'];
+  const modules = selected.length ? selected : supported;
+  if (new Set(modules).size !== modules.length || modules.some(module => !supported.includes(module))) throw new Error('Select web, iam, ingest or console once each.');
   const env = loadEnvironment(root);
   const configs = Object.fromEntries(['iam', 'console', 'ingest'].map((module) => [module, path.join(root, `src/apps/${module}/config.yaml`)]));
   for (const module of modules.filter(module => module !== 'web')) if (!existsSync(configs[module])) throw new Error(`Missing module config.yaml (src/apps/${module}/config.yaml); restore the module configuration before starting.`);
   if (modules.includes('iam')) env.SPX_WEB_ORIGIN = webOrigin(env);
   if (modules.includes('web')) webListener(env);
-  if (command !== 'check-config' && modules.includes('web')) assertWebAvailable();
   if (command !== 'check-config') {
-    const running = readRuntime(root).filter((entry) => processAlive(entry.pid));
-    if (running.length) throw new Error(`Another SecPlexus stack is already running (PID ${running.map((entry) => entry.pid).join(', ')}). Run pnpm stop (or make stop) first.`);
+    assertStackAvailable(root, modules.includes('web'));
     clearRuntime(root);
   }
   if (command === 'dev' && modules.includes('web')) run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], { ...webEnvironment(env), HUSKY: '0' });
@@ -125,10 +110,13 @@ async function main() {
     const webEnv = modules.includes('web') ? { ...webEnvironment(env), ...webEndpoints(env, services) } : undefined;
     if (webEnv) run(process.execPath, ['src/apps/web/scripts/serve.mjs', 'check-config', ...(command === 'dev' ? ['--development'] : [])], webEnv);
     if (command === 'check-config') { console.log(`SecPlexus ${modules.join(', ')} configuration valid (offline).`); return; }
-    if (prepared.iam) run(prepared.iam.output, ['migrate', '--config', configs.iam], prepared.iam.moduleEnv);
+    if (prepared.iam) {
+      run(prepared.iam.output, ['migrate', '--config', configs.iam], prepared.iam.moduleEnv);
+      run(prepared.iam.output, ['initialize-administrator', '--config', configs.iam], prepared.iam.moduleEnv);
+    }
     // ingest 的表归它自己：不迁移就启动会在首个管理请求上失败。
     if (prepared.ingest) run(prepared.ingest.output, ['migrate', '--config', configs.ingest], prepared.ingest.moduleEnv);
-    for (const module of ['iam', 'console'].filter(module => modules.includes(module))) {
+    for (const module of ['iam', 'console', 'ingest'].filter(module => modules.includes(module))) {
       const { output, moduleEnv } = prepared[module];
       const args = ['serve', '--config', configs[module]];
       function build() { run('go', ['build', '-o', `${output}.next`, `./src/apps/${module}/cmd`]); }
@@ -161,7 +149,7 @@ async function main() {
     stopping = true;
     for (const watcher of watchers) watcher.close();
     await Promise.all([...children].map(terminate));
-    clearRuntime(root);
+    if (command !== 'check-config') clearRuntime(root);
     removeBuildDirectory(buildDirectory);
   }
 }

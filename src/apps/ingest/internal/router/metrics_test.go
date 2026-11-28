@@ -18,8 +18,8 @@ func TestMetricsExposesPipelineCounters(t *testing.T) {
 		Stats: func() pipeline.Stats {
 			return pipeline.Stats{
 				Accepted: 10, Parsed: 8, ParseFailed: 2, Published: 8, QueueDepth: 3,
-				ByInput: map[string]pipeline.ProtocolStats{
-					"input-a": {Accepted: 2, Parsed: 2},
+				ByInput: map[string]pipeline.InputStats{
+					"input-a": {ProtocolStats: pipeline.ProtocolStats{Accepted: 2, Parsed: 2}},
 				},
 				ByProtocol: map[string]pipeline.ProtocolStats{
 					"http":   {Accepted: 6, Parsed: 5},

@@ -17,11 +17,9 @@ import (
 	"github.com/gorilla/csrf"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/account"
-	"github.com/google/uuid"
 
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authentication"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/authorization"
-	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/enum"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/handler/management"
 	iammiddleware "github.com/EayonLee/SecPlexus/src/apps/iam/internal/middleware"
 	"github.com/EayonLee/SecPlexus/src/apps/iam/internal/model"
@@ -279,40 +277,12 @@ func (s *Server) PostAuditEvent(c *gin.Context) {
 		return
 	}
 
-	if event.Action == "" || event.TargetType == "" || event.RequestID == "" ||
-		(event.Outcome != string(enum.AuditOutcomeSuccess) &&
-			event.Outcome != string(enum.AuditOutcomeDenied) &&
-			event.Outcome != string(enum.AuditOutcomeFailure)) {
-		httpx.Reject(c, repository.ErrInvalid)
-
-		return
-	}
-
-	audit := repository.Audit{
-		ActorType:  enum.ActorTypeSystem,
-		Action:     event.Action,
-		TargetType: event.TargetType,
-		Outcome:    enum.AuditOutcome(event.Outcome),
-		Reason:     event.Reason,
-		RequestID:  event.RequestID,
-		Metadata:   event.Metadata,
-	}
-
-	if event.TargetID != "" {
-		if parsed, err := uuid.Parse(event.TargetID); err == nil {
-			audit.TargetID = &parsed
-		}
-	}
-
-	if event.DecisionID != "" {
-		if parsed, err := uuid.Parse(event.DecisionID); err == nil {
-			audit.DecisionID = &parsed
-		}
-	}
-
-	if err := repository.AppendAudit(r.Context(), s.Service.Store.DB, audit); err != nil {
+	if err := s.Service.RecordServiceAudit(r.Context(), service.ServiceAuditInput{
+		EventID: event.EventID, OccurredAt: event.OccurredAt, Action: event.Action,
+		TargetType: event.TargetType, TargetID: event.TargetID, Outcome: event.Outcome,
+		Reason: event.Reason, RequestID: event.RequestID, DecisionID: event.DecisionID, Metadata: event.Metadata,
+	}); err != nil {
 		httpx.Reject(c, err)
-
 		return
 	}
 

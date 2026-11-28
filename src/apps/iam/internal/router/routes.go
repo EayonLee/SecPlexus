@@ -17,28 +17,13 @@ import (
 // 授权只有「用户 → 角色 → 权限」，路由全部扁平，没有组织段。
 func RegisterUserRoutes(engine gin.IRouter, server *handler.Server) {
 	engine.GET("/health/ready", server.Ready)
-	engine.GET("/api/v1/iam/auth/context", server.AuthContext)
-	engine.POST("/api/v1/iam/auth/login", server.Login)
-	engine.POST("/api/v1/iam/auth/reauthenticate", server.Reauthenticate)
-	engine.POST("/api/v1/iam/auth/logout", server.Logout)
-	engine.GET("/api/v1/iam/me", server.Me)
-	engine.PATCH("/api/v1/iam/me", server.UpdateProfile)
-	engine.POST("/api/v1/iam/me/password", server.ChangePassword)
-	engine.GET("/api/v1/iam/users", server.ListUsers)
-	engine.POST("/api/v1/iam/users", server.CreateUser)
-	engine.GET("/api/v1/iam/users/:id", server.GetUser)
-	engine.PATCH("/api/v1/iam/users/:id", server.UpdateUser)
-	engine.DELETE("/api/v1/iam/users/:id", server.DeleteUser)
-	engine.PUT("/api/v1/iam/users/:id/roles", server.SetUserRoles)
-	engine.POST("/api/v1/iam/users/:id/reset-password", server.ResetUserPassword)
-	engine.GET("/api/v1/iam/roles", server.ListRoles)
-	engine.POST("/api/v1/iam/roles", server.CreateRole)
-	engine.GET("/api/v1/iam/roles/:id", server.GetRole)
-	engine.PATCH("/api/v1/iam/roles/:id", server.UpdateRole)
-	engine.DELETE("/api/v1/iam/roles/:id", server.DeleteRole)
-	engine.PUT("/api/v1/iam/roles/:id/permissions", server.SetRolePermissions)
-	engine.GET("/api/v1/iam/permissions", server.Permissions)
-	engine.GET("/api/v1/iam/audit-events", server.ListAuditEvents)
+	api := engine.Group("/api/v1/iam")
+	registerAuth(api.Group("/auth"), server)
+	registerMe(api.Group("/me"), server)
+	registerUsers(api.Group("/users"), server)
+	registerRoles(api.Group("/roles"), server)
+	api.GET("/permissions", server.Permissions)
+	api.GET("/audit-events", server.ListAuditEvents)
 }
 
 // Handler 在同一监听装配路由；用户请求与服务鉴权分别应用所需中间件。
@@ -55,9 +40,11 @@ func Handler(server *handler.Server) http.Handler {
 	} else if err := engine.SetTrustedProxies(trustedProxies); err != nil {
 		panic("invalid trusted proxies")
 	}
-	engine.POST("/api/v1/iam/authorize", server.Errors, middleware.InputBoundary(nil), server.AuthorizeRequest)
-	engine.POST("/api/v1/iam/audit-events", server.Errors, middleware.InputBoundary(nil), server.PostAuditEvent)
-	engine.GET("/api/v1/iam/permission-catalog", server.Errors, server.PermissionCatalog)
+	services := engine.Group("/api/v1/iam", server.Errors)
+	inputBoundary := middleware.InputBoundary(nil)
+	services.POST("/authorize", inputBoundary, server.AuthorizeRequest)
+	services.POST("/audit-events", inputBoundary, server.PostAuditEvent)
+	services.GET("/permission-catalog", server.PermissionCatalog)
 	user := engine.Group("")
 	user.Use(iammiddleware.Session(server.Service.Sessions), server.Errors, server.Security.GinProtect(), func(c *gin.Context) {
 		if c.FullPath() == "/api/v1/iam/auth/login" || c.FullPath() == "/api/v1/iam/auth/reauthenticate" {

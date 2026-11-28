@@ -18,7 +18,7 @@ test('one remote IAM location reaches all callers without changing local bind co
 test('Web listening port is independent from the external HTTPS origin',()=>{
  assert.deepEqual(webListener({SPX_WEB_PORT:'15173',SPX_WEB_ORIGIN:'https://sec.example.com'}),{host:'0.0.0.0',port:15173});
  assert.equal(webOrigin({SPX_WEB_PORT:'15173',SPX_WEB_ORIGIN:'https://sec.example.com'}),'https://sec.example.com');
- assert.equal(webOrigin({SPX_WEB_PORT:'15173'}),'http://localhost:15173');
+ assert.equal(webOrigin({SPX_WEB_PORT:'15173'}),'http://127.0.0.1:15173');
 });
 
 test('invalid binding, port, external origin and unusable connection addresses fail at loading',()=>{
@@ -29,7 +29,7 @@ test('invalid binding, port, external origin and unusable connection addresses f
  assert.throws(()=>serviceConnection({},'iam'),/connection/i);
 });
 
-test('Web receives the ingest proxy target only when ingest takes part in the start',()=>{
+test('Web discovers Ingest when it starts locally and no target is configured',()=>{
  const services={iam:{public_addr:'127.0.0.1:18081'},console:{public_addr:'127.0.0.1:18080'},ingest:{public_addr:'127.0.0.1:18082'}};
  const withIngest=webEndpoints({},services);
  assert.equal(withIngest.SPX_INGEST_ORIGIN,'http://127.0.0.1:18082');
@@ -41,4 +41,23 @@ test('Web receives the ingest proxy target only when ingest takes part in the st
 
  // IPv6 目标必须带方括号，否则 URL 不合法。
  assert.equal(webEndpoints({SPX_INGEST_HOST:'::1',SPX_INGEST_PORT:'18082'},services).SPX_INGEST_ORIGIN,'http://[::1]:18082');
+});
+
+test('Web-only startup uses the configured Ingest connection', () => {
+  const environment = {
+    SPX_IAM_HOST: 'iam.corp', SPX_IAM_PORT: '8081',
+    SPX_CONSOLE_HOST: 'console.corp', SPX_CONSOLE_PORT: '8080',
+    SPX_INGEST_HOST: 'ingest.corp', SPX_INGEST_PORT: '18082',
+  };
+  assert.equal(webEndpoints(environment, {}).SPX_INGEST_ORIGIN, 'http://ingest.corp:18082');
+});
+
+test('Ingest HTTPS discovery preserves its transport for health checks and Web', () => {
+  const environment = {
+    SPX_IAM_HOST: 'iam.corp', SPX_IAM_PORT: '8081',
+    SPX_CONSOLE_HOST: 'console.corp', SPX_CONSOLE_PORT: '8080',
+  };
+  const ingest = { public_addr: '127.0.0.1:18082', scheme: 'https' };
+  assert.equal(endpoint(ingest.public_addr, ingest.scheme), 'https://127.0.0.1:18082');
+  assert.equal(webEndpoints(environment, { ingest }).SPX_INGEST_ORIGIN, 'https://127.0.0.1:18082');
 });

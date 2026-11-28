@@ -17,7 +17,7 @@ import (
 func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "wildcard search password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "wildcard search password"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -29,7 +29,7 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	all, err := repository.ListUsers(ctx, store.DB, 50, 0, "")
+	all, err := repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 	}
 
 	// % 在 ILIKE 里是通配符；作为字面量搜索时只应命中名字里真的带 % 的账号。
-	percent, err := repository.ListUsers(ctx, store.DB, 50, 0, "%")
+	percent, err := repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: "%"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +49,11 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 	}
 
 	// 反斜杠也是字面量，不会破坏 ESCAPE 语法。
-	if _, err = repository.ListUsers(ctx, store.DB, 50, 0, `\\`); err != nil {
+	if _, err = repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: `\\`}); err != nil {
 		t.Fatalf("backslash query failed: %v", err)
 	}
 
-	named, err := repository.ListUsers(ctx, store.DB, 50, 0, "alp")
+	named, err := repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: "alp"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestListUsersTreatsWildcardsLiterally(t *testing.T) {
 func TestListUsersProjectsAssignedRoles(t *testing.T) {
 	store := testutil.Database(t)
 	ctx := context.Background()
-	if err := store.Seed(ctx, "admin", "role projection password"); err != nil {
+	if err := store.SyncAdministrator(ctx, "admin", "role projection password"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,7 +87,7 @@ func TestListUsersProjectsAssignedRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := repository.ListUsers(ctx, store.DB, 50, 0, "role-holder")
+	page, err := repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: "role-holder"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestListUsersProjectsAssignedRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plain, err := repository.ListUsers(ctx, store.DB, 50, 0, "no-role")
+	plain, err := repository.ListUsers(ctx, store.DB, 50, 0, repository.UserListFilter{Query: "no-role"})
 	if err != nil {
 		t.Fatal(err)
 	}

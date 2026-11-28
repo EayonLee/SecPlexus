@@ -19,3 +19,8 @@ export const openGraphLocales: Record<Locale, string> = { en: "en_US", "zh-CN": 
 export function oppositeLocale(locale: string): Locale {
   return locale === "zh-CN" ? "en" : "zh-CN";
 }
+
+/** Keep missing catalog keys out of the UI. next-intl still reports the original error. */
+export function messageFallback(): string {
+  return "—";
+}

@@ -11,6 +11,8 @@ bin
 # Module-local credentials must also stay outside build contexts.
 **/.env
 **/.env.*
+# The Web image uses this checked-in, non-secret build template.
+!src/apps/web/.env.example
 **/*.pem
 **/*.key
 **/secrets

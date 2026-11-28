@@ -12,10 +12,10 @@ GOVULNCHECK_VERSION := v1.9.0
 SQLC_VERSION := v1.31.1
 
 
-.PHONY: dev build stop config preview compose-up test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security sqlc sqlc-check sqlc-vet
+.PHONY: dev build stop config preview compose-up event-store test test-e2e install-browsers integration typecheck lint lint-go vuln-go vet catalogs catalogs-generate security sqlc sqlc-check sqlc-vet
 
 dev:
-	@node scripts/start.mjs $(MODULES)
+	@node scripts/start.mjs dev $(MODULES)
 
 build:
 	@pnpm build
@@ -31,6 +31,9 @@ preview:
 
 compose-up:
 	@pnpm compose:up $(SERVICES)
+
+event-store:
+	@node scripts/event-store.mjs $(ACTION)
 
 test:
 	@pnpm test:unit

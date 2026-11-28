@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
-import { ArrowLeft, Command, LayoutDashboard, LogOut, type LucideIcon, Settings } from "lucide-react";
+import { ArrowLeft, Command, LayoutDashboard, LogOut, type LucideIcon, Settings, UserRound } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -35,12 +35,12 @@ import {
 } from "@/components/ui/sidebar";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-import { visibleSettingsPages } from "../iam/navigation";
+import { profilePath, visibleIngestPages, visibleSettingsPages } from "../iam/navigation";
 import { signOut, useIdentity } from "../iam/session";
 import { useAction } from "./data";
-import { ReauthGate } from "./reauth";
 import { LanguageSwitcher } from "./language-switcher";
 import { LayoutControls } from "./layout-controls";
+import { ReauthGate } from "./reauth";
 import { ThemeSwitcher } from "./theme-switcher";
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -53,8 +53,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const variant = usePreferencesStore((state) => state.values.sidebar_variant);
   const collapsible = usePreferencesStore((state) => state.values.sidebar_collapsible);
+  const ingestItems = visibleIngestPages(auth);
   const settingsItems = visibleSettingsPages(auth);
-  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const inSettings = pathname.startsWith("/settings/");
   const navigationLabel = inSettings ? t("settingsNavigation") : t("mainNavigation");
   return (
     <SidebarProvider style={{ "--sidebar-width": "calc(var(--spacing) * 68)" } as CSSProperties}>
@@ -71,7 +72,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <SidebarContent role="navigation" aria-label={navigationLabel}>
           {!inSettings && (
             <SidebarGroup>
-              <SidebarGroupLabel>{t("dashboards")}</SidebarGroupLabel>
+              <SidebarGroupLabel>{t("console")}</SidebarGroupLabel>
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarLink href="/dashboard" icon={LayoutDashboard} isActive={pathname === "/dashboard"}>
@@ -81,13 +82,32 @@ export function Shell({ children }: { children: ReactNode }) {
               </SidebarMenu>
             </SidebarGroup>
           )}
+          {!inSettings && ingestItems.length > 0 && (
+            <SidebarGroup role="group" aria-label={t("ingest")}>
+              <SidebarGroupLabel>{t("ingest")}</SidebarGroupLabel>
+              <SidebarMenu>
+                {ingestItems.map((item) => (
+                  <SidebarMenuItem key={item.id}>
+                    <SidebarLink
+                      href={item.path}
+                      icon={item.icon}
+                      isActive={pathname === item.path || pathname.startsWith(item.path + "/")}
+                      label={t(item.title)}
+                    >
+                      <span>{t(item.title)}</span>
+                    </SidebarLink>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          )}
           {inSettings && (
             <SidebarGroup>
               <SidebarGroupLabel>{t("settings")}</SidebarGroupLabel>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarLink href="/settings" icon={Settings} isActive={pathname === "/settings"}>
-                    <span className="whitespace-nowrap">{t("settingsHome")}</span>
+                  <SidebarLink href={profilePath} icon={UserRound} isActive={pathname === profilePath}>
+                    <span className="whitespace-nowrap">{t("profile")}</span>
                   </SidebarLink>
                 </SidebarMenuItem>
                 {settingsItems.map((item) => (
@@ -113,9 +133,9 @@ export function Shell({ children }: { children: ReactNode }) {
           </SidebarFooter>
         )}
       </Sidebar>
-      <SidebarInset className="min-w-0 overflow-x-clip [--dashboard-header-height:--spacing(12)] peer-data-[variant=inset]:border [html[data-content-layout=centered]_&>*]:mx-auto [html[data-content-layout=centered]_&>*]:w-full [html[data-content-layout=centered]_&>*]:max-w-screen-2xl">
+      <SidebarInset className="min-w-0 overflow-x-clip [--dashboard-header-height:--spacing(12)] peer-data-[variant=inset]:border">
         <header className="[html[data-navbar-style=sticky]_&]:bg-background/50 flex h-12 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 [html[data-navbar-style=sticky]_&]:sticky [html[data-navbar-style=sticky]_&]:top-0 [html[data-navbar-style=sticky]_&]:z-50 [html[data-navbar-style=sticky]_&]:overflow-hidden [html[data-navbar-style=sticky]_&]:rounded-t-[inherit] [html[data-navbar-style=sticky]_&]:backdrop-blur-md">
-          <div className="flex w-full items-center justify-between gap-2 px-4 lg:px-6">
+          <div className="console-frame flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <SidebarTrigger />
               <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
@@ -138,7 +158,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 >
                   <DropdownMenuGroup>
                     <DropdownMenuItem asChild>
-                      <Link href="/settings">
+                      <Link href={profilePath}>
                         <Settings />
                         {t("settings")}
                       </Link>
@@ -163,7 +183,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">{children}</main>
+        <div className="console-frame min-h-0 flex-1 py-5 md:py-7">{children}</div>
         <ReauthGate />
       </SidebarInset>
     </SidebarProvider>
@@ -174,19 +194,23 @@ export function Shell({ children }: { children: ReactNode }) {
 function SidebarLink({
   href,
   icon: Icon,
+  label,
   isActive,
   children,
 }: {
   href: string;
   icon: LucideIcon;
+  label?: string;
   isActive?: boolean;
   children: ReactNode;
 }) {
   const { setOpenMobile } = useSidebar();
   return (
-    <SidebarMenuButton asChild isActive={isActive}>
+    <SidebarMenuButton asChild isActive={isActive} tooltip={label}>
       <Link
         href={href}
+        aria-label={label}
+        aria-current={isActive ? "page" : undefined}
         onNavigate={() => {
           setOpenMobile(false);
         }}

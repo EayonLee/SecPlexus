@@ -18,8 +18,10 @@ import {
   type zUpdateUserBody,
 } from "./schemas";
 
-export const listUsers = (query?: ListQuery, signal?: AbortSignal) =>
-  request({ url: "/api/v1/iam/users", params: query, signal }, pageSchema(zApiUser));
+export const listUsers = (
+  query?: ListQuery & { status?: "active" | "disabled"; role_id?: string },
+  signal?: AbortSignal,
+) => request({ url: "/api/v1/iam/users", params: query, signal }, pageSchema(zApiUser));
 export const createUser = (body: z.infer<typeof zCreateUserBody>) =>
   request({ method: "POST", url: "/api/v1/iam/users", data: body }, zApiCreated, 201);
 export const updateUser = ({ id, body }: { id: string; body: z.infer<typeof zUpdateUserBody> }) =>
@@ -34,7 +36,7 @@ export const resetUserPassword = ({ id, body }: { id: string; body: z.infer<type
     z.void(),
     204,
   );
-export const listRoles = (query?: ListQuery, signal?: AbortSignal) =>
+export const listRoles = (query?: ListQuery & { type?: "builtin" | "custom" }, signal?: AbortSignal) =>
   request({ url: "/api/v1/iam/roles", params: query, signal }, pageSchema(zApiRole));
 export const createRole = (body: z.infer<typeof zCreateRoleBody>) =>
   request({ method: "POST", url: "/api/v1/iam/roles", data: body }, zApiCreated, 201);

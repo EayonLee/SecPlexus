@@ -14,8 +14,9 @@ export interface SettingsPage {
   icon: typeof ShieldCheck;
 }
 
-// settingsPages 是设置区的完整页面列表，按左侧菜单的实际顺序排列。
-// 设置主页（个人资料与账号）不在列表里：它总是第一项且始终可见。
+export const profilePath = "/settings/profile";
+
+// settingsPages 列出需要 IAM 读取权限的设置页。个人资料始终显示在设置导航首项。
 export const settingsPages: SettingsPage[] = [
   {
     id: "roles",
@@ -32,20 +33,6 @@ export const settingsPages: SettingsPage[] = [
     icon: Users,
   },
   {
-    id: "ingest",
-    title: "ingest",
-    action: permissions.IngestInputRead,
-    path: "/settings/ingest",
-    icon: Database,
-  },
-  {
-    id: "mappings",
-    title: "mappings",
-    action: permissions.IngestMappingRead,
-    path: "/settings/mappings",
-    icon: FileJson,
-  },
-  {
     id: "audit",
     title: "audit",
     action: permissions.IAMAuditRead,
@@ -60,4 +47,25 @@ export function visibleSettingsPages(me: Pick<ApiMe, "permissions">) {
 
 export function settingsPageFor(pathname: string) {
   return settingsPages.find((page) => page.path === pathname);
+}
+
+export const ingestPages: SettingsPage[] = [
+  {
+    id: "ingest",
+    title: "inputs",
+    action: permissions.IngestInputRead,
+    path: "/ingest/inputs",
+    icon: Database,
+  },
+  {
+    id: "parsing-rules",
+    title: "mappings",
+    action: permissions.IngestParsingRuleRead,
+    path: "/ingest/parsing-rules",
+    icon: FileJson,
+  },
+];
+
+export function visibleIngestPages(me: Pick<ApiMe, "permissions">) {
+  return ingestPages.filter((page) => me.permissions.includes(page.action));
 }

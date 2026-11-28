@@ -1,7 +1,7 @@
 [
   {
-    "key": "console.events.read",
-    "description": "订阅运维事件流（SSE）",
+    "key": "console.context.read",
+    "description": "查看运营上下文",
     "risk_level": "normal",
     "delegable": true,
     "requires_recent_auth": false,
@@ -80,6 +80,14 @@
     "status": "active"
   },
   {
+    "key": "ingest.events.read",
+    "description": "查询已保存的安全事件",
+    "risk_level": "normal",
+    "delegable": true,
+    "requires_recent_auth": false,
+    "status": "active"
+  },
+  {
     "key": "ingest.input.read",
     "description": "查看数据接入点与解析映射",
     "risk_level": "normal",
@@ -96,7 +104,7 @@
     "status": "active"
   },
   {
-    "key": "ingest.mapping.read",
+    "key": "ingest.parsing_rule.read",
     "description": "查看解析映射",
     "risk_level": "normal",
     "delegable": true,
@@ -104,7 +112,7 @@
     "status": "active"
   },
   {
-    "key": "ingest.mapping.write",
+    "key": "ingest.parsing_rule.write",
     "description": "创建、修改、删除解析映射",
     "risk_level": "sensitive",
     "delegable": true,
