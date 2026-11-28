@@ -50,6 +50,13 @@ func (p delimiterParser) Parse(raw []byte) (map[string]any, error) {
 
 		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
+	// Reader 按记录读取，额外的记录不能作为本条报文的一部分静默忽略。
+	if _, err := reader.Read(); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, ErrMultipleRecords)
+	}
 
 	if len(p.fieldNames) == 0 {
 		fields := make(map[string]any, len(record))

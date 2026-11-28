@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ func (j Job) mixedResult() (mapped normalizer.Result, fields map[string]any, out
 		fields = j.Fields
 	}
 	if err != nil {
-		mapped = failed(StageDecode, ReasonFormatMismatch)
+		mapped = failed(StageDecode, DecodeFailureReason(err))
 		return
 	}
 	mapped, fields, err = engine.ApplyFieldsWithExtraction(fields, j.Received)
@@ -74,6 +75,14 @@ func (j Job) mixedResult() (mapped normalizer.Result, fields map[string]any, out
 		outcome = Outcome{Status: StatusPartial, Stage: StageMap, Reason: ReasonContractViolation}
 	}
 	return
+}
+
+// DecodeFailureReason 统一样本提取与实际报文的解析诊断。
+func DecodeFailureReason(err error) Reason {
+	if errors.Is(err, parser.ErrMultipleRecords) {
+		return ReasonMultipleRecords
+	}
+	return ReasonFormatMismatch
 }
 
 func (j Job) mixedEvent(event Event) (Event, map[string]any, error) {

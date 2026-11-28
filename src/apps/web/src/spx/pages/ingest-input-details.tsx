@@ -73,6 +73,10 @@ export function InputDetails({
   const unlistedMapping = input.parsing_rule_id ? t("bound") : t("mappingNone");
   const { data: boundMapping } = useMappingDetail(input.parsing_rule_id ?? undefined);
   const endpoint = inputEndpoint(input);
+  const isSyslog = input.protocol === "syslog";
+  const syslogListener = isSyslog && input.activation?.state === "applied"
+    ? t(input.enabled ? "syslogListening" : "disabled")
+    : undefined;
   return (
     <section className="@container flex min-w-0 flex-col gap-4">
       <PageHeader
@@ -110,7 +114,7 @@ export function InputDetails({
                 rows={[
                   { label: t("protocol"), value: t(input.protocol) },
                   {
-                    label: input.protocol === "kafka" ? t("topicLabel") : t("endpoint"),
+                    label: input.protocol === "kafka" ? t("topicLabel") : t(isSyslog ? "syslogListenPort" : "endpoint"),
                     value: endpoint ? (
                       <span className="inline-flex max-w-full items-center gap-2">
                         <code className="min-w-0 break-all">{endpoint}</code>
@@ -150,6 +154,12 @@ export function InputDetails({
                     POST {endpoint}
                     {"\n"}Authorization: Bearer &lt;token&gt;
                   </pre>
+                </details>
+              )}
+              {isSyslog && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer font-medium">{t("syslogDeviceConnection")}</summary>
+                  <p className="text-muted-foreground mt-2">{t("syslogDeviceConnectionHint")}</p>
                 </details>
               )}
             </IngestSection>
@@ -197,10 +207,10 @@ export function InputDetails({
                   },
                   ...(input.activation
                     ? [{
-                        label: t("activationStatus"),
+                        label: t(isSyslog ? "syslogListenerStatus" : "activationStatus"),
                         value: input.activation.reason
                           ? t(`activationReason.${input.activation.reason}`)
-                          : t(`activation.${input.activation.state}`),
+                          : (syslogListener ?? t(`activation.${input.activation.state}`)),
                       }]
                     : []),
                   ...(input.traffic_status && input.traffic_status !== "disabled"

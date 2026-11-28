@@ -64,6 +64,34 @@ func TestOutcomeSeparatesStageAndReason(t *testing.T) {
 	}
 }
 
+func TestDelimiterExtraRecordPublishesFailure(t *testing.T) {
+	engine, err := normalizer.CompileDefinition([]byte(`{
+		"contract_version":"v1","parse":{"mode":"delimiter","delimiter":{"separator":"|"}},
+		"branches":[{"id":"network","name":"Network","class_uid":4001,"field_map":{"field_1":"src_endpoint.ip"}}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, publisher := start(t, pipeline.Options{BatchSize: 1})
+	entry := input.Entry{ID: "delimiter-input", Protocol: input.ProtocolSyslog, Mapping: engine}
+	if err := line.SubmitFields(context.Background(), entry, map[string]any{"message": "192.0.2.1|one\n192.0.2.2|two"}, time.Now(), pipeline.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := line.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	event := publisher.events()[0]
+	if event.Outcome.Status != pipeline.StatusError || event.Outcome.Reason != pipeline.ReasonMultipleRecords {
+		t.Fatalf("unexpected parse outcome: %+v", event.Outcome)
+	}
+	var body struct {
+		ClassUID int `json:"class_uid"`
+	}
+	if err := json.Unmarshal(event.Body, &body); err != nil || body.ClassUID != 0 {
+		t.Fatalf("expected a base event: %s, %v", event.Body, err)
+	}
+}
+
 // 未挂规则与格式不符是两件事：前者要补规则，后者要查报文。
 func TestNoRuleIsDistinctFromFormatMismatch(t *testing.T) {
 	line, publisher := start(t, pipeline.Options{Workers: 1, BatchSize: 1, FlushInterval: 20 * time.Millisecond})

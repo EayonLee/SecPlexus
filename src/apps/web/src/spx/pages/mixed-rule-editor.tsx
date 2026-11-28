@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 
 import { permissions } from "@/auth/permissions.gen";
@@ -121,6 +121,7 @@ export function MixedRuleEditor({
   const shared = useTranslations("Ingest");
   const wizard = useTranslations("RuleWizard");
   const locale = useLocale();
+  const format = useFormatter();
   const queryClient = useQueryClient();
   const base = mixedDefinition.safeParse(mapping?.definition).data;
   const originalBranches = base?.branches ?? [];
@@ -158,8 +159,7 @@ export function MixedRuleEditor({
   const processors = useWatch({ control: form.control, name: "processors" });
   const samples = useWatch({ control: form.control, name: "samples" });
   const sampleFields = useFieldArray({ control: form.control, name: "samples" });
-  const showSamples = !readOnly;
-  const sampleCount = showSamples ? sampleFields.fields.length : 0;
+  const sampleCount = sampleFields.fields.length;
   const [step, setStep] = useState(0);
   const [showRevisions, setShowRevisions] = useState(false);
   const [sampleIndex, setSampleIndex] = useState(0);
@@ -179,7 +179,7 @@ export function MixedRuleEditor({
   const branchTypes = data.allowedClasses ?? [];
   const mixed = eventType === "mixed";
   const showRouting =
-    mixed || Boolean(originalBranches.length === 1 && originalBranches[0].match.length && eventType === initialType);
+    mixed || Boolean(originalBranches.length === 1 && originalBranches[0].match?.length && eventType === initialType);
   const [confirm, setConfirm] = useState(false);
   const [discard, setDiscard] = useState(false);
   const [resumeReview, setResumeReview] = useState(false);
@@ -592,7 +592,7 @@ export function MixedRuleEditor({
     const key = extractionKey(settings.processors);
     const result = await extraction.run(key, (signal) => extractMapping(settings, inputSamples, signal), applySampleError);
     if (next === undefined || !result?.compiled) return;
-    const mismatch = result.previews?.find((item) => item.reason === "format_mismatch");
+    const mismatch = result.previews?.find((item) => item.reason);
     if (mismatch) {
       const sample = submittedSamples[mismatch.index];
       if (sample) form.setFocus(`samples.${sample.index}.value`);
@@ -789,6 +789,23 @@ export function MixedRuleEditor({
         : shared("operationFailed");
 
   const typeChange = pendingType ? previewTypeChange(pendingType) : undefined;
+  const verification = mapping?.verification;
+  const sampleVerification = verification ? (
+    <div className="flex flex-col gap-1 text-sm">
+      <span>{wizard("verifiedSamples", { passed: verification.passed, total: verification.sample_count })}</span>
+      <time dateTime={verification.verified_at} className="text-muted-foreground">
+        {format.dateTime(new Date(verification.verified_at), { dateStyle: "medium", timeStyle: "short" })}
+      </time>
+    </div>
+  ) : (
+    <p className="text-sm text-muted-foreground">{wizard("noVerification")}</p>
+  );
+  let sampleSidebar = sampleVerification;
+  if (!readOnly) {
+    sampleSidebar = submittedSamples.length ? samplePreviews : (
+      <p className="text-muted-foreground text-sm">{wizard("noSample")}</p>
+    );
+  }
   const samplePicker = visibleSamples.length > 1 && (
     <Select value={String(sampleIndex)} onValueChange={(value) => value !== null && setSampleIndex(Number(value))}>
       <SelectTrigger aria-label={mt("selectedSample")} className="w-fit max-w-full">
@@ -1043,108 +1060,105 @@ export function MixedRuleEditor({
                 </FieldGroup>
               </IngestSection>
               <IngestSection
-                title={mt("samples")}
-                required
+                title={readOnly ? wizard("verificationSummary") : mt("samples")}
+                required={!readOnly}
                 action={
-                  <output className="text-muted-foreground text-sm tabular-nums">
-                    {wizard("sampleCount", { count: sampleCount, total: maxRuleSamples })}
-                  </output>
+                  !readOnly && (
+                    <output className="text-muted-foreground text-sm tabular-nums">
+                      {wizard("sampleCount", { count: sampleCount, total: maxRuleSamples })}
+                    </output>
+                  )
                 }
               >
-                {showSamples ? (
-                  <FieldGroup className="gap-3">
-                    {sampleFields.fields.map((field, index) => {
-                      const fieldError = form.formState.errors.samples?.[index]?.value;
-                      const requestIndex = submittedSamples.findIndex((sample) => sample.index === index);
-                      const mismatch = extracted?.previews?.some(
-                        (item) => item.index === requestIndex && item.reason === "format_mismatch",
-                      );
-                      let message: string | undefined;
-                      if (fieldError?.type === "invalid_json") message = wizard("sampleInvalidJSON");
-                      else if (fieldError?.type === "too_long") message = wizard("sampleTooLong");
-                      else if (fieldError?.type === "required" && !inputSamples.length)
-                        message = wizard("sampleRequired");
-                      else if (mismatch && data.mode)
-                        message = wizard("sampleFormatMismatch", { label: mt(data.mode) });
-                      const errorID = message ? `mixed-rule-sample-${field.id}-error` : undefined;
-                      return (
-                        <Field
-                          key={field.id}
-                          orientation="horizontal"
-                          className="items-start gap-2"
-                          data-invalid={!!message}
-                        >
-                          <div className="grid min-w-0 flex-1 gap-1.5">
-                            <Textarea
-                              aria-label={
-                                sampleFields.fields.length === 1
-                                  ? mt("samples")
-                                  : mt("sampleNumber", { number: index + 1 })
-                              }
-                              readOnly={readOnly}
-                              aria-required={!readOnly && sampleFields.fields.length === 1}
-                              variant="three-lines"
-                              aria-invalid={!!message}
-                              aria-describedby={errorID}
-                              placeholder={wizard("samplePlaceholder")}
-                              className="font-mono"
-                              spellCheck={false}
-                              {...form.register(`samples.${index}.value`, {
-                                onBlur: () => {
-                                  const path = `samples.${index}.value` as const;
-                                  if (!readOnly && form.getValues("mode") === "json" && form.getValues(path).trim()) {
-                                    void form.trigger(path);
-                                  }
-                                },
-                                onChange: () => {
-                                  const path = `samples.${index}.value` as const;
-                                  if (form.getFieldState(path).error?.type === "invalid_json") void form.trigger(path);
-                                },
-                                validate: {
-                                  invalid_json: (value) =>
-                                    readOnly ||
-                                    form.getValues("mode") !== "json" ||
-                                    !value.trim() ||
-                                    isJSONLogSample(value),
-                                },
-                              })}
-                            />
-                            {message && <FieldError id={errorID}>{message}</FieldError>}
-                          </div>
-                          {!readOnly && sampleFields.fields.length > 1 && (
-                            <Button
-                              type="button"
-                              size="icon-sm"
-                              variant="ghost"
-                              aria-label={wizard("removeSample", { number: index + 1 })}
-                              onClick={() => {
-                                const neighbor = index < sampleFields.fields.length - 1 ? index + 1 : index - 1;
-                                form.setFocus(`samples.${neighbor}.value`);
-                                sampleFields.remove(index);
-                              }}
-                            >
-                              <Trash2Icon />
-                            </Button>
-                          )}
-                        </Field>
-                      );
-                    })}
-                  </FieldGroup>
-                ) : (
-                  <p className="text-sm text-muted-foreground">{wizard("noSample")}</p>
-                )}
-                {!readOnly && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    disabled={sampleCount >= maxRuleSamples}
-                    onClick={() => sampleFields.append({ value: "" })}
-                  >
-                    <PlusIcon data-icon="inline-start" />
-                    {wizard("addSample")}
-                  </Button>
+                {readOnly ? sampleVerification : (
+                  <>
+                    <FieldGroup className="gap-3">
+                      {sampleFields.fields.map((field, index) => {
+                        const fieldError = form.formState.errors.samples?.[index]?.value;
+                        const requestIndex = submittedSamples.findIndex((sample) => sample.index === index);
+                        const reason = extracted?.previews?.find((item) => item.index === requestIndex)?.reason;
+                        let message: string | undefined;
+                        if (fieldError?.type === "invalid_json") message = wizard("sampleInvalidJSON");
+                        else if (fieldError?.type === "too_long") message = wizard("sampleTooLong");
+                        else if (fieldError?.type === "required" && !inputSamples.length)
+                          message = wizard("sampleRequired");
+                        else if (reason === "multiple_records") message = wizard("sampleMultipleRecords");
+                        else if (reason && data.mode)
+                          message = wizard("sampleFormatMismatch", { label: mt(data.mode) });
+                        const errorID = message ? `mixed-rule-sample-${field.id}-error` : undefined;
+                        return (
+                          <Field
+                            key={field.id}
+                            orientation="horizontal"
+                            className="items-start gap-2"
+                            data-invalid={!!message}
+                          >
+                            <div className="grid min-w-0 flex-1 gap-1.5">
+                              <Textarea
+                                aria-label={
+                                  sampleFields.fields.length === 1
+                                    ? mt("samples")
+                                    : mt("sampleNumber", { number: index + 1 })
+                                }
+                                aria-required={sampleFields.fields.length === 1}
+                                variant="three-lines"
+                                aria-invalid={!!message}
+                                aria-describedby={errorID}
+                                placeholder={wizard("samplePlaceholder")}
+                                className="font-mono"
+                                spellCheck={false}
+                                {...form.register(`samples.${index}.value`, {
+                                  onBlur: () => {
+                                    const path = `samples.${index}.value` as const;
+                                    if (form.getValues("mode") === "json" && form.getValues(path).trim()) {
+                                      void form.trigger(path);
+                                    }
+                                  },
+                                  onChange: () => {
+                                    const path = `samples.${index}.value` as const;
+                                    if (form.getFieldState(path).error?.type === "invalid_json") void form.trigger(path);
+                                  },
+                                  validate: {
+                                    invalid_json: (value) =>
+                                      form.getValues("mode") !== "json" ||
+                                      !value.trim() ||
+                                      isJSONLogSample(value),
+                                  },
+                                })}
+                              />
+                              {message && <FieldError id={errorID}>{message}</FieldError>}
+                            </div>
+                            {sampleFields.fields.length > 1 && (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={wizard("removeSample", { number: index + 1 })}
+                                onClick={() => {
+                                  const neighbor = index < sampleFields.fields.length - 1 ? index + 1 : index - 1;
+                                  form.setFocus(`samples.${neighbor}.value`);
+                                  sampleFields.remove(index);
+                                }}
+                              >
+                                <Trash2Icon />
+                              </Button>
+                            )}
+                          </Field>
+                        );
+                      })}
+                    </FieldGroup>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      disabled={sampleCount >= maxRuleSamples}
+                      onClick={() => sampleFields.append({ value: "" })}
+                    >
+                      <PlusIcon data-icon="inline-start" />
+                      {wizard("addSample")}
+                    </Button>
+                  </>
                 )}
               </IngestSection>
             </div>
@@ -1306,12 +1320,8 @@ export function MixedRuleEditor({
                   </IngestSection>
                 )}
               </div>
-              <IngestSection title={mt("samples")}>
-                {submittedSamples.length ? (
-                  samplePreviews
-                ) : (
-                  <p className="text-muted-foreground text-sm">{wizard("noSample")}</p>
-                )}
+              <IngestSection title={readOnly ? wizard("verificationSummary") : mt("samples")}>
+                {sampleSidebar}
                 <Collapsible>
                   <CollapsibleTrigger asChild>
                     <Button type="button" variant="ghost" size="sm" className="group/encoding -ml-2">
@@ -1408,12 +1418,8 @@ export function MixedRuleEditor({
                   )}
                 </IngestSection>
               </div>
-              <IngestSection title={mt("samples")}>
-                {submittedSamples.length ? (
-                  samplePreviews
-                ) : (
-                  <p className="text-muted-foreground text-sm">{wizard("noSample")}</p>
-                )}
+              <IngestSection title={readOnly ? wizard("verificationSummary") : mt("samples")}>
+                {sampleSidebar}
               </IngestSection>
             </div>
           )}
@@ -1556,31 +1562,29 @@ export function MixedRuleEditor({
                       </p>
                     )}
                   </div>
-                ) : mapping?.verification && readOnly ? (
-                  <p className="text-sm">
-                    {wizard("verifiedSamples", { passed: mapping.verification.passed, total: mapping.verification.sample_count })}
-                  </p>
+                ) : readOnly ? (
+                  sampleVerification
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {readOnly ? wizard("noVerification") : t("stale")}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("stale")}</p>
                 )}
               </IngestSection>
-              <IngestSection
-                title={mt("samples")}
-                action={<div className="hidden @min-[52rem]:block">{samplePicker}</div>}
-              >
-                {visibleSamples[sampleIndex] && (
-                  <Textarea
-                    aria-label={mt("samples")}
-                    readOnly
-                    spellCheck={false}
-                    variant="three-lines"
-                    className="bg-muted/40 font-mono"
-                    value={visibleSamples[sampleIndex]}
-                  />
-                )}
-              </IngestSection>
+              {!readOnly && (
+                <IngestSection
+                  title={mt("samples")}
+                  action={<div className="hidden @min-[52rem]:block">{samplePicker}</div>}
+                >
+                  {visibleSamples[sampleIndex] && (
+                    <Textarea
+                      aria-label={mt("samples")}
+                      readOnly
+                      spellCheck={false}
+                      variant="three-lines"
+                      className="bg-muted/40 font-mono"
+                      value={visibleSamples[sampleIndex]}
+                    />
+                  )}
+                </IngestSection>
+              )}
             </div>
           )}
         </section>

@@ -49,6 +49,7 @@ const (
 	ReasonNoMatchingBranch  Reason = "no_matching_branch" // 没有符合条件的分支。
 	ReasonNoRule            Reason = "no_rule"            // 接入点未挂解析规则，原文透传。
 	ReasonFormatMismatch    Reason = "format_mismatch"    // 报文与规则的线格式不符。
+	ReasonMultipleRecords   Reason = "multiple_records"   // 单条报文包含多条记录。
 	ReasonTruncated         Reason = "truncated"          // 报文超上限被截断，解析结果不可信。
 	ReasonContractViolation Reason = "contract_violation" // 映射结果不满足所选事件类的字段约束。
 	ReasonEnginePanic       Reason = "engine_panic"       // 引擎 panic，正常不应出现。

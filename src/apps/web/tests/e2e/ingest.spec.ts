@@ -325,6 +325,10 @@ test("解析规则与数据接入可在页面上完成创建，并真实接收�
     await expect(sheet.getByText("解析成功", { exact: true })).toBeVisible();
     await sheet.getByRole("button", { name: "保存", exact: true }).click();
     await expect(savedRule.getByText(description)).toBeVisible();
+    await savedRule.getByRole("link", { name: mappingName, exact: true }).click();
+    await expect(sheet.getByLabel("规则描述", { exact: true })).toHaveValue(description);
+    await expect(sheet.locator("time[datetime]")).toBeVisible();
+    await sheet.getByRole("button", { name: "返回列表", exact: true }).click();
     const summaryPage = await admin.get("/api/v1/ingest/parsing-rules", {
       params: { limit: 1, q: ` ${mappingName.toUpperCase()} `, origin: "custom", parse_type: "json" },
     });
@@ -788,6 +792,70 @@ test("解析规则基础字段校验和重名恢复", async ({ page }) => {
       field_errors: [{ field: "expected_version", code: "revision_conflict" }],
     });
   } finally {
+    await admin.dispose();
+  }
+});
+
+test("分隔符样本有第二条记录时留在原步骤", async ({ page }) => {
+  const admin = await login(environment.SPX_E2E_USERNAME, environment.SPX_E2E_PASSWORD);
+  const path = "/api/v1/ingest/parsing-rules";
+  const headers = { Origin: baseURL, "X-CSRF-Token": await csrf(admin) };
+  let ruleID: string | undefined;
+  try {
+    await page.context().addCookies((await admin.storageState()).cookies);
+    await page.goto("/ingest/parsing-rules/new");
+    const main = page.getByRole("main");
+    await main.getByLabel("名称", { exact: true }).fill("分隔符样本校验");
+    await main.getByLabel("数据源厂商", { exact: true }).fill("Example");
+    await main.getByLabel("数据源产品", { exact: true }).fill("Edge");
+    await main.getByLabel("规则描述", { exact: true }).fill("Traffic mapping");
+    await main.getByRole("combobox", { name: "事件类型", exact: true }).click();
+    await page.getByRole("option", { name: "网络活动", exact: true }).click();
+    await main.getByRole("combobox", { name: "解析类型", exact: true }).click();
+    await page.getByRole("option", { name: "分隔符", exact: true }).click();
+    await main.getByLabel("分隔符", { exact: true }).fill("|");
+    const sample = main.getByRole("textbox", { name: "日志样本", exact: true });
+    await sample.fill("one|two\nthree|four");
+    await main.getByRole("button", { name: "提取字段", exact: true }).last().click();
+    await expect(sample).toHaveAttribute("aria-invalid", "true");
+    await expect(sample).toBeFocused();
+    await sample.fill('one|"two\nthree"');
+    await main.getByRole("button", { name: "提取字段", exact: true }).last().click();
+    await expect(main.getByRole("region", { name: "提取字段", exact: true }).getByRole("row").filter({ hasText: "field_2" }))
+      .toContainText(/two\s+three/);
+
+    const definition = {
+      contract_version: "v1",
+      description: "Delimiter rule created through the API",
+      parse: { mode: "delimiter", delimiter: { separator: "|" } },
+      branches: [{ id: "network", name: "Network", class_uid: 4001, field_map: { field_1: "src_endpoint.ip" } }],
+    };
+    const created = await admin.post(path, {
+      headers,
+      data: {
+        name: `Delimiter API rule ${randomBytes(4).toString("hex")}`,
+        vendor: "Example",
+        product: "Edge",
+        definition,
+        samples: ["192.0.2.1|traffic"],
+      },
+    });
+    expect(created.status()).toBe(201);
+    const stored = (await created.json()).data;
+    ruleID = z.uuid().parse(stored.id);
+    await page.goto(`/ingest/parsing-rules/${ruleID}`);
+    await expect(main.getByRole("combobox", { name: "解析类型", exact: true })).toContainText("分隔符");
+    await expect(main.getByLabel("规则描述", { exact: true })).toHaveValue(definition.description);
+    await expect(main.getByLabel("分隔符", { exact: true })).toHaveValue("|");
+    await main.getByRole("button", { name: "编辑", exact: true }).click();
+    const updatedDescription = "Delimiter rule with an updated description";
+    await main.getByLabel("规则描述", { exact: true }).fill(updatedDescription);
+    await main.getByRole("button", { name: "保存", exact: true }).click();
+    await main.getByRole("link", { name: z.string().parse(stored.name), exact: true }).click();
+    await expect(main.getByLabel("规则描述", { exact: true })).toHaveValue(updatedDescription);
+    await expect(main.locator("time[datetime]")).toHaveAttribute("datetime", z.string().parse(stored.verification.verified_at));
+  } finally {
+    if (ruleID) await admin.delete(`${path}/${ruleID}`, { headers });
     await admin.dispose();
   }
 });

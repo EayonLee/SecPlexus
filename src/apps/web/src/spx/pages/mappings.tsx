@@ -124,7 +124,10 @@ export function MappingsPage({ id }: { id?: string }) {
       mapping: editing === "new" ? undefined : editing,
       canWrite,
       onClose: () => router.push(mappingHref()),
-      onSave: (saved: ApiMappingDetail) => {
+      onSave: async (saved: ApiMappingDetail) => {
+        const detailKey = [...mappingKey, "detail", saved.id];
+        await client.cancelQueries({ queryKey: detailKey, exact: true });
+        client.setQueryData(detailKey, saved);
         if (saved.id === id) router.push(mappingHref());
         else router.push("/ingest/parsing-rules?" + new URLSearchParams({ q: saved.name }).toString());
         void client.invalidateQueries({ queryKey: mappingKey });
@@ -134,7 +137,7 @@ export function MappingsPage({ id }: { id?: string }) {
       <CollectionBoundary query={detail} pageTitle={t("mappings")} hasContent={!!editing} title={t("loadFailed")}>
         {editing && (
           <MixedRuleEditor
-            key={`${id}:${copyRequested}:${readOnly}`}
+            key={`${id}:${copyRequested}:${readOnly}:${readOnly ? (detail.data?.version ?? "") : ""}`}
             {...editor}
             onCopy={() => router.push(mappingHref(id, "copy"))}
             onEdit={() => router.push(mappingHref(id, "edit"))}

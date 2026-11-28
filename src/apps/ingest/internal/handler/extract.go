@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/normalizer"
+	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/pipeline"
 	"github.com/EayonLee/SecPlexus/src/apps/ingest/internal/validation"
 	"github.com/EayonLee/SecPlexus/src/packages/go/result"
 )
@@ -57,7 +58,7 @@ func extractSamples(ctx context.Context, engine *normalizer.Compiled, samples []
 		entry := extractionSample{Index: index}
 		fields, err := engine.ParseDecodedFields([]byte(sample))
 		if err != nil {
-			entry.Reason = "format_mismatch"
+			entry.Reason = string(pipeline.DecodeFailureReason(err))
 		} else {
 			fields, entry.Issues = engine.ProcessFields(fields)
 			entry.Fields = normalizer.PreviewFields(fields)
