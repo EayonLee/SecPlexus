@@ -22,7 +22,7 @@ export function branchValue(branch: RuleBranch): BranchValue {
     name: branch.name,
     class_uid: branch.class_uid,
     fields: mappingRows(branch),
-    conditions: branch.match.map((item) => ({
+    conditions: (branch.match ?? []).map((item) => ({
       id: item.field,
       field: item.field,
       operation: "equals" in item ? "equals" : "in",

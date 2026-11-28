@@ -4,7 +4,7 @@ import { permissions } from "../../src/auth/permissions.gen";
 import { zCreateInputBody, zUpdateInputBody } from "../../src/spx/api/ingest/schemas";
 import { ingestPages, settingsPages, visibleIngestPages } from "../../src/spx/iam/navigation";
 import { inputEndpoint, inputTrialKey } from "../../src/spx/pages/ingest-model";
-import { readEventValue } from "../../src/spx/pages/mixed-rule-model";
+import { mixedDefinition, readEventValue } from "../../src/spx/pages/mixed-rule-model";
 import { readRuleCatalog } from "../../src/spx/pages/rule-catalog";
 
 // 导航是权限的第一道可见性：用户看不到自己无权访问的入口。
@@ -94,6 +94,17 @@ test("catalog facets survive partial definitions and field previews follow actua
   expect(readEventValue({ value: "" }, "value")).toBe("");
   expect(readEventValue({ value: false }, "value")).toBe("false");
   expect(readEventValue({}, "constructor.name")).toBe("—");
+});
+
+test.each([{ match: undefined }, { match: null }, { match: [] }])("accepts unconditional API rules with $match", ({ match }) => {
+  const definition = mixedDefinition.parse({
+    contract_version: "v1",
+    parse: { mode: "delimiter", delimiter: { separator: "|" } },
+    branches: [{ id: "network", name: "Network", class_uid: 4001, field_map: { field_1: "src_endpoint.ip" }, match }],
+  });
+  expect(definition.parse.mode).toBe("delimiter");
+  expect(definition.branches[0].class_uid).toBe(4001);
+  expect(definition.branches[0].match).toEqual(match);
 });
 
 test("a Syslog input only exposes a copyable endpoint when it has a port", () => {

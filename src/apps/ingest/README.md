@@ -41,16 +41,19 @@ make config MODULES="iam console ingest web"
 make dev MODULES="iam console ingest web"
 ```
 
-在「解析规则」新建 JSON 规则，事件类型选择「网络活动」，将 `src` 和 `dst` 映射到源 IP 和目的 IP。再在「数据接入」新建并启用绑定这条规则的 HTTP 数据接入，用一次性显示的设备令牌发送样本。
+在「解析规则」新建 JSON 规则，事件类型选择「网络活动」，将 `src` 和 `dst` 映射到源 IP 和目的 IP。再在「数据接入」新建并启用绑定这条规则的 HTTP 数据接入，用一次性显示的设备令牌发送样本。源码直连用 Ingest 监听地址，默认 `http://127.0.0.1:8082`。整栈 Compose 用 Web 同源入口，默认 `http://127.0.0.1:5173`。
 
 ```sh
-curl --fail-with-body -X POST "http://127.0.0.1:8082/api/v1/ingest/events/${INPUT_ID}" \
+INGEST_BASE_URL=http://127.0.0.1:8082  # 整栈 Compose 默认使用 http://127.0.0.1:5173
+curl --fail-with-body -X POST "${INGEST_BASE_URL}/api/v1/ingest/events/${INPUT_ID}" \
   -H "Authorization: Bearer ${INPUT_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data '{"src":"192.0.2.12","dst":"198.51.100.4"}'
 ```
 
 HTTP 返回的 `accepted` 是 Kafka 已确认的条数。完整链路由 `make compose-up` 启动，数据接入、Kafka 确认和 ClickHouse 已写入是三个不同的状态。
+
+Syslog 详情显示 Ingest 服务内的监听状态。设备使用部署主机的地址和可访问端口。容器部署按需发布已登记的 TCP 或 UDP 端口。 [Compose 端口示例](../../../docs/design/architecture/03-deployment-architecture.md#syslog-端口)
 
 ### ClickHouse 事件存储
 
@@ -99,7 +102,7 @@ done
 
 数据接入引用整份规则 `parsing_rule_id`。按 `parse.mode` 提取字段。多类型规则使用首个匹配分支，单一类型直接使用预先选定的事件类。无分类的通用规则也能生成合规的 Base Event。实际报文按规则声明的来源编码解码，默认 UTF-8。粘贴样本作为 UTF-8 文本试算。
 
-键值对的 `parse.kv.entry`、`parse.kv.delimiter`、`parse.kv.quote` 分别对应字段分隔符、键值分隔符、引号。分隔符解析配置 `parse.delimiter.separator`。省略 `parse.delimiter.columns` 时，源字段按位置产生 `field_1`、`field_2` 等名称。
+键值对的 `parse.kv.entry`、`parse.kv.delimiter`、`parse.kv.quote` 分别对应字段分隔符、键值分隔符、引号。分隔符解析配置 `parse.delimiter.separator`。省略 `parse.delimiter.columns` 时，源字段按位置产生 `field_1`、`field_2` 等名称。每条样本、Syslog 报文或 Kafka 消息应包含一条记录。引号内的换行属于字段内容。包含额外记录的报文标记为 `multiple_records`，归入解析失败。HTTP 纯文本批量接入按行拆分。
 
 | 解析状态 | 标准化结果 |
 | --- | --- |
@@ -110,9 +113,9 @@ done
 管理 API 使用 `/api/v1/ingest`，写入需通过 IAM 授权与 CSRF 校验。
 
 - `/inputs` 管理数据接入、绑定和设备令牌。`/inputs/counts-by-rule` 按规则 ID 统计绑定的数据接入数量。
-- `/mappings` 管理解析规则，`parse_type` 用于筛选和摘要，具体配置来自 `definition.parse.mode`。编辑提交 `expected_version`。
-- `/mappings/extract` 提取字段与类型，`/mappings/validate` 返回 Event 预览和 `required_branches`。编辑预览传入 `parsing_rule_id` 与 `expected_version`，由服务端按同一修订判断待验证分支。试算和保存传请求顶层 `samples`，最多 20 条，每条最多 64 KiB。样本由当前表单持有，数据库定义和修订禁止存入原文。保存用最终定义复验，验证摘要包含定义校验值、覆盖分支、时间及通过数。
-- 规则详情返回当前定义与验证摘要。`/mappings/:id/revisions` 按修订倒序读取，指定修订的详情用于比较。已验证定义可以恢复为新修订。恢复仍需当前版本，审计保留来源修订。
+- `/parsing-rules` 管理解析规则，`parse_type` 用于筛选和摘要，具体配置来自 `definition.parse.mode`。编辑提交 `expected_version`。
+- `/parsing-rules/extract` 提取字段与类型，`/parsing-rules/validate` 返回 Event 预览和 `required_branches`。编辑预览传入 `parsing_rule_id` 与 `expected_version`，由服务端按同一修订判断待验证分支。试算和保存传请求顶层 `samples`，最多 20 条，每条最多 64 KiB。样本由当前表单持有，数据库定义和修订保存验证摘要。摘要包含定义校验值、覆盖分支、时间及通过数。规则详情展示最近一次通过数和验证时间。
+- `/parsing-rules/:id/revisions` 按修订倒序读取，`/parsing-rules/:id/revisions/:version` 返回指定修订的详情。用 `/parsing-rules/:id/revisions/:version/restore` 将已验证定义恢复为新修订。恢复仍需当前版本，审计保留来源修订。
 - `/event-schema` 提供分类与事件类，`/event-schema/classes/:class_uid` 提供类内字段和条件组，`/event-schema/fields` 提供完整字段目录。规则编辑和试算使用同一目录修订。
 
 两个列表始终返回分页结果，默认 20 条。规则的 `q` 匹配名称、描述、厂商和产品，`class_uid` 匹配任意已配置的事件类型，摘要通过 `class_uids` 返回这些类型。数据接入的 `q` 匹配名称、厂商和产品，`rule` 按规则 ID 筛选。事件类型由规则定义派生，数据接入数量按规则绑定外键统计。

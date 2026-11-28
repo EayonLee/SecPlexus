@@ -35,6 +35,8 @@ var (
 	ErrUnknownMode = errors.New("unknown parse mode")
 	// ErrMalformed 表示消息与规则声明的线格式不符。
 	ErrMalformed = errors.New("malformed message")
+	// ErrMultipleRecords 表示单条报文中包含多条记录。
+	ErrMultipleRecords = errors.New("expected a single record")
 	// ErrInvalidSpec 表示规则参数不完整或不可用；构造期即拒绝，不留到运行期。
 	ErrInvalidSpec = errors.New("invalid parse spec")
 )

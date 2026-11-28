@@ -165,6 +165,22 @@ func TestDelimiterNamesFieldsByPosition(t *testing.T) {
 	}
 }
 
+func TestDelimiterRequiresOneRecord(t *testing.T) {
+	instance, err := parser.New(parser.Spec{Mode: parser.ModeDelimiter, Delimiter: parser.DelimiterSpec{Separator: "|"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []string{"one|two\nthree|four", "one|two\r\n\r\nthree|four"} {
+		if fields, err := instance.Parse([]byte(message)); !errors.Is(err, parser.ErrMultipleRecords) || fields != nil {
+			t.Fatalf("expected the entire payload to be rejected, got %v, %v", fields, err)
+		}
+	}
+	fields, err := instance.Parse([]byte("one|\"two\nthree\"\r\n\r\n"))
+	if err != nil || fields["field_2"] != "two\nthree" {
+		t.Fatalf("expected a quoted newline in a single record, got %v, %v", fields, err)
+	}
+}
+
 func TestDelimiterMapsColumnsByPosition(t *testing.T) {
 	fields := parse(t, parser.Spec{
 		Mode:      parser.ModeDelimiter,

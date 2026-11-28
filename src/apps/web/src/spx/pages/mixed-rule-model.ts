@@ -28,7 +28,8 @@ const branch = fieldMappings.extend({
   id: z.string(),
   name: z.string(),
   class_uid: z.int(),
-  match: z.array(condition),
+  // 保留 API 的条件写法，避免仅改名称或描述时改变已验证定义。
+  match: z.array(condition).nullish(),
 });
 
 export const fieldOperations = [

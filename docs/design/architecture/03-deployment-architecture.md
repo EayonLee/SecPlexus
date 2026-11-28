@@ -70,9 +70,30 @@ PostgreSQL 和 Redis 仅绑定本机端口并持久化卷。仅启动它们时�
 docker compose --project-directory . --env-file .env -f deploy/compose/compose.yaml up -d --build --wait
 ```
 
-正式环境的 PostgreSQL、Redis、Kafka 和 ClickHouse 用服务网络连接，HTTPS 由反代提供。需要对外接收 Syslog 时，在部署覆盖文件中只发布已登记的 TCP 或 UDP 接入端口。 [反代可信范围](../../development/configuration.md#可信代理)
+正式环境的 PostgreSQL、Redis、Kafka 和 ClickHouse 用服务网络连接，HTTPS 由反代提供。 [反代可信范围](../../development/configuration.md#可信代理)
 
 开发环境可共用 PostgreSQL 账号。`make stop` 停止工作区拥有的进程和容器并保留数据卷。
+
+### Syslog 端口
+
+在数据接入中登记监听端口后，通过部署覆盖文件把该端口发布到宿主机。按设备使用的传输协议选 TCP、UDP 或两者。下例在本机验证 15514 端口。
+
+```yaml
+services:
+  ingest:
+    ports:
+      - "127.0.0.1:15514:15514/tcp"
+      - "127.0.0.1:15514:15514/udp"
+```
+
+保存为 `compose.syslog.yaml` 后，从仓库根目录执行。已有环境用 `-p` 指定原 Compose 项目名，保持数据卷归属。
+
+```sh
+docker compose --project-directory . --env-file .env \
+  -f deploy/compose/compose.yaml -f compose.syslog.yaml up -d --build --wait
+```
+
+接入外部设备时，将绑定地址改为设备可访问的宿主机接口，在防火墙允许该设备来源，再从设备发送一条日志并核对接收计数。 [Docker Compose 端口配置](https://docs.docker.com/reference/compose-file/services/#ports)
 
 ## 日志与运行目录
 

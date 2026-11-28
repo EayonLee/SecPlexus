@@ -30,6 +30,7 @@
 | [ingest-rule-wizard](ingest-rule-wizard/spec.md) | 样本驱动的解析规则与统一字段目录 | 四步向导、字段全集、逐条分类、常用 OCSF 类、术语审核、单一 v1 契约与共享 | 已实施，核心流程已验收，持续容量待验证 | [spec](ingest-rule-wizard/spec.md) | [plan](ingest-rule-wizard/plan.md) |
 | [ingest-rule-validation](ingest-rule-validation/spec.md) | 解析规则基础字段校验 | 名称去重、字符与长度、前后端一致、字段级错误、数据库约束 | 已实施 | [spec](ingest-rule-validation/spec.md) | [plan](ingest-rule-validation/plan.md) |
 | [ingest-rule-field-workflow](ingest-rule-field-workflow/spec.md) | 按事件类型配置解析规则与字段映射 | 基础配置选类型、标准字段优先、类型化默认值、处理预览和事件结果 | 向导、详情与管理列表已实施 | [spec](ingest-rule-field-workflow/spec.md) | [plan](ingest-rule-field-workflow/plan.md) |
+| [ingest-audit-fixes](ingest-audit-fixes/spec.md) | 接入与解析规则走查修复 | 分隔符报文边界、规则详情刷新和验证摘要、Syslog 监听与部署说明 | 已实施并通过浏览器及真实链路验收 | [spec](ingest-audit-fixes/spec.md) | [plan](ingest-audit-fixes/plan.md) |
 | [configuration-entrypoints](configuration-entrypoints/spec.md) | 配置入口一致性 | 根配置、服务监听、Compose、Web 代理、归档与测试入口 | 已实施并通过隔离配置验收 | [spec](configuration-entrypoints/spec.md) | [plan](configuration-entrypoints/plan.md) |
 | [commercial-delivery](commercial-delivery/spec.md) | 商业交付整改（审查第 2–16 项） | 可信入口、样本与规则修订、接入生效、OCSF、Kafka 重放、恢复与容量 | 实施中，安装包延后 | [spec](commercial-delivery/spec.md) | [plan](commercial-delivery/plan.md) · [同行对照](commercial-delivery/references.md) |
 | [first-release-baseline](first-release-baseline/spec.md) | 首次发行基线 | 共享依赖、模块结构、事件链路、数据模型、全栈 Compose、恢复与容量；一次清理试制配置、旧代码与旧模型 | 主链路已实施，生产部署与容量待验收 | [spec](first-release-baseline/spec.md) | [plan](first-release-baseline/plan.md) |
